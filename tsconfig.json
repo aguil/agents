@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["bun"],
+    "baseUrl": ".",
+    "paths": {
+      "@aguil/agents-context": ["packages/context/src/index.ts"],
+      "@aguil/agents-core": ["packages/core/src/index.ts"],
+      "@aguil/agents-execution": ["packages/execution/src/index.ts"],
+      "@aguil/agents-orchestration": ["packages/orchestration/src/index.ts"],
+      "@aguil/agents-reporting": ["packages/reporting/src/index.ts"],
+      "@aguil/agents-telemetry": ["packages/telemetry/src/index.ts"]
+    }
+  },
+  "include": ["packages/**/*.ts", "harnesses/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

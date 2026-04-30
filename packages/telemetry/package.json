@@ -1,0 +1,12 @@
+{
+  "name": "@aguil/agents-telemetry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aguil/agents-core": "workspace:*"
+  }
+}
