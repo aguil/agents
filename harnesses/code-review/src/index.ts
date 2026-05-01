@@ -1,5 +1,7 @@
 import {
   AgentsInstructionsProvider,
+  PullRequestMetadataProvider,
+  PullRequestReferencedDocsProvider,
   RepositoryDiffProvider,
   collectContextBundle,
   writeContextBundle,
@@ -101,7 +103,12 @@ export async function runCodeReview(
   const context = await collectContextBundle(
     `${runId}-context`,
     { workspacePath, scratchpadPath },
-    [new RepositoryDiffProvider(), new AgentsInstructionsProvider()],
+    [
+      new PullRequestMetadataProvider(),
+      new PullRequestReferencedDocsProvider(),
+      new RepositoryDiffProvider(),
+      new AgentsInstructionsProvider(),
+    ],
   );
   const writtenContext = await writeContextBundle(context, scratchpadPath);
   const triage = parseTriageTier(

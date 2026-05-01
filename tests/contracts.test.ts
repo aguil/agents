@@ -8,7 +8,14 @@ import {
   definitionForTriage,
   runCodeReview,
 } from "@aguil/agents-code-review";
-import { changedFilesFromDiff, classifyDiff } from "@aguil/agents-context";
+import {
+  changedFilesFromDiff,
+  classifyDiff,
+  extractReferencedDocumentation,
+  parseGitRemoteUrl,
+  selectPreferredRemoteName,
+  shouldFetchReferencedUrl,
+} from "@aguil/agents-context";
 import {
   SubprocessAgentAdapter,
   buildClaudeCodeCommand,
@@ -58,6 +65,66 @@ test("classifies small diffs as trivial", () => {
 
   expect(classifyDiff(diff)).toBe("trivial");
   expect(changedFilesFromDiff(diff)).toEqual(["src/a.ts"]);
+});
+
+test("parses git remote URLs for host/org scope", () => {
+  expect(parseGitRemoteUrl("git@github.com:aguil/agents.git")).toEqual({
+    host: "github.com",
+    owner: "aguil",
+    repo: "agents",
+  });
+  expect(parseGitRemoteUrl("https://github.com/aguil/agents.git")).toEqual({
+    host: "github.com",
+    owner: "aguil",
+    repo: "agents",
+  });
+});
+
+test("prefers tracking remote before origin", () => {
+  expect(
+    selectPreferredRemoteName({
+      trackingRemote: "upstream",
+      remoteNames: ["origin", "upstream"],
+    }),
+  ).toBe("upstream");
+  expect(
+    selectPreferredRemoteName({
+      trackingRemote: undefined,
+      remoteNames: ["origin", "upstream"],
+    }),
+  ).toBe("origin");
+});
+
+test("extracts referenced docs from PR descriptions", () => {
+  const references = extractReferencedDocumentation(`
+See [design](docs/architecture.md) and README.md.
+Also referenced: https://github.com/aguil/another-repo/blob/main/docs/guide.md
+And [external](https://example.com/docs)
+`);
+
+  expect(references).toEqual([
+    { kind: "local-path", value: "README.md" },
+    { kind: "local-path", value: "docs/architecture.md" },
+    { kind: "url", value: "https://example.com/docs" },
+    { kind: "url", value: "https://github.com/aguil/another-repo/blob/main/docs/guide.md" },
+  ]);
+});
+
+test("fetch gating allows only same remote org links", () => {
+  const remoteScope = {
+    remoteName: "origin",
+    host: "github.com",
+    owner: "aguil",
+    repo: "agents",
+  };
+  expect(
+    shouldFetchReferencedUrl("https://github.com/aguil/other-repo/blob/main/README.md", remoteScope)
+      .allowed,
+  ).toBe(true);
+  expect(
+    shouldFetchReferencedUrl("https://github.com/other-org/repo/blob/main/README.md", remoteScope)
+      .allowed,
+  ).toBe(false);
 });
 
 test("dedupes findings and derives severity status", () => {

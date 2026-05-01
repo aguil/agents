@@ -13,6 +13,8 @@ Current real adapters include:
 
 Both adapters use the same `SubprocessAgentAdapter` base to write per-role request artifacts, enforce role timeouts, and normalize finding JSONL into harness events. The same base is intended to support Cursor CLI, pi.dev, and other CLIs later.
 
+Context retrieval includes PR-aware signals. The harness attempts to auto-discover the active PR, ingest title and body, then parse and fetch referenced docs when links match the configured tracking-remote org scope.
+
 Primary layers:
 
 - `packages/core`: shared run, event, finding, scratchpad, and JSON contracts.

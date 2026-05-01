@@ -37,3 +37,15 @@ bun run agents run code-review --adapter claude --model <model>
 - `harnesses/code-review`: multi-role code review using native Bun orchestration, JSONL events, scratchpad artifacts, risk-tier triage, and an agent-agnostic execution adapter.
 
 The `fake` adapter is deterministic and intended for local smoke tests. The `opencode` and `claude` adapters shell out to their CLIs and normalize emitted finding JSONL into harness events.
+
+The code-review harness also attempts to auto-discover the active PR, ingest PR title/description, and fetch PR-referenced docs scoped to the configured tracking-remote org.
+
+## Human In The Loop
+
+- Run review locally from your working branch.
+- Inspect `report.md` for human-readable findings and `result.json` for machine-readable status.
+- Fix code or mark rationale in your PR description/comments.
+- Re-run until output is acceptable.
+- Post findings to PR manually (auto-post is not implemented yet).
+
+See `harnesses/code-review/README.md` for the concrete run workflow and expected output artifacts.
