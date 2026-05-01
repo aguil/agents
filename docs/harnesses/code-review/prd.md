@@ -16,3 +16,4 @@ Initial success criteria:
 - Produce a single Markdown report from normalized findings.
 - Keep unverified findings out of the final actionable report.
 - Make OpenCode, Claude Code, Cursor CLI, pi.dev, and future agents swappable through execution adapters.
+- Keep real agent execution opt-in; deterministic local tests use the fake adapter.

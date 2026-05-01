@@ -9,7 +9,13 @@ import {
   runCodeReview,
 } from "@aguil/agents-code-review";
 import { changedFilesFromDiff, classifyDiff } from "@aguil/agents-context";
-import { collectAgentRun } from "@aguil/agents-execution";
+import {
+  SubprocessAgentAdapter,
+  buildOpenCodeCommand,
+  collectAgentRun,
+  normalizeAgentOutputLine,
+  validateFinding,
+} from "@aguil/agents-execution";
 import { actionableFindings, dedupeFindings, statusForFindings } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
 
@@ -72,6 +78,78 @@ test("dedupes findings and derives severity status", () => {
   expect(statusForFindings(deduped)).toBe("failed");
 });
 
+test("validates finding shape before accepting agent output", () => {
+  const invalid = validateFinding({
+    id: "finding-1",
+    severity: "info",
+    title: "Not actionable",
+  });
+
+  expect(invalid.valid).toBe(false);
+  expect(invalid.errors).toContain("severity must be critical or warning");
+  expect(invalid.errors).toContain("description must be a non-empty string");
+});
+
+test("normalizes finding JSONL emitted by an agent", () => {
+  const finding: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Verified issue",
+    description: "A validated review finding.",
+    evidence: "The reproduction passed.",
+    sourceRole: "quality",
+    validation: { status: "verified", details: "Reproduced locally." },
+  };
+
+  const events = normalizeAgentOutputLine(
+    {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: "/tmp/workspace",
+      contextBundlePath: "/tmp/context.json",
+      scratchpadPath: "/tmp/scratchpad",
+      timeoutMs: 1_000,
+      allowedCommands: [],
+    },
+    JSON.stringify({ finding }),
+  );
+
+  expect(events).toHaveLength(1);
+  expect(events[0]?.type).toBe("finding");
+  expect(events[0]?.data).toEqual(finding);
+});
+
+test("builds opencode command behind the adapter boundary", () => {
+  const command = buildOpenCodeCommand(
+    {
+      runId: "run-1",
+      roleId: "security",
+      prompt: "Review this change.",
+      workspacePath: "/repo",
+      contextBundlePath: "/scratch/context.json",
+      scratchpadPath: "/scratch/roles/security",
+      timeoutMs: 1_000,
+      allowedCommands: ["bun test"],
+    },
+    "/scratch/roles/security/security.request.json",
+    { executable: "opencode-test", model: "provider/model", agent: "reviewer", pure: true },
+  );
+
+  expect(command.slice(0, 6)).toEqual([
+    "opencode-test",
+    "run",
+    "--format",
+    "json",
+    "--dir",
+    "/repo",
+  ]);
+  expect(command).toContain("provider/model");
+  expect(command).toContain("reviewer");
+  expect(command).toContain("--pure");
+  expect(command.at(-1)).toContain("security code-review specialist");
+});
+
 test("uses fewer reviewer roles for lower-risk triage tiers", () => {
   expect(definitionForTriage("trivial").roles.map((role) => role.id)).toEqual(["quality"]);
   expect(definitionForTriage("lite").roles.map((role) => role.id)).toEqual([
@@ -111,6 +189,42 @@ test("collects fake agent findings through the adapter contract", async () => {
   }
 });
 
+test("marks subprocess agents as timed out", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-timeout-"));
+  try {
+    const adapter = new SubprocessAgentAdapter({
+      name: "slow-test-agent",
+      capabilities: {
+        streaming: true,
+        structuredOutput: true,
+        readOnlyMode: true,
+        mcp: false,
+        cancellation: true,
+      },
+      buildCommand: () => ({
+        cmd: [process.execPath, "--eval", "await new Promise((resolve) => setTimeout(resolve, 500));"],
+        cwd: tempDir,
+      }),
+    });
+
+    const run = await collectAgentRun(adapter, {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: tempDir,
+      contextBundlePath: join(tempDir, "context.json"),
+      scratchpadPath: tempDir,
+      timeoutMs: 10,
+      allowedCommands: [],
+    });
+
+    expect(run.result.status).toBe("timed_out");
+    expect(run.events.at(-1)?.type).toBe("error");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runs the code-review harness with a fake adapter", async () => {
   const finding: Finding = {
     id: "finding-1",
@@ -133,6 +247,41 @@ test("runs the code-review harness with a fake adapter", async () => {
     expect(result.status).toBe("warnings");
     expect(result.findings).toEqual([finding]);
     expect(await readFile(result.reportPath, "utf8")).toContain("Verified harness issue");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("preserves adapter errors in final harness status", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-error-"));
+  try {
+    const result = await runCodeReview({
+      workspacePath: tempDir,
+      scratchpadRoot: join(tempDir, "scratchpad"),
+      runId: "test-error-run",
+      adapter: {
+        name: "error-test-agent",
+        capabilities: () => ({
+          streaming: true,
+          structuredOutput: true,
+          readOnlyMode: true,
+          mcp: false,
+          cancellation: true,
+        }),
+        async *run(request) {
+          yield {
+            timestamp: "2026-05-01T00:00:00.000Z",
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "error" as const,
+            message: "adapter failed",
+          };
+        },
+      },
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.findings).toEqual([]);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -34,22 +34,62 @@ export interface AgentAdapter {
   run(request: AgentRunRequest): AsyncIterable<AgentEvent>;
 }
 
+export interface FindingValidationResult {
+  readonly valid: boolean;
+  readonly errors: readonly string[];
+}
+
 export function isFinding(value: unknown): value is Finding {
+  return validateFinding(value).valid;
+}
+
+export function validateFinding(value: unknown): FindingValidationResult {
+  const errors: string[] = [];
   if (typeof value !== "object" || value === null) {
-    return false;
+    return { valid: false, errors: ["finding must be an object"] };
   }
 
   const candidate = value as Partial<Finding>;
-  return (
-    typeof candidate.id === "string" &&
-    (candidate.severity === "critical" || candidate.severity === "warning") &&
-    typeof candidate.title === "string" &&
-    typeof candidate.description === "string" &&
-    typeof candidate.evidence === "string" &&
-    typeof candidate.sourceRole === "string" &&
-    typeof candidate.validation === "object" &&
-    candidate.validation !== null
-  );
+  requireString(candidate.id, "id", errors);
+  if (candidate.severity !== "critical" && candidate.severity !== "warning") {
+    errors.push("severity must be critical or warning");
+  }
+  requireString(candidate.title, "title", errors);
+  requireString(candidate.description, "description", errors);
+  requireString(candidate.evidence, "evidence", errors);
+  requireString(candidate.sourceRole, "sourceRole", errors);
+
+  if (candidate.file !== undefined) {
+    requireString(candidate.file, "file", errors);
+  }
+  if (
+    candidate.line !== undefined &&
+    (!Number.isInteger(candidate.line) || candidate.line < 1)
+  ) {
+    errors.push("line must be a positive integer when present");
+  }
+
+  if (typeof candidate.validation !== "object" || candidate.validation === null) {
+    errors.push("validation must be an object");
+  } else {
+    const validation = candidate.validation as Partial<Finding["validation"]>;
+    if (
+      validation.status !== "verified" &&
+      validation.status !== "not_reproduced" &&
+      validation.status !== "not_run"
+    ) {
+      errors.push("validation.status must be verified, not_reproduced, or not_run");
+    }
+    requireString(validation.details, "validation.details", errors);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+function requireString(value: unknown, field: string, errors: string[]): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    errors.push(`${field} must be a non-empty string`);
+  }
 }
 
 export class FakeAgentAdapter implements AgentAdapter {
@@ -145,14 +185,38 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       stderr: "pipe",
     });
 
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    let timedOut = false;
+    let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutTimer = request.timeoutMs > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          proc.kill("SIGTERM");
+          hardKillTimer = setTimeout(() => proc.kill("SIGKILL"), 1_000);
+        }, request.timeoutMs)
+      : undefined;
+
+    let stdout = "";
+    let stderr = "";
+    let exitCode = 0;
+    try {
+      [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+    } finally {
+      if (timeoutTimer !== undefined) {
+        clearTimeout(timeoutTimer);
+      }
+      if (hardKillTimer !== undefined) {
+        clearTimeout(hardKillTimer);
+      }
+    }
 
     for (const line of stdout.split(/\r?\n/).filter(Boolean)) {
-      yield normalizeStdoutLine(request, line);
+      for (const event of normalizeAgentOutputLine(request, line)) {
+        yield event;
+      }
     }
 
     for (const line of stderr.split(/\r?\n/).filter(Boolean)) {
@@ -162,6 +226,17 @@ export class SubprocessAgentAdapter implements AgentAdapter {
         type: "stderr",
         message: line,
       });
+    }
+
+    if (timedOut) {
+      yield createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "error",
+        message: `${this.name} timed out after ${request.timeoutMs}ms`,
+        data: { reason: "timed_out", timeoutMs: request.timeoutMs, exitCode },
+      });
+      return;
     }
 
     if (exitCode === 0) {
@@ -203,7 +278,7 @@ export async function collectAgentRun(
       findings.push(event.data);
     }
     if (event.type === "error") {
-      status = "failed";
+      status = hasTimedOut(event.data) ? "timed_out" : "failed";
     }
   }
 
@@ -217,51 +292,135 @@ export async function collectAgentRun(
   };
 }
 
-function normalizeStdoutLine(request: AgentRunRequest, line: string): AgentEvent {
+export function normalizeAgentOutputLine(
+  request: AgentRunRequest,
+  line: string,
+): readonly AgentEvent[] {
   try {
     const parsed = JSON.parse(line) as unknown;
-    if (isFindingEnvelope(parsed)) {
-      return createAgentEvent({
+    const findingEnvelope = readFindingEnvelope(parsed);
+    if (findingEnvelope !== undefined) {
+      if (!findingEnvelope.validation.valid) {
+        return [
+          createAgentEvent({
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "error",
+            message: "invalid finding envelope",
+            data: { errors: findingEnvelope.validation.errors, finding: findingEnvelope.value },
+          }),
+        ];
+      }
+      return [createAgentEvent({
         runId: request.runId,
         roleId: request.roleId,
         type: "finding",
-        message: parsed.finding.title,
-        data: parsed.finding,
-      });
+        message: findingEnvelope.value.title,
+        data: findingEnvelope.value,
+      })];
     }
     if (isAgentEventEnvelope(parsed)) {
-      return createAgentEvent({
+      return [createAgentEvent({
         runId: parsed.runId ?? request.runId,
         roleId: parsed.roleId ?? request.roleId,
         type: parsed.type,
         message: parsed.message,
         data: parsed.data,
-      });
+      })];
     }
-    return createAgentEvent({
+
+    const nestedFindings = extractFindingEnvelopes(parsed).map((envelope) => {
+      if (!envelope.validation.valid) {
+        return createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "error",
+          message: "invalid nested finding envelope",
+          data: { errors: envelope.validation.errors, finding: envelope.value },
+        });
+      }
+      return createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "finding",
+        message: envelope.value.title,
+        data: envelope.value,
+      });
+    });
+    if (nestedFindings.length > 0) {
+      return nestedFindings;
+    }
+
+    return [createAgentEvent({
       runId: request.runId,
       roleId: request.roleId,
       type: "stdout",
       message: line,
       data: parsed,
-    });
+    })];
   } catch {
-    return createAgentEvent({
+    return [createAgentEvent({
       runId: request.runId,
       roleId: request.roleId,
       type: "stdout",
       message: line,
-    });
+    })];
   }
 }
 
-function isFindingEnvelope(value: unknown): value is { readonly finding: Finding } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "finding" in value &&
-    isFinding((value as { readonly finding?: unknown }).finding)
-  );
+interface ParsedFindingEnvelope {
+  readonly value: Finding;
+  readonly validation: FindingValidationResult;
+}
+
+function readFindingEnvelope(value: unknown): ParsedFindingEnvelope | undefined {
+  if (typeof value !== "object" || value === null || !("finding" in value)) {
+    return undefined;
+  }
+  const finding = (value as { readonly finding?: unknown }).finding;
+  const validation = validateFinding(finding);
+  return { value: finding as Finding, validation };
+}
+
+function extractFindingEnvelopes(value: unknown): readonly ParsedFindingEnvelope[] {
+  const envelopes: ParsedFindingEnvelope[] = [];
+  const texts = extractTextCandidates(value);
+  for (const text of texts) {
+    for (const line of text.split(/\r?\n/).filter(Boolean)) {
+      try {
+        const envelope = readFindingEnvelope(JSON.parse(line) as unknown);
+        if (envelope !== undefined) {
+          envelopes.push(envelope);
+        }
+      } catch {
+        // Non-JSON text inside an agent event is expected.
+      }
+    }
+  }
+  return envelopes;
+}
+
+function extractTextCandidates(value: unknown): readonly string[] {
+  const texts: string[] = [];
+  const visit = (node: unknown): void => {
+    if (typeof node === "string") {
+      texts.push(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        visit(item);
+      }
+      return;
+    }
+    if (typeof node === "object" && node !== null) {
+      for (const child of Object.values(node)) {
+        visit(child);
+      }
+    }
+  };
+  visit(value);
+  return texts;
 }
 
 function isAgentEventEnvelope(
@@ -281,4 +440,98 @@ function isAgentEventEnvelope(
     event.type === "completed" ||
     event.type === "error"
   );
+}
+
+function hasTimedOut(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { readonly reason?: unknown }).reason === "timed_out"
+  );
+}
+
+export interface OpenCodeAdapterOptions {
+  readonly executable?: string;
+  readonly model?: string;
+  readonly agent?: string;
+  readonly pure?: boolean;
+  readonly printLogs?: boolean;
+}
+
+export class OpenCodeAdapter extends SubprocessAgentAdapter {
+  constructor(options: OpenCodeAdapterOptions = {}) {
+    super({
+      name: "opencode",
+      capabilities: {
+        streaming: true,
+        structuredOutput: true,
+        readOnlyMode: true,
+        mcp: false,
+        cancellation: true,
+      },
+      buildCommand: (request, requestPath) => ({
+        cmd: buildOpenCodeCommand(request, requestPath, options),
+        cwd: request.workspacePath,
+      }),
+    });
+  }
+}
+
+export function buildOpenCodeCommand(
+  request: AgentRunRequest,
+  requestPath: string,
+  options: OpenCodeAdapterOptions = {},
+): readonly string[] {
+  const cmd = [
+    options.executable ?? "opencode",
+    "run",
+    "--format",
+    "json",
+    "--dir",
+    request.workspacePath,
+    "--file",
+    request.contextBundlePath,
+    "--file",
+    requestPath,
+    "--title",
+    `code-review:${request.roleId}`,
+  ];
+
+  if (options.model !== undefined) {
+    cmd.push("--model", options.model);
+  }
+  if (options.agent !== undefined) {
+    cmd.push("--agent", options.agent);
+  }
+  if (options.pure === true) {
+    cmd.push("--pure");
+  }
+  if (options.printLogs === true) {
+    cmd.push("--print-logs");
+  }
+
+  cmd.push(buildOpenCodePrompt(request));
+  return cmd;
+}
+
+export function buildOpenCodePrompt(request: AgentRunRequest): string {
+  return `${request.prompt}
+
+You are running as the ${request.roleId} code-review specialist inside an autonomous review harness.
+
+Inputs attached to this session:
+- Context bundle: ${request.contextBundlePath}
+- Machine-readable run request: ${request.scratchpadPath}/${request.roleId}.request.json
+
+Rules:
+- Stay read-only. Do not edit files.
+- Use generic repository commands only when useful: ${request.allowedCommands.join(", ") || "none"}.
+- Report only critical or warning issues with concrete evidence.
+- Do not report nitpicks, style preferences, or speculative hardening ideas.
+- Every finding must include validation details. Use validation.status "verified" only when you validated the issue.
+
+When you find an issue, emit it as a JSON line exactly shaped like:
+{"finding":{"id":"${request.roleId}-short-stable-id","severity":"warning","title":"Concise title","description":"What is wrong and why it matters","evidence":"Specific code or command evidence","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"How this was validated"},"file":"path/to/file.ts","line":1}}
+
+If there are no verified critical or warning findings, do not emit a finding line.`;
 }

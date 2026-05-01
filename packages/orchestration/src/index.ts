@@ -38,6 +38,7 @@ export class NativeBunOrchestrator implements Orchestrator {
 
   async run(request: HarnessRunRequest): Promise<HarnessRunResult> {
     await ensureDirectory(request.scratchpadPath);
+    assertAdapterCapabilities(this.options.adapter, this.options.definition);
 
     const outcomes = await Promise.all(
       this.options.definition.roles.map((role) => this.runRole(request, role)),
@@ -121,4 +122,19 @@ function statusFromFindings(findings: readonly Finding[]): HarnessRunResult["sta
     return "warnings";
   }
   return "passed";
+}
+
+function assertAdapterCapabilities(adapter: AgentAdapter, definition: HarnessDefinition): void {
+  const capabilities = adapter.capabilities() as unknown as Readonly<Record<string, boolean>>;
+  const missing = definition.roles.flatMap((role) =>
+    role.requiredCapabilities
+      .filter((capability) => capabilities[capability] !== true)
+      .map((capability) => `${role.id}:${capability}`),
+  );
+
+  if (missing.length > 0) {
+    throw new Error(
+      `${adapter.name} adapter does not satisfy required capabilities: ${missing.join(", ")}`,
+    );
+  }
 }

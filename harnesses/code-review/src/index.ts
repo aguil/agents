@@ -11,8 +11,8 @@ import {
   writeTextFile,
 } from "@aguil/agents-core";
 import type { Finding, HarnessRunResult, ReviewTriageTier } from "@aguil/agents-core";
-import { FakeAgentAdapter } from "@aguil/agents-execution";
-import type { AgentAdapter } from "@aguil/agents-execution";
+import { FakeAgentAdapter, OpenCodeAdapter } from "@aguil/agents-execution";
+import type { AgentAdapter, OpenCodeAdapterOptions } from "@aguil/agents-execution";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 import type { HarnessDefinition } from "@aguil/agents-orchestration";
 import {
@@ -35,6 +35,8 @@ export interface CodeReviewRunOptions {
   readonly adapter?: AgentAdapter;
   readonly metadata?: Readonly<Record<string, string>>;
 }
+
+export type CodeReviewAdapterName = "fake" | "opencode";
 
 export interface CodeReviewRunResult extends HarnessRunResult {
   readonly reportPath: string;
@@ -122,7 +124,7 @@ export async function runCodeReview(
   const findings = dedupeFindings(actionableFindings(rawResult.findings));
   const result: HarnessRunResult = {
     ...rawResult,
-    status: statusForFindings(findings),
+    status: rawResult.status === "error" ? "error" : statusForFindings(findings),
     findings,
     artifacts: [...rawResult.artifacts, writtenContext.jsonPath, writtenContext.markdownPath],
   };
@@ -149,6 +151,16 @@ export function createFakeCodeReviewAdapter(
   findingsByRole: Readonly<Record<string, readonly Finding[]>> = {},
 ): AgentAdapter {
   return new FakeAgentAdapter(findingsByRole);
+}
+
+export function createCodeReviewAdapter(
+  name: CodeReviewAdapterName,
+  options: OpenCodeAdapterOptions = {},
+): AgentAdapter {
+  if (name === "opencode") {
+    return new OpenCodeAdapter(options);
+  }
+  return new FakeAgentAdapter();
 }
 
 export function definitionForTriage(triage: ReviewTriageTier): HarnessDefinition {
