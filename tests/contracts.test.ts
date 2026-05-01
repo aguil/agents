@@ -11,6 +11,7 @@ import {
 import { changedFilesFromDiff, classifyDiff } from "@aguil/agents-context";
 import {
   SubprocessAgentAdapter,
+  buildClaudeCodeCommand,
   buildOpenCodeCommand,
   collectAgentRun,
   normalizeAgentOutputLine,
@@ -150,6 +151,36 @@ test("builds opencode command behind the adapter boundary", () => {
   expect(command.at(-1)).toContain("security code-review specialist");
 });
 
+test("builds claude command behind the adapter boundary", () => {
+  const command = buildClaudeCodeCommand(
+    {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: "/repo",
+      contextBundlePath: "/scratch/context.json",
+      scratchpadPath: "/scratch/roles/quality",
+      timeoutMs: 1_000,
+      allowedCommands: ["bun test"],
+    },
+    "/scratch/roles/quality/quality.request.json",
+    {
+      executable: "claude-test",
+      model: "claude-sonnet",
+      argsTemplate: ["-p", "{prompt}", "--cwd", "{workspace}", "--context", "{context_bundle}"],
+    },
+  );
+
+  expect(command[0]).toBe("claude-test");
+  expect(command[1]).toBe("-p");
+  expect(command[3]).toBe("--cwd");
+  expect(command).toContain("/repo");
+  expect(command).toContain("/scratch/context.json");
+  expect(command).toContain("--model");
+  expect(command).toContain("claude-sonnet");
+  expect(command[2]).toContain("quality specialist");
+});
+
 test("uses fewer reviewer roles for lower-risk triage tiers", () => {
   expect(definitionForTriage("trivial").roles.map((role) => role.id)).toEqual(["quality"]);
   expect(definitionForTriage("lite").roles.map((role) => role.id)).toEqual([
@@ -219,6 +250,42 @@ test("marks subprocess agents as timed out", async () => {
     });
 
     expect(run.result.status).toBe("timed_out");
+    expect(run.events.at(-1)?.type).toBe("error");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("handles missing subprocess binaries as adapter failures", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-missing-binary-"));
+  try {
+    const adapter = new SubprocessAgentAdapter({
+      name: "missing-binary-agent",
+      capabilities: {
+        streaming: true,
+        structuredOutput: true,
+        readOnlyMode: true,
+        mcp: false,
+        cancellation: true,
+      },
+      buildCommand: () => ({
+        cmd: ["command-that-does-not-exist-for-tests-xyz"],
+        cwd: tempDir,
+      }),
+    });
+
+    const run = await collectAgentRun(adapter, {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: tempDir,
+      contextBundlePath: join(tempDir, "context.json"),
+      scratchpadPath: tempDir,
+      timeoutMs: 1_000,
+      allowedCommands: [],
+    });
+
+    expect(run.result.status).toBe("failed");
     expect(run.events.at(-1)?.type).toBe("error");
   } finally {
     await rm(tempDir, { recursive: true, force: true });

@@ -173,17 +173,33 @@ export class SubprocessAgentAdapter implements AgentAdapter {
     });
 
     const command = this.options.buildCommand(request, requestPath);
-    const proc = Bun.spawn({
-      cmd: [...command.cmd],
-      cwd: command.cwd ?? request.workspacePath,
-      env: {
-        ...Bun.env,
-        ...command.env,
-        AGENTS_REQUEST_PATH: requestPath,
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn({
+        cmd: [...command.cmd],
+        cwd: command.cwd ?? request.workspacePath,
+        env: {
+          ...Bun.env,
+          ...command.env,
+          AGENTS_REQUEST_PATH: requestPath,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+    } catch (error) {
+      yield createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "error",
+        message: `${this.name} failed to start subprocess`,
+        data: {
+          reason: "spawn_failed",
+          command: command.cmd,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      return;
+    }
 
     let timedOut = false;
     let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -200,8 +216,8 @@ export class SubprocessAgentAdapter implements AgentAdapter {
     let exitCode = 0;
     try {
       [stdout, stderr, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
+        readProcessText(proc.stdout),
+        readProcessText(proc.stderr),
         proc.exited,
       ]);
     } finally {
@@ -458,6 +474,12 @@ export interface OpenCodeAdapterOptions {
   readonly printLogs?: boolean;
 }
 
+export interface ClaudeCodeAdapterOptions {
+  readonly executable?: string;
+  readonly model?: string;
+  readonly argsTemplate?: readonly string[];
+}
+
 export class OpenCodeAdapter extends SubprocessAgentAdapter {
   constructor(options: OpenCodeAdapterOptions = {}) {
     super({
@@ -471,6 +493,25 @@ export class OpenCodeAdapter extends SubprocessAgentAdapter {
       },
       buildCommand: (request, requestPath) => ({
         cmd: buildOpenCodeCommand(request, requestPath, options),
+        cwd: request.workspacePath,
+      }),
+    });
+  }
+}
+
+export class ClaudeCodeAdapter extends SubprocessAgentAdapter {
+  constructor(options: ClaudeCodeAdapterOptions = {}) {
+    super({
+      name: "claude",
+      capabilities: {
+        streaming: true,
+        structuredOutput: true,
+        readOnlyMode: true,
+        mcp: false,
+        cancellation: true,
+      },
+      buildCommand: (request, requestPath) => ({
+        cmd: buildClaudeCodeCommand(request, requestPath, options),
         cwd: request.workspacePath,
       }),
     });
@@ -534,4 +575,73 @@ When you find an issue, emit it as a JSON line exactly shaped like:
 {"finding":{"id":"${request.roleId}-short-stable-id","severity":"warning","title":"Concise title","description":"What is wrong and why it matters","evidence":"Specific code or command evidence","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"How this was validated"},"file":"path/to/file.ts","line":1}}
 
 If there are no verified critical or warning findings, do not emit a finding line.`;
+}
+
+export function buildClaudeCodeCommand(
+  request: AgentRunRequest,
+  requestPath: string,
+  options: ClaudeCodeAdapterOptions = {},
+): readonly string[] {
+  const prompt = buildClaudeCodePrompt(request, requestPath);
+  const substitutions: Record<string, string> = {
+    workspace: request.workspacePath,
+    context_bundle: request.contextBundlePath,
+    request: requestPath,
+    role: request.roleId,
+    prompt,
+  };
+
+  const template = options.argsTemplate ?? ["-p", "{prompt}"];
+  const args = template.map((arg) => substituteTemplateArg(arg, substitutions));
+  const hasPrompt = template.some((arg) => arg.includes("{prompt}"));
+  const cmd = [options.executable ?? "claude", ...args];
+
+  if (options.model !== undefined) {
+    cmd.push("--model", options.model);
+  }
+  if (!hasPrompt) {
+    cmd.push(prompt);
+  }
+
+  return cmd;
+}
+
+export function buildClaudeCodePrompt(
+  request: AgentRunRequest,
+  requestPath: string,
+): string {
+  return `${request.prompt}
+
+You are the ${request.roleId} specialist in an autonomous code-review harness.
+
+Inputs:
+- Context bundle: ${request.contextBundlePath}
+- Machine-readable run request: ${requestPath}
+
+Rules:
+- Stay read-only. Do not edit files.
+- Report only critical or warning findings with concrete evidence.
+- Ignore style-only feedback and speculative nitpicks.
+- Emit each finding as a single JSON line with a top-level \"finding\" object.
+
+Required finding shape:
+{"finding":{"id":"${request.roleId}-short-stable-id","severity":"warning","title":"Concise title","description":"What is wrong and why it matters","evidence":"Specific code or command evidence","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"How this was validated"},"file":"path/to/file.ts","line":1}}
+
+If no verified critical or warning findings exist, do not emit any finding JSON line.`;
+}
+
+function substituteTemplateArg(
+  arg: string,
+  substitutions: Readonly<Record<string, string>>,
+): string {
+  return arg.replaceAll(/\{([a-z_]+)\}/g, (full, key: string) => substitutions[key] ?? full);
+}
+
+async function readProcessText(
+  stream: ReadableStream<Uint8Array> | number | undefined,
+): Promise<string> {
+  if (!(stream instanceof ReadableStream)) {
+    return "";
+  }
+  return new Response(stream).text();
 }

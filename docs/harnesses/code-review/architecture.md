@@ -6,7 +6,12 @@ CrewAI is intentionally out of scope. Native orchestration owns role fan-out, JS
 
 Execution is agent-agnostic. OpenCode can become the first production adapter, while Claude Code, Cursor CLI, pi.dev, or other coding agents can be swapped in through the same adapter contract.
 
-The current real adapter is `OpenCodeAdapter`, which wraps `opencode run --format json` as a subprocess. It writes a per-role request artifact, attaches the context bundle, enforces the role timeout, and normalizes finding JSONL into harness events. The same `SubprocessAgentAdapter` base is intended to support Claude Code, Cursor CLI, pi.dev, and other CLIs later.
+Current real adapters include:
+
+- `OpenCodeAdapter`, which wraps `opencode run --format json` as a subprocess.
+- `ClaudeCodeAdapter`, which wraps the Claude Code CLI as a subprocess with configurable argument templates.
+
+Both adapters use the same `SubprocessAgentAdapter` base to write per-role request artifacts, enforce role timeouts, and normalize finding JSONL into harness events. The same base is intended to support Cursor CLI, pi.dev, and other CLIs later.
 
 Primary layers:
 

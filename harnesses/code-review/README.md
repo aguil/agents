@@ -8,10 +8,12 @@ The first implementation includes:
 
 - `FakeAgentAdapter` for deterministic tests and local smoke runs.
 - `OpenCodeAdapter` for real opt-in reviewer sessions through `opencode run --format json`.
+- `ClaudeCodeAdapter` for opt-in Claude Code subprocess sessions.
 
 Run locally with:
 
 ```bash
 bun run agents run code-review --adapter fake
 bun run agents run code-review --adapter opencode --model <provider/model>
+bun run agents run code-review --adapter claude --model <model>
 ```

@@ -21,6 +21,7 @@ bun run typecheck
 bun test
 bun run agents run code-review --adapter fake
 bun run agents run code-review --adapter opencode --model <provider/model>
+bun run agents run code-review --adapter claude --model <model>
 ```
 
 ## Principles
@@ -35,4 +36,4 @@ bun run agents run code-review --adapter opencode --model <provider/model>
 
 - `harnesses/code-review`: multi-role code review using native Bun orchestration, JSONL events, scratchpad artifacts, risk-tier triage, and an agent-agnostic execution adapter.
 
-The `fake` adapter is deterministic and intended for local smoke tests. The `opencode` adapter shells out to `opencode run --format json` and normalizes emitted finding JSONL into harness events.
+The `fake` adapter is deterministic and intended for local smoke tests. The `opencode` and `claude` adapters shell out to their CLIs and normalize emitted finding JSONL into harness events.

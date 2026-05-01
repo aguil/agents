@@ -11,8 +11,12 @@ import {
   writeTextFile,
 } from "@aguil/agents-core";
 import type { Finding, HarnessRunResult, ReviewTriageTier } from "@aguil/agents-core";
-import { FakeAgentAdapter, OpenCodeAdapter } from "@aguil/agents-execution";
-import type { AgentAdapter, OpenCodeAdapterOptions } from "@aguil/agents-execution";
+import { ClaudeCodeAdapter, FakeAgentAdapter, OpenCodeAdapter } from "@aguil/agents-execution";
+import type {
+  AgentAdapter,
+  ClaudeCodeAdapterOptions,
+  OpenCodeAdapterOptions,
+} from "@aguil/agents-execution";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 import type { HarnessDefinition } from "@aguil/agents-orchestration";
 import {
@@ -36,7 +40,12 @@ export interface CodeReviewRunOptions {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
-export type CodeReviewAdapterName = "fake" | "opencode";
+export type CodeReviewAdapterName = "fake" | "opencode" | "claude";
+
+export interface CodeReviewAdapterOptions {
+  readonly opencode?: OpenCodeAdapterOptions;
+  readonly claude?: ClaudeCodeAdapterOptions;
+}
 
 export interface CodeReviewRunResult extends HarnessRunResult {
   readonly reportPath: string;
@@ -155,10 +164,13 @@ export function createFakeCodeReviewAdapter(
 
 export function createCodeReviewAdapter(
   name: CodeReviewAdapterName,
-  options: OpenCodeAdapterOptions = {},
+  options: CodeReviewAdapterOptions = {},
 ): AgentAdapter {
   if (name === "opencode") {
-    return new OpenCodeAdapter(options);
+    return new OpenCodeAdapter(options.opencode);
+  }
+  if (name === "claude") {
+    return new ClaudeCodeAdapter(options.claude);
   }
   return new FakeAgentAdapter();
 }

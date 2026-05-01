@@ -11,10 +11,12 @@ Commands:
 Options:
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
-  --adapter <name>       Execution adapter: fake or opencode (default: fake)
+  --adapter <name>       Execution adapter: fake, opencode, or claude (default: fake)
   --model <id>           Model passed to opencode
   --agent <name>         OpenCode agent name
   --opencode <path>      OpenCode executable (default: opencode)
+  --claude <path>        Claude Code executable (default: claude)
+  --claude-args <value>  Comma-separated arg template for Claude (supports {prompt})
   --pure                 Run opencode without external plugins
   --print-logs           Ask opencode to print logs to stderr`);
     return 0;
@@ -28,11 +30,18 @@ Options:
       return 1;
     }
     const adapter = createCodeReviewAdapter(adapterName, {
-      executable: options.opencode,
-      model: options.model,
-      agent: options.agent,
-      pure: options.pure,
-      printLogs: options.printLogs,
+      opencode: {
+        executable: options.opencode,
+        model: options.model,
+        agent: options.agent,
+        pure: options.pure,
+        printLogs: options.printLogs,
+      },
+      claude: {
+        executable: options.claude,
+        model: options.model,
+        argsTemplate: parseCommaSeparated(options.claudeArgs),
+      },
     });
 
     const result = await runCodeReview({
@@ -59,6 +68,8 @@ interface CliOptions {
   readonly model?: string;
   readonly agent?: string;
   readonly opencode?: string;
+  readonly claude?: string;
+  readonly claudeArgs?: string;
   readonly pure: boolean;
   readonly printLogs: boolean;
 }
@@ -87,14 +98,27 @@ function parseOptions(argv: readonly string[]): CliOptions {
     model: options.model,
     agent: options.agent,
     opencode: options.opencode,
+    claude: options.claude,
+    claudeArgs: options["claude-args"],
     pure: flags.has("pure"),
     printLogs: flags.has("print-logs"),
   };
 }
 
 function parseAdapterName(value: string | undefined): CodeReviewAdapterName | undefined {
-  if (value === undefined || value === "fake" || value === "opencode") {
+  if (value === undefined || value === "fake" || value === "opencode" || value === "claude") {
     return value ?? "fake";
   }
   return undefined;
+}
+
+function parseCommaSeparated(value: string | undefined): readonly string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parsed.length > 0 ? parsed : undefined;
 }
