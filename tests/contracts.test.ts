@@ -24,11 +24,17 @@ import {
   SubprocessAgentAdapter,
   buildClaudeCodeCommand,
   buildOpenCodeCommand,
+  buildOpenCodePrompt,
   collectAgentRun,
   normalizeAgentOutputLine,
   validateFinding,
 } from "@aguil/agents-execution";
-import { actionableFindings, dedupeFindings, statusForFindings } from "@aguil/agents-reporting";
+import {
+  actionableFindings,
+  dedupeFindings,
+  findingFingerprint,
+  statusForFindings,
+} from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
 import {
   buildPendingReviewSummaryBody,
@@ -63,8 +69,13 @@ test("keeps only verified findings for actionable reports", () => {
     id: "finding-2",
     validation: { status: "not_run", details: "No validation was attempted." },
   };
+  const weaklyValidated: Finding = {
+    ...verified,
+    id: "finding-3",
+    validation: { status: "verified", details: "looks fine" },
+  };
 
-  expect(actionableFindings([verified, unverified])).toEqual([verified]);
+  expect(actionableFindings([verified, unverified, weaklyValidated])).toEqual([verified]);
 });
 
 test("classifies small diffs as trivial", () => {
@@ -227,6 +238,55 @@ test("dedupes findings and derives severity status", () => {
 
   expect(deduped).toHaveLength(1);
   expect(statusForFindings(deduped)).toBe("failed");
+});
+
+test("keeps rephrased findings distinct when semantic fingerprint differs", () => {
+  const base: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Event sink does directory checks on every emitted event",
+    description: "Event sink runs ensureDirectory on every write and orchestration awaits each call.",
+    evidence: "JsonlFileEventSink.write calls ensureDirectory(dirname(path)) before appendFile.",
+    sourceRole: "performance",
+    file: "packages/telemetry/src/index.ts",
+    line: 18,
+    validation: { status: "verified", details: "Code-path review." },
+  };
+  const rephrased: Finding = {
+    ...base,
+    id: "finding-2",
+    title: "Per-event ensureDirectory adds avoidable filesystem overhead",
+    description: "Each telemetry event performs a directory check and the orchestrator waits on it.",
+    evidence: "The event sink performs ensureDirectory before appending JSONL for each event.",
+  };
+
+  expect(findingFingerprint(base).split("|")[0]).toBe("performance");
+  expect(dedupeFindings([base, rephrased])).toHaveLength(2);
+});
+
+test("does not merge distinct findings that share one location", () => {
+  const left: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Missing authorization check on write path",
+    description: "Mutation endpoint updates state without verifying caller permissions.",
+    evidence: "writeConfig() is called before any authorize() guard in the handler.",
+    sourceRole: "security",
+    file: "src/handler.ts",
+    line: 42,
+    validation: { status: "verified", details: "Inspected call path around handler implementation." },
+  };
+  const right: Finding = {
+    ...left,
+    id: "finding-2",
+    title: "Expensive JSON parse in hot request path",
+    description: "Handler reparses unchanged payload and doubles CPU work for each request.",
+    evidence: "JSON.parse runs twice in the same handler branch without transformation.",
+    sourceRole: "security",
+  };
+
+  expect(findingFingerprint(left)).not.toBe(findingFingerprint(right));
+  expect(dedupeFindings([left, right])).toHaveLength(2);
 });
 
 test("validates finding shape before accepting agent output", () => {
@@ -392,7 +452,13 @@ test("builds opencode command behind the adapter boundary", () => {
       allowedCommands: ["bun test"],
     },
     "/scratch/roles/security/security.request.json",
-    { executable: "opencode-test", model: "provider/model", agent: "reviewer", pure: true },
+    {
+      executable: "opencode-test",
+      model: "provider/model",
+      variant: "minimal",
+      agent: "reviewer",
+      pure: true,
+    },
   );
 
   expect(command.slice(0, 6)).toEqual([
@@ -404,9 +470,27 @@ test("builds opencode command behind the adapter boundary", () => {
     "/repo",
   ]);
   expect(command).toContain("provider/model");
+  expect(command).toContain("minimal");
   expect(command).toContain("reviewer");
   expect(command).toContain("--pure");
   expect(command.at(-1)).toContain("security code-review specialist");
+});
+
+test("adds jj guidance to opencode prompt when workspace is jj", () => {
+  const prompt = buildOpenCodePrompt({
+    runId: "run-1",
+    roleId: "quality",
+    prompt: "Review this change.",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch/roles/quality",
+    timeoutMs: 1_000,
+    allowedCommands: ["jj diff"],
+    metadata: { vcs_mode: "jj" },
+  });
+
+  expect(prompt).toContain("workspace uses jujutsu");
+  expect(prompt).toContain("Prefer the provided context bundle");
 });
 
 test("builds claude command behind the adapter boundary", () => {
@@ -696,6 +780,168 @@ test("treats timed out roles as warnings with partial coverage metadata", async 
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("replays a run from a provided context bundle", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-replay-"));
+  try {
+    const contextPath = join(tempDir, "context.json");
+    await writeFile(
+      contextPath,
+      JSON.stringify({
+        id: "replay-context",
+        artifacts: [
+          { id: "triage", title: "Risk Triage", content: "trivial" },
+          { id: "workspace-diff", title: "Workspace Diff", content: "diff --git a/a b/a" },
+        ],
+      }),
+    );
+
+    const result = await runCodeReview({
+      workspacePath: tempDir,
+      scratchpadRoot: join(tempDir, "scratchpad"),
+      runId: "test-replay-run",
+      contextBundlePath: contextPath,
+      adapter: createFakeCodeReviewAdapter(),
+    });
+
+    expect(result.metadata?.context_source).toBe("replay");
+    expect(result.metadata?.context_fingerprint?.length).toBe(12);
+    expect(result.metadata?.completed_roles).toBe("quality");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("keeps only recurring findings when consensus mode is enabled", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-consensus-"));
+  try {
+    const shared: Finding = {
+      id: "shared-finding",
+      severity: "warning",
+      title: "Shared issue",
+      description: "Present in all passes.",
+      evidence: "Detected consistently.",
+      sourceRole: "quality",
+      file: "src/app.ts",
+      line: 42,
+      validation: { status: "verified", details: "Verified by code-path inspection." },
+    };
+
+    const result = await runCodeReview({
+      workspacePath: tempDir,
+      scratchpadRoot: join(tempDir, "scratchpad"),
+      runId: "test-consensus-run",
+      consensusRuns: 2,
+      adapter: {
+        name: "consensus-test-agent",
+        capabilities: () => ({
+          streaming: true,
+          structuredOutput: true,
+          readOnlyMode: true,
+          mcp: false,
+          cancellation: true,
+        }),
+        async *run(request) {
+          if (request.roleId !== "quality") {
+            return;
+          }
+          const passSpecific: Finding = {
+            ...shared,
+            id: request.runId.endsWith("pass1") ? "pass1-only" : "pass2-only",
+            title: request.runId.endsWith("pass1") ? "Only pass 1" : "Only pass 2",
+            line: request.runId.endsWith("pass1") ? 100 : 101,
+          };
+          yield {
+            timestamp: "2026-05-02T00:00:00.000Z",
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "finding" as const,
+            message: shared.title,
+            data: shared,
+          };
+          yield {
+            timestamp: "2026-05-02T00:00:00.000Z",
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "finding" as const,
+            message: passSpecific.title,
+            data: passSpecific,
+          };
+        },
+      },
+    });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.id).toBe("shared-finding");
+    expect(result.metadata?.consensus_mode).toBe("intersection");
+    expect(result.metadata?.consensus_runs).toBe("2");
+    expect(result.metadata?.consensus_dropped_findings).toBe("2");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("consensus run with no recurring findings reports passed and drops findings", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-consensus-none-"));
+  try {
+    const result = await runCodeReview({
+      workspacePath: tempDir,
+      scratchpadRoot: join(tempDir, "scratchpad"),
+      runId: "test-consensus-none",
+      consensusRuns: 2,
+      adapter: {
+        name: "consensus-none-agent",
+        capabilities: () => ({
+          streaming: true,
+          structuredOutput: true,
+          readOnlyMode: true,
+          mcp: false,
+          cancellation: true,
+        }),
+        async *run(request) {
+          if (request.roleId !== "quality") {
+            return;
+          }
+          const finding: Finding = {
+            id: request.runId.endsWith("pass1") ? "p1" : "p2",
+            severity: "warning",
+            title: request.runId.endsWith("pass1") ? "Only pass 1" : "Only pass 2",
+            description: "Pass-specific finding",
+            evidence: "Only appears in one pass",
+            sourceRole: "quality",
+            file: "src/app.ts",
+            line: request.runId.endsWith("pass1") ? 10 : 11,
+            validation: { status: "verified", details: "Verified by code inspection path trace." },
+          };
+          yield {
+            timestamp: "2026-05-02T00:00:00.000Z",
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "finding" as const,
+            message: finding.title,
+            data: finding,
+          };
+        },
+      },
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.findings).toHaveLength(0);
+    expect(result.metadata?.consensus_dropped_findings).toBe("2");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("rejects non-positive consensusRuns from API options", async () => {
+  await expect(async () => {
+    await runCodeReview({
+      workspacePath: "/tmp",
+      consensusRuns: 0,
+      adapter: createFakeCodeReviewAdapter(),
+    });
+  }).toThrow("Invalid consensusRuns value");
 });
 
 test("strict mode fails run on timed out roles", async () => {

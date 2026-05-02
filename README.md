@@ -25,7 +25,20 @@ bun run agents run code-review --adapter claude --model <model>
 bun run agents run code-review --adapter claude --model <model> --strict
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
+bun run agents run code-review --adapter claude --model <model>
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --no-deterministic
 ```
+
+## Deterministic Runs
+
+- Deterministic mode is enabled by default and records deterministic metadata in `result.json`.
+- OpenCode deterministic defaults force `--pure` and support optional `--variant <id>` pinning.
+- Claude deterministic defaults are conservative: no extra arguments are injected beyond what you explicitly provide.
+- Use `--no-deterministic` to opt out.
+- Determinism is still best-effort because OpenCode/Claude CLI surfaces do not currently expose seed/temperature/top-p controls here.
 
 ## Review Summary Options
 

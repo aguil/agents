@@ -14,12 +14,16 @@ Commands:
 Options:
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
+  --context-bundle <path> Reuse an existing context bundle JSON for replay
+  --consensus <n>        Run n passes and keep recurring findings (default: 3 with --pending-review)
   --adapter <name>       Execution adapter: fake, opencode, or claude (default: fake)
   --model <id>           Model passed to opencode/claude
+  --variant <id>         OpenCode variant (provider-specific effort profile)
   --agent <name>         OpenCode agent name
   --opencode <path>      OpenCode executable (default: opencode)
   --claude <path>        Claude Code executable (default: claude)
   --claude-args <value>  Comma-separated arg template for Claude (supports {prompt})
+  --no-deterministic     Disable deterministic adapter defaults
   --strict               Fail run on any role error or timeout
   --pending-review       Create an unsubmitted GitHub PR review
   --pr <number>          PR number for pending review (auto-discover if omitted)
@@ -36,25 +40,39 @@ Options:
       console.error(`Unsupported adapter: ${options.adapter}`);
       return 1;
     }
+    const deterministicEnabled = !options.noDeterministic;
+    const effectiveAdapter = resolveEffectiveAdapterOptions(options, adapterName, deterministicEnabled);
     const adapter = createCodeReviewAdapter(adapterName, {
       opencode: {
         executable: options.opencode,
-        model: options.model,
-        agent: options.agent,
-        pure: options.pure,
+        model: effectiveAdapter.opencode.model,
+        variant: effectiveAdapter.opencode.variant,
+        agent: effectiveAdapter.opencode.agent,
+        pure: effectiveAdapter.opencode.pure,
         printLogs: options.printLogs,
       },
       claude: {
         executable: options.claude,
-        model: options.model,
-        argsTemplate: parseCommaSeparated(options.claudeArgs),
+        model: effectiveAdapter.claude.model,
+        argsTemplate: effectiveAdapter.claude.argsTemplate,
       },
     });
+
+    const requestedConsensusRuns = parseConsensusRuns(options.consensus);
+    if (options.consensus !== undefined && requestedConsensusRuns === undefined) {
+      console.error(`Invalid --consensus value: ${options.consensus}`);
+      console.error("Expected a positive integer greater than 0.");
+      return 1;
+    }
+    const consensusRuns = requestedConsensusRuns ?? (options.pendingReview ? 3 : undefined);
 
     const result = await runCodeReview({
       workspacePath: options.workspace,
       scratchpadRoot: options.scratchpad,
+      contextBundlePath: options.contextBundle,
+      consensusRuns,
       strict: options.strict,
+      metadata: await buildDeterminismMetadata(adapterName, effectiveAdapter, options, deterministicEnabled),
       adapter,
     });
     console.log(`Code review ${result.status}. Report: ${result.reportPath}`);
@@ -97,14 +115,18 @@ if (import.meta.main) {
 interface CliOptions {
   readonly workspace?: string;
   readonly scratchpad?: string;
+  readonly contextBundle?: string;
+  readonly consensus?: string;
   readonly adapter?: string;
   readonly model?: string;
+  readonly variant?: string;
   readonly agent?: string;
   readonly opencode?: string;
   readonly claude?: string;
   readonly claudeArgs?: string;
   readonly pr?: string;
   readonly reviewSummary?: string;
+  readonly noDeterministic: boolean;
   readonly strict: boolean;
   readonly pendingReview: boolean;
   readonly pure: boolean;
@@ -133,6 +155,19 @@ interface PendingReviewPosted {
   readonly url: string;
 }
 
+interface EffectiveAdapterOptions {
+  readonly opencode: {
+    readonly model?: string;
+    readonly variant?: string;
+    readonly agent?: string;
+    readonly pure: boolean;
+  };
+  readonly claude: {
+    readonly model?: string;
+    readonly argsTemplate?: readonly string[];
+  };
+}
+
 function parseOptions(argv: readonly string[]): CliOptions {
   const options: Record<string, string> = {};
   const flags = new Set<string>();
@@ -153,19 +188,34 @@ function parseOptions(argv: readonly string[]): CliOptions {
   return {
     workspace: options.workspace,
     scratchpad: options.scratchpad,
+    contextBundle: options["context-bundle"],
+    consensus: options.consensus,
     adapter: options.adapter,
     model: options.model,
+    variant: options.variant,
     agent: options.agent,
     opencode: options.opencode,
     claude: options.claude,
     claudeArgs: options["claude-args"],
     pr: options.pr,
     reviewSummary: options["review-summary"],
+    noDeterministic: flags.has("no-deterministic"),
     strict: flags.has("strict"),
     pendingReview: flags.has("pending-review"),
     pure: flags.has("pure"),
     printLogs: flags.has("print-logs"),
   };
+}
+
+function parseConsensusRuns(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || `${parsed}` !== value.trim()) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function parseAdapterName(value: string | undefined): CodeReviewAdapterName | undefined {
@@ -184,6 +234,58 @@ function parseCommaSeparated(value: string | undefined): readonly string[] | und
     .map((part) => part.trim())
     .filter(Boolean);
   return parsed.length > 0 ? parsed : undefined;
+}
+
+function resolveEffectiveAdapterOptions(
+  options: CliOptions,
+  adapterName: CodeReviewAdapterName,
+  deterministicEnabled: boolean,
+): EffectiveAdapterOptions {
+  return {
+    opencode: {
+      model: options.model,
+      variant: options.variant,
+      agent: options.agent,
+      pure: options.pure || (deterministicEnabled && adapterName === "opencode"),
+    },
+    claude: {
+      model: options.model,
+      argsTemplate: parseCommaSeparated(options.claudeArgs),
+    },
+  };
+}
+
+async function buildDeterminismMetadata(
+  adapterName: CodeReviewAdapterName,
+  effective: EffectiveAdapterOptions,
+  options: CliOptions,
+  deterministicEnabled: boolean,
+): Promise<Readonly<Record<string, string>>> {
+  const metadata: Record<string, string> = {
+    deterministic_mode: deterministicEnabled ? "true" : "false",
+  };
+
+  if (adapterName === "opencode") {
+    metadata.opencode_model = effective.opencode.model ?? "";
+    metadata.opencode_variant = effective.opencode.variant ?? "";
+    metadata.opencode_agent = effective.opencode.agent ?? "";
+    metadata.opencode_pure = effective.opencode.pure ? "true" : "false";
+    metadata.opencode_version = await detectExecutableVersion(options.opencode ?? "opencode");
+  }
+
+  if (adapterName === "claude") {
+    metadata.claude_model = effective.claude.model ?? "";
+    metadata.claude_args_template = effective.claude.argsTemplate?.join(",") ?? "";
+    metadata.claude_version = await detectExecutableVersion(options.claude ?? "claude");
+  }
+
+  return metadata;
+}
+
+async function detectExecutableVersion(executable: string): Promise<string> {
+  const output = await runCommand([executable, "--version"]);
+  const line = output?.trim().split(/\r?\n/).find((entry) => entry.trim().length > 0);
+  return line ?? "";
 }
 
 function parsePrNumber(value: string | undefined): number | undefined {
@@ -302,8 +404,6 @@ function renderTriageSummary(
   const followUp = [...critical, ...warnings].slice(2, 6);
 
   return [
-    "Code Review Harness (unsubmitted)",
-    "",
     "## At a Glance",
     `- Findings: ${findings.length} (${critical.length} critical, ${warnings.length} warning)`,
     `- Inline comments posted: ${postedCommentCount}`,
@@ -334,8 +434,6 @@ function renderImpactSummary(
   }
 
   return [
-    "Code Review Harness (unsubmitted)",
-    "",
     "## Impact Summary",
     `- Total findings: ${findings.length}`,
     `- Inline comments posted: ${postedCommentCount}`,
@@ -361,8 +459,6 @@ function renderEvidenceSummary(
   skippedUnanchorable: number,
 ): string {
   const lines = [
-    "Code Review Harness (unsubmitted)",
-    "",
     "## Why / Evidence / Fix",
     `- Total findings: ${findings.length}`,
     `- Inline comments posted: ${postedCommentCount}`,

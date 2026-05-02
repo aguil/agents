@@ -543,6 +543,7 @@ function hasTimedOut(data: unknown): boolean {
 export interface OpenCodeAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
+  readonly variant?: string;
   readonly agent?: string;
   readonly pure?: boolean;
   readonly printLogs?: boolean;
@@ -615,6 +616,9 @@ export function buildOpenCodeCommand(
   if (options.model !== undefined) {
     cmd.push("--model", options.model);
   }
+  if (options.variant !== undefined) {
+    cmd.push("--variant", options.variant);
+  }
   if (options.agent !== undefined) {
     cmd.push("--agent", options.agent);
   }
@@ -630,6 +634,13 @@ export function buildOpenCodeCommand(
 }
 
 export function buildOpenCodePrompt(request: AgentRunRequest): string {
+  const vcsMode = request.metadata?.vcs_mode;
+  const vcsGuidance = vcsMode === "jj"
+    ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
+    : vcsMode === "git"
+    ? "- This workspace uses git. Prefer `git diff`/`git log`."
+    : "";
+
   return `${request.prompt}
 
 You are running as the ${request.roleId} code-review specialist inside an autonomous review harness.
@@ -641,6 +652,8 @@ Inputs attached to this session:
 Rules:
 - Stay read-only. Do not edit files.
 - Use generic repository commands only when useful: ${request.allowedCommands.join(", ") || "none"}.
+- Prefer the provided context bundle and diff artifacts before ad-hoc shell exploration.
+${vcsGuidance}
 - Report only critical or warning issues with concrete evidence.
 - Do not report nitpicks, style preferences, or speculative hardening ideas.
 - Every finding must include validation details. Use validation.status "verified" only when you validated the issue.
@@ -684,6 +697,13 @@ export function buildClaudeCodePrompt(
   request: AgentRunRequest,
   requestPath: string,
 ): string {
+  const vcsMode = request.metadata?.vcs_mode;
+  const vcsGuidance = vcsMode === "jj"
+    ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
+    : vcsMode === "git"
+    ? "- This workspace uses git. Prefer `git diff`/`git log`."
+    : "";
+
   return `${request.prompt}
 
 You are the ${request.roleId} specialist in an autonomous code-review harness.
@@ -694,6 +714,8 @@ Inputs:
 
 Rules:
 - Stay read-only. Do not edit files.
+- Prefer the provided context bundle and diff artifacts before ad-hoc shell exploration.
+${vcsGuidance}
 - Report only critical or warning findings with concrete evidence.
 - Ignore style-only feedback and speculative nitpicks.
 - Emit each finding as a single JSON line with a top-level \"finding\" object.
