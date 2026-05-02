@@ -19,6 +19,7 @@ bun run agents run code-review --adapter claude --model <model>
 bun run agents run code-review --adapter claude --model <model> --strict
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 ```
 
 ## Human-In-The-Loop Workflow
@@ -48,6 +49,12 @@ Pending review mode:
 - Use `--pr <number>` to target a specific PR, otherwise the current branch PR is auto-discovered.
 - Use `--review-summary <triage|impact|evidence>` to choose the review body format (`impact` is the default).
 - Only anchorable findings (`file` + `line`) are posted as inline comments.
+
+Consistency and replay mode:
+
+- `--context-bundle <path>` reuses a prior context bundle instead of collecting live PR/diff context again.
+- Replay mode is useful for comparing model behavior with stable input.
+- `result.json` metadata includes `vcs_mode`, `context_source`, and `context_fingerprint` for run-to-run comparison.
 
 Review summary examples:
 
@@ -126,6 +133,9 @@ Core artifacts:
 - `metadata.failed_roles`: comma-separated roles that failed
 - `metadata.completed_roles`: comma-separated roles that completed
 - `metadata.strict_mode`: `true` when strict mode is enabled
+- `metadata.vcs_mode`: detected workspace mode (`jj`, `git`, or `unknown`)
+- `metadata.context_source`: `live` (collected) or `replay` (`--context-bundle`)
+- `metadata.context_fingerprint`: short hash for context-equivalence checks
 - `reportPath` and `contextBundlePath`
 
 `events.jsonl` also includes periodic role heartbeat events (`type: tool`) with elapsed time and byte counts so long-running reviews can be diagnosed while still running.

@@ -24,6 +24,7 @@ import {
   SubprocessAgentAdapter,
   buildClaudeCodeCommand,
   buildOpenCodeCommand,
+  buildOpenCodePrompt,
   collectAgentRun,
   normalizeAgentOutputLine,
   validateFinding,
@@ -409,6 +410,23 @@ test("builds opencode command behind the adapter boundary", () => {
   expect(command.at(-1)).toContain("security code-review specialist");
 });
 
+test("adds jj guidance to opencode prompt when workspace is jj", () => {
+  const prompt = buildOpenCodePrompt({
+    runId: "run-1",
+    roleId: "quality",
+    prompt: "Review this change.",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch/roles/quality",
+    timeoutMs: 1_000,
+    allowedCommands: ["jj diff"],
+    metadata: { vcs_mode: "jj" },
+  });
+
+  expect(prompt).toContain("workspace uses jujutsu");
+  expect(prompt).toContain("Prefer the provided context bundle");
+});
+
 test("builds claude command behind the adapter boundary", () => {
   const command = buildClaudeCodeCommand(
     {
@@ -693,6 +711,37 @@ test("treats timed out roles as warnings with partial coverage metadata", async 
     expect(result.metadata?.timed_out_roles).toBe("quality");
     expect(result.metadata?.failed_roles).toBe("");
     expect(await readFile(result.reportPath, "utf8")).toContain("Execution Notes");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("replays a run from a provided context bundle", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-replay-"));
+  try {
+    const contextPath = join(tempDir, "context.json");
+    await writeFile(
+      contextPath,
+      JSON.stringify({
+        id: "replay-context",
+        artifacts: [
+          { id: "triage", title: "Risk Triage", content: "trivial" },
+          { id: "workspace-diff", title: "Workspace Diff", content: "diff --git a/a b/a" },
+        ],
+      }),
+    );
+
+    const result = await runCodeReview({
+      workspacePath: tempDir,
+      scratchpadRoot: join(tempDir, "scratchpad"),
+      runId: "test-replay-run",
+      contextBundlePath: contextPath,
+      adapter: createFakeCodeReviewAdapter(),
+    });
+
+    expect(result.metadata?.context_source).toBe("replay");
+    expect(result.metadata?.context_fingerprint?.length).toBe(12);
+    expect(result.metadata?.completed_roles).toBe("quality");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

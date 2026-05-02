@@ -14,6 +14,7 @@ Commands:
 Options:
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
+  --context-bundle <path> Reuse an existing context bundle JSON for replay
   --adapter <name>       Execution adapter: fake, opencode, or claude (default: fake)
   --model <id>           Model passed to opencode/claude
   --agent <name>         OpenCode agent name
@@ -54,6 +55,7 @@ Options:
     const result = await runCodeReview({
       workspacePath: options.workspace,
       scratchpadRoot: options.scratchpad,
+      contextBundlePath: options.contextBundle,
       strict: options.strict,
       adapter,
     });
@@ -97,6 +99,7 @@ if (import.meta.main) {
 interface CliOptions {
   readonly workspace?: string;
   readonly scratchpad?: string;
+  readonly contextBundle?: string;
   readonly adapter?: string;
   readonly model?: string;
   readonly agent?: string;
@@ -153,6 +156,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
   return {
     workspace: options.workspace,
     scratchpad: options.scratchpad,
+    contextBundle: options["context-bundle"],
     adapter: options.adapter,
     model: options.model,
     agent: options.agent,
