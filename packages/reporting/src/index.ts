@@ -33,7 +33,8 @@ export function dedupeFindings(findings: readonly Finding[]): readonly Finding[]
 
 export function findingFingerprint(finding: Finding): string {
   if (finding.file !== undefined && finding.line !== undefined) {
-    return [finding.sourceRole, `${finding.file}:${finding.line}`].join("|");
+    const semantic = semanticSignature([finding.description, finding.evidence].join(" "));
+    return [finding.sourceRole, `${finding.file}:${finding.line}`, semantic].join("|");
   }
   if (finding.file !== undefined) {
     return [finding.sourceRole, finding.file, semanticSignature(finding.title)].join("|");

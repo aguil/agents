@@ -240,7 +240,7 @@ test("dedupes findings and derives severity status", () => {
   expect(statusForFindings(deduped)).toBe("failed");
 });
 
-test("dedupes semantically equivalent findings with phrasing drift", () => {
+test("keeps rephrased findings distinct when semantic fingerprint differs", () => {
   const base: Finding = {
     id: "finding-1",
     severity: "warning",
@@ -261,7 +261,32 @@ test("dedupes semantically equivalent findings with phrasing drift", () => {
   };
 
   expect(findingFingerprint(base).split("|")[0]).toBe("performance");
-  expect(dedupeFindings([base, rephrased])).toHaveLength(1);
+  expect(dedupeFindings([base, rephrased])).toHaveLength(2);
+});
+
+test("does not merge distinct findings that share one location", () => {
+  const left: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Missing authorization check on write path",
+    description: "Mutation endpoint updates state without verifying caller permissions.",
+    evidence: "writeConfig() is called before any authorize() guard in the handler.",
+    sourceRole: "security",
+    file: "src/handler.ts",
+    line: 42,
+    validation: { status: "verified", details: "Inspected call path around handler implementation." },
+  };
+  const right: Finding = {
+    ...left,
+    id: "finding-2",
+    title: "Expensive JSON parse in hot request path",
+    description: "Handler reparses unchanged payload and doubles CPU work for each request.",
+    evidence: "JSON.parse runs twice in the same handler branch without transformation.",
+    sourceRole: "security",
+  };
+
+  expect(findingFingerprint(left)).not.toBe(findingFingerprint(right));
+  expect(dedupeFindings([left, right])).toHaveLength(2);
 });
 
 test("validates finding shape before accepting agent output", () => {
@@ -844,6 +869,7 @@ test("keeps only recurring findings when consensus mode is enabled", async () =>
     expect(result.findings[0]?.id).toBe("shared-finding");
     expect(result.metadata?.consensus_mode).toBe("intersection");
     expect(result.metadata?.consensus_runs).toBe("2");
+    expect(result.metadata?.consensus_dropped_findings).toBe("2");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

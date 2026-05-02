@@ -15,7 +15,7 @@ Options:
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
   --context-bundle <path> Reuse an existing context bundle JSON for replay
-  --consensus <n>        Run n passes and keep recurring findings
+  --consensus <n>        Run n passes and keep recurring findings (default: 3 with --pending-review)
   --adapter <name>       Execution adapter: fake, opencode, or claude (default: fake)
   --model <id>           Model passed to opencode/claude
   --agent <name>         OpenCode agent name
@@ -53,12 +53,13 @@ Options:
       },
     });
 
-    const consensusRuns = parseConsensusRuns(options.consensus);
-    if (options.consensus !== undefined && consensusRuns === undefined) {
+    const requestedConsensusRuns = parseConsensusRuns(options.consensus);
+    if (options.consensus !== undefined && requestedConsensusRuns === undefined) {
       console.error(`Invalid --consensus value: ${options.consensus}`);
       console.error("Expected a positive integer greater than 0.");
       return 1;
     }
+    const consensusRuns = requestedConsensusRuns ?? (options.pendingReview ? 3 : undefined);
 
     const result = await runCodeReview({
       workspacePath: options.workspace,
@@ -328,8 +329,6 @@ function renderTriageSummary(
   const followUp = [...critical, ...warnings].slice(2, 6);
 
   return [
-    "Code Review Harness (unsubmitted)",
-    "",
     "## At a Glance",
     `- Findings: ${findings.length} (${critical.length} critical, ${warnings.length} warning)`,
     `- Inline comments posted: ${postedCommentCount}`,
@@ -360,8 +359,6 @@ function renderImpactSummary(
   }
 
   return [
-    "Code Review Harness (unsubmitted)",
-    "",
     "## Impact Summary",
     `- Total findings: ${findings.length}`,
     `- Inline comments posted: ${postedCommentCount}`,
@@ -387,8 +384,6 @@ function renderEvidenceSummary(
   skippedUnanchorable: number,
 ): string {
   const lines = [
-    "Code Review Harness (unsubmitted)",
-    "",
     "## Why / Evidence / Fix",
     `- Total findings: ${findings.length}`,
     `- Inline comments posted: ${postedCommentCount}`,

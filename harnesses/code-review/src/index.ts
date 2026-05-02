@@ -181,8 +181,7 @@ export async function runCodeReview(
   const findings = consensusRuns > 1
     ? intersectFindingsByFingerprint(passFindingSets)
     : passFindingSets[0] ?? [];
-  const totalActionable = passFindingSets.reduce((sum, set) => sum + set.length, 0);
-  const consensusDropped = Math.max(0, totalActionable - findings.length);
+  const consensusDropped = countConsensusDroppedFindings(passFindingSets, findings);
 
   const rawMetadata = {
     ...(rawResult.metadata ?? {}),
@@ -287,6 +286,21 @@ function intersectFindingsByFingerprint(perPassFindings: readonly (readonly Find
   return [...counts.values()]
     .filter((entry) => entry.count === requiredCount)
     .map((entry) => entry.finding);
+}
+
+function countConsensusDroppedFindings(
+  perPassFindings: readonly (readonly Finding[])[],
+  keptFindings: readonly Finding[],
+): number {
+  const observed = new Set<string>();
+  for (const passFindings of perPassFindings) {
+    for (const finding of passFindings) {
+      observed.add(findingFingerprint(finding));
+    }
+  }
+
+  const kept = new Set(keptFindings.map((finding) => findingFingerprint(finding)));
+  return [...observed].filter((fingerprint) => !kept.has(fingerprint)).length;
 }
 
 export function createFakeCodeReviewAdapter(
