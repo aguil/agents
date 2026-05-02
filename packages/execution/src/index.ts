@@ -178,6 +178,7 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       proc = Bun.spawn({
         cmd: [...command.cmd],
         cwd: command.cwd ?? request.workspacePath,
+        stdin: "ignore",
         env: {
           ...Bun.env,
           ...command.env,
