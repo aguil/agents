@@ -108,11 +108,13 @@ function buildExecutionNotes(
 
   const timedOutRoles = parseRoleList(metadata.timed_out_roles);
   const failedRoles = parseRoleList(metadata.failed_roles);
-  if (timedOutRoles.length === 0 && failedRoles.length === 0) {
+  const strictMode = metadata.strict_mode === "true";
+  if (timedOutRoles.length === 0 && failedRoles.length === 0 && !strictMode) {
     return [];
   }
 
   const notes = ["## Execution Notes"];
+  notes.push(`- Strict mode: ${strictMode ? "enabled" : "disabled"}`);
   if (timedOutRoles.length > 0) {
     notes.push(`- Timed out roles: ${timedOutRoles.join(", ")}`);
   }

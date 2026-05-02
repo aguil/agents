@@ -22,6 +22,7 @@ export interface HarnessRunRequest {
   readonly workspacePath: string;
   readonly scratchpadPath: string;
   readonly contextBundlePath?: string;
+  readonly strictMode?: boolean;
   readonly metadata?: Readonly<Record<string, string>>;
 }
 

@@ -37,6 +37,7 @@ export interface PullRequestMetadata {
   readonly title: string;
   readonly body: string;
   readonly url: string;
+  readonly baseRefName?: string;
 }
 
 export interface RemoteScope {
@@ -223,12 +224,26 @@ export class PullRequestReferencedDocsProvider implements ContextProvider {
 export class RepositoryDiffProvider implements ContextProvider {
   readonly name = "repository-diff";
 
+  constructor(private readonly commandRunner: CommandRunner = runCommand) {}
+
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const diff = request.diffPath
-      ? await readFile(request.diffPath, "utf8")
-      : await collectRepositoryDiff(request.workspacePath);
+    const { diff, baseRef, strategy } = request.diffPath
+      ? {
+          diff: await readFile(request.diffPath, "utf8"),
+          baseRef: undefined,
+          strategy: "explicit_diff_path",
+        }
+      : await collectReviewDiff(request.workspacePath, this.commandRunner);
 
     return [
+      {
+        id: "diff-strategy",
+        title: "Diff Strategy",
+        content: [
+          `Strategy: ${strategy}`,
+          `Base Ref: ${baseRef ?? "(none)"}`,
+        ].join("\n"),
+      },
       {
         id: "workspace-diff",
         title: "Workspace Diff",
@@ -316,12 +331,144 @@ export async function collectRepositoryDiff(workspacePath: string): Promise<stri
   );
 }
 
+export async function collectReviewDiff(
+  workspacePath: string,
+  commandRunner: CommandRunner = runCommand,
+): Promise<{
+  readonly diff: string;
+  readonly baseRef?: string;
+  readonly strategy: string;
+}> {
+  const pullRequest = await discoverPullRequest(workspacePath, commandRunner);
+  const remoteScope = await resolvePreferredRemoteScope(workspacePath, commandRunner);
+  const baseCandidates = pullRequest?.baseRefName !== undefined
+    ? [pullRequest.baseRefName]
+    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteScope?.remoteName);
+
+  for (const baseRef of dedupeStrings(baseCandidates)) {
+    const gitDiff = await commandRunner(
+      ["git", "diff", "--no-ext-diff", `${baseRef}...HEAD`],
+      workspacePath,
+    );
+    if (gitDiff !== undefined) {
+      return {
+        diff: filterReviewDiff(gitDiff),
+        baseRef,
+        strategy: pullRequest?.baseRefName !== undefined ? "pr_base_git" : "fallback_base_git",
+      };
+    }
+
+    for (const jjBase of toJjBaseCandidates(baseRef, remoteScope?.remoteName)) {
+      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
+      if (jjDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(jjDiff),
+          baseRef: jjBase,
+          strategy: pullRequest?.baseRefName !== undefined ? "pr_base_jj" : "fallback_base_jj",
+        };
+      }
+    }
+  }
+
+  const workingDiff = await collectRepositoryDiff(workspacePath);
+  return {
+    diff: filterReviewDiff(workingDiff),
+    baseRef: undefined,
+    strategy: "working_copy_fallback",
+  };
+}
+
+export function filterReviewDiff(diff: string): string {
+  const lines = diff.split(/\r?\n/);
+  const kept: string[] = [];
+  let current: string[] = [];
+  let currentPath: string | undefined;
+
+  const flush = (): void => {
+    if (current.length === 0) {
+      return;
+    }
+    if (currentPath === undefined || !isHarnessArtifactPath(currentPath)) {
+      kept.push(...current);
+    }
+    current = [];
+    currentPath = undefined;
+  };
+
+  for (const line of lines) {
+    const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+    if (match) {
+      flush();
+      currentPath = match[2];
+      current.push(line);
+      continue;
+    }
+    current.push(line);
+  }
+  flush();
+
+  return kept.join("\n").trimEnd();
+}
+
+export async function resolvePreferredBaseBranch(
+  workspacePath: string,
+  commandRunner: CommandRunner = runCommand,
+  remoteName?: string,
+): Promise<string | undefined> {
+  if (remoteName !== undefined) {
+    const headRef = await commandRunner(
+      ["git", "symbolic-ref", `refs/remotes/${remoteName}/HEAD`],
+      workspacePath,
+    );
+    const branch = parseRemoteHeadBranch(headRef);
+    if (branch !== undefined) {
+      return branch;
+    }
+  }
+
+  const candidates = dedupeStrings([
+    ...(remoteName !== undefined ? [`${remoteName}/main`, `${remoteName}/master`] : []),
+    "main",
+    "master",
+  ]);
+  for (const candidate of candidates) {
+    const exists = await commandRunner(["git", "rev-parse", "--verify", candidate], workspacePath);
+    if (exists !== undefined) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+export async function resolvePreferredBaseBranchCandidates(
+  workspacePath: string,
+  commandRunner: CommandRunner = runCommand,
+  remoteName?: string,
+): Promise<readonly string[]> {
+  const preferred = await resolvePreferredBaseBranch(workspacePath, commandRunner, remoteName);
+  return dedupeStrings([
+    ...(preferred !== undefined ? [preferred] : []),
+    ...(remoteName !== undefined ? [`${remoteName}/main`, `${remoteName}/master`] : []),
+    "main",
+    "master",
+  ]);
+}
+
+export function parseRemoteHeadBranch(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  const parts = trimmed.split("/");
+  return parts.length >= 4 ? parts.at(-1) : undefined;
+}
+
 export async function discoverPullRequest(
   workspacePath: string,
   commandRunner: CommandRunner = runCommand,
 ): Promise<PullRequestMetadata | undefined> {
   const json = await commandRunner(
-    ["gh", "pr", "view", "--json", "number,title,body,url"],
+    ["gh", "pr", "view", "--json", "number,title,body,url,baseRefName"],
     workspacePath,
   );
   if (json === undefined) {
@@ -341,10 +488,11 @@ export async function discoverPullRequest(
 
     return {
       number: parsed.number,
-      title: parsed.title,
-      body: parsed.body,
-      url: parsed.url,
-    };
+        title: parsed.title,
+        body: parsed.body,
+        url: parsed.url,
+        baseRefName: typeof parsed.baseRefName === "string" ? parsed.baseRefName : undefined,
+      };
   } catch {
     return undefined;
   }
@@ -604,11 +752,32 @@ function isPathInsideWorkspace(path: string, workspacePath: string): boolean {
   return path === workspacePath || path.startsWith(normalizedWorkspace);
 }
 
+function toJjBaseCandidates(baseRef: string, remoteName: string | undefined): readonly string[] {
+  const candidates = [baseRef];
+  const slash = baseRef.indexOf("/");
+  if (slash > 0) {
+    const remote = baseRef.slice(0, slash);
+    const branch = baseRef.slice(slash + 1);
+    candidates.push(`${branch}@${remote}`);
+  } else if (remoteName !== undefined) {
+    candidates.push(`${baseRef}@${remoteName}`);
+  }
+  return dedupeStrings(candidates);
+}
+
+function dedupeStrings(values: readonly string[]): readonly string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
 function normalizeReference(value: string | undefined): string | undefined {
   if (value === undefined) {
     return undefined;
   }
   return value.trim().replace(/[.,;:]$/, "");
+}
+
+function isHarnessArtifactPath(path: string): boolean {
+  return path.startsWith(".review-agent/");
 }
 
 function isUrl(value: string): boolean {

@@ -1,5 +1,6 @@
 import { createAgentEvent, ensureDirectory, writeJsonFile } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
+import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface AdapterCapabilities {
@@ -146,6 +147,7 @@ export interface SubprocessAgentAdapterOptions {
   readonly name: string;
   readonly capabilities: AdapterCapabilities;
   buildCommand(request: AgentRunRequest, requestPath: string): CommandSpec;
+  readonly heartbeatIntervalMs?: number;
 }
 
 export class SubprocessAgentAdapter implements AgentAdapter {
@@ -162,6 +164,8 @@ export class SubprocessAgentAdapter implements AgentAdapter {
   async *run(request: AgentRunRequest): AsyncIterable<AgentEvent> {
     await ensureDirectory(request.scratchpadPath);
     const requestPath = join(request.scratchpadPath, `${request.roleId}.request.json`);
+    const stdoutLogPath = join(request.scratchpadPath, "stdout.log");
+    const stderrLogPath = join(request.scratchpadPath, "stderr.log");
     await writeJsonFile(requestPath, request);
 
     yield createAgentEvent({
@@ -202,8 +206,16 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       return;
     }
 
+    const queue = new AsyncEventQueue<AgentEvent>();
     let timedOut = false;
     let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let lastOutputTimestamp: string | undefined;
+    const stdoutTail = createTailBuffer(25);
+    const stderrTail = createTailBuffer(25);
+    const startedAtMs = Date.now();
+
     const timeoutTimer = request.timeoutMs > 0
       ? setTimeout(() => {
           timedOut = true;
@@ -212,15 +224,53 @@ export class SubprocessAgentAdapter implements AgentAdapter {
         }, request.timeoutMs)
       : undefined;
 
-    let stdout = "";
-    let stderr = "";
+    const heartbeatInterval = this.options.heartbeatIntervalMs ?? 15_000;
+    const heartbeatTimer = setInterval(() => {
+      queue.push(
+        createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "tool",
+          message: `${this.name} heartbeat`,
+          data: {
+            kind: "heartbeat",
+            elapsedMs: Date.now() - startedAtMs,
+            stdoutBytes,
+            stderrBytes,
+            lastOutputTimestamp,
+          },
+        }),
+      );
+    }, heartbeatInterval);
+
+    const stdoutDrainer = drainProcessStream(proc.stdout, async (line) => {
+      stdoutBytes += Buffer.byteLength(line, "utf8") + 1;
+      lastOutputTimestamp = new Date().toISOString();
+      stdoutTail.push(line);
+      await appendFile(stdoutLogPath, `${line}\n`, "utf8");
+      for (const event of normalizeAgentOutputLine(request, line)) {
+        queue.push(event);
+      }
+    });
+
+    const stderrDrainer = drainProcessStream(proc.stderr, async (line) => {
+      stderrBytes += Buffer.byteLength(line, "utf8") + 1;
+      lastOutputTimestamp = new Date().toISOString();
+      stderrTail.push(line);
+      await appendFile(stderrLogPath, `${line}\n`, "utf8");
+      queue.push(
+        createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "stderr",
+          message: line,
+        }),
+      );
+    });
+
     let exitCode = 0;
     try {
-      [stdout, stderr, exitCode] = await Promise.all([
-        readProcessText(proc.stdout),
-        readProcessText(proc.stderr),
-        proc.exited,
-      ]);
+      [exitCode] = await Promise.all([proc.exited, stdoutDrainer, stderrDrainer]);
     } finally {
       if (timeoutTimer !== undefined) {
         clearTimeout(timeoutTimer);
@@ -228,51 +278,70 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       if (hardKillTimer !== undefined) {
         clearTimeout(hardKillTimer);
       }
-    }
-
-    for (const line of stdout.split(/\r?\n/).filter(Boolean)) {
-      for (const event of normalizeAgentOutputLine(request, line)) {
-        yield event;
-      }
-    }
-
-    for (const line of stderr.split(/\r?\n/).filter(Boolean)) {
-      yield createAgentEvent({
-        runId: request.runId,
-        roleId: request.roleId,
-        type: "stderr",
-        message: line,
-      });
+      clearInterval(heartbeatTimer);
     }
 
     if (timedOut) {
-      yield createAgentEvent({
+      queue.push(createAgentEvent({
         runId: request.runId,
         roleId: request.roleId,
         type: "error",
         message: `${this.name} timed out after ${request.timeoutMs}ms`,
-        data: { reason: "timed_out", timeoutMs: request.timeoutMs, exitCode },
-      });
+        data: {
+          reason: "timed_out",
+          timeoutMs: request.timeoutMs,
+          elapsedMs: Date.now() - startedAtMs,
+          exitCode,
+          stdoutBytes,
+          stderrBytes,
+          lastOutputTimestamp,
+          stdoutTail: stdoutTail.values(),
+          stderrTail: stderrTail.values(),
+          stdoutLogPath,
+          stderrLogPath,
+        },
+      }));
+      queue.close();
+      for await (const event of queue) {
+        yield event;
+      }
       return;
     }
 
     if (exitCode === 0) {
-      yield createAgentEvent({
+      queue.push(createAgentEvent({
         runId: request.runId,
         roleId: request.roleId,
         type: "completed",
         message: `${this.name} completed ${request.roleId}`,
-      });
+      }));
+      queue.close();
+      for await (const event of queue) {
+        yield event;
+      }
       return;
     }
 
-    yield createAgentEvent({
+    queue.push(createAgentEvent({
       runId: request.runId,
       roleId: request.roleId,
       type: "error",
       message: `${this.name} exited with code ${exitCode}`,
-      data: { exitCode },
-    });
+      data: {
+        exitCode,
+        stdoutBytes,
+        stderrBytes,
+        lastOutputTimestamp,
+        stdoutTail: stdoutTail.values(),
+        stderrTail: stderrTail.values(),
+        stdoutLogPath,
+        stderrLogPath,
+      },
+    }));
+    queue.close();
+    for await (const event of queue) {
+      yield event;
+    }
   }
 }
 
@@ -638,11 +707,108 @@ function substituteTemplateArg(
   return arg.replaceAll(/\{([a-z_]+)\}/g, (full, key: string) => substitutions[key] ?? full);
 }
 
-async function readProcessText(
-  stream: ReadableStream<Uint8Array> | number | undefined,
-): Promise<string> {
-  if (!(stream instanceof ReadableStream)) {
-    return "";
+function createTailBuffer(limit: number): {
+  push(value: string): void;
+  values(): readonly string[];
+} {
+  const lines: string[] = [];
+  return {
+    push(value: string) {
+      lines.push(value);
+      if (lines.length > limit) {
+        lines.shift();
+      }
+    },
+    values() {
+      return [...lines];
+    },
+  };
+}
+
+class AsyncEventQueue<T> {
+  private readonly values: T[] = [];
+  private readonly waiters: Array<(value: IteratorResult<T>) => void> = [];
+  private closed = false;
+
+  push(value: T): void {
+    if (this.closed) {
+      return;
+    }
+    const waiter = this.waiters.shift();
+    if (waiter !== undefined) {
+      waiter({ done: false, value });
+      return;
+    }
+    this.values.push(value);
   }
-  return new Response(stream).text();
+
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    while (this.waiters.length > 0) {
+      const waiter = this.waiters.shift();
+      waiter?.({ done: true, value: undefined as T });
+    }
+  }
+
+  async *[Symbol.asyncIterator](): AsyncIterator<T> {
+    while (true) {
+      if (this.values.length > 0) {
+        const value = this.values.shift();
+        if (value !== undefined) {
+          yield value;
+          continue;
+        }
+      }
+      if (this.closed) {
+        return;
+      }
+      const next = await new Promise<IteratorResult<T>>((resolve) => {
+        this.waiters.push(resolve);
+      });
+      if (next.done) {
+        return;
+      }
+      yield next.value;
+    }
+  }
+}
+
+async function drainProcessStream(
+  stream: ReadableStream<Uint8Array> | number | undefined,
+  onLine: (line: string) => Promise<void> | void,
+): Promise<void> {
+  if (!(stream instanceof ReadableStream)) {
+    return;
+  }
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value !== undefined) {
+      buffer += decoder.decode(value, { stream: true });
+    }
+    while (true) {
+      const newlineIndex = buffer.indexOf("\n");
+      if (newlineIndex < 0) {
+        break;
+      }
+      const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.length > 0) {
+        await onLine(line);
+      }
+    }
+  }
+  buffer += decoder.decode();
+  const finalLine = buffer.replace(/\r$/, "").trim();
+  if (finalLine.length > 0) {
+    await onLine(finalLine);
+  }
 }

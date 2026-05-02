@@ -57,6 +57,7 @@ export class NativeBunOrchestrator implements Orchestrator {
 
     const metadata: Record<string, string> = {
       ...(request.metadata ?? {}),
+      strict_mode: request.strictMode === true ? "true" : "false",
       timed_out_roles: timedOutRoles.join(","),
       failed_roles: failedRoles.join(","),
       completed_roles: completedRoles.join(","),
@@ -65,6 +66,7 @@ export class NativeBunOrchestrator implements Orchestrator {
     const result: HarnessRunResult = {
       runId: request.runId,
       status: statusFromOutcomes(findings, {
+        strictMode: request.strictMode === true,
         timedOutRoles,
         failedRoles,
       }),
@@ -147,11 +149,15 @@ function statusFromFindings(findings: readonly Finding[]): HarnessRunResult["sta
 function statusFromOutcomes(
   findings: readonly Finding[],
   outcomes: {
+    readonly strictMode: boolean;
     readonly timedOutRoles: readonly string[];
     readonly failedRoles: readonly string[];
   },
 ): HarnessRunResult["status"] {
   if (outcomes.failedRoles.length > 0) {
+    return "error";
+  }
+  if (outcomes.strictMode && outcomes.timedOutRoles.length > 0) {
     return "error";
   }
   const findingStatus = statusFromFindings(findings);

@@ -38,6 +38,7 @@ export interface CodeReviewRunOptions {
   readonly workspacePath?: string;
   readonly scratchpadRoot?: string;
   readonly runId?: string;
+  readonly strict?: boolean;
   readonly adapter?: AgentAdapter;
   readonly metadata?: Readonly<Record<string, string>>;
 }
@@ -63,28 +64,28 @@ export const codeReviewHarnessDefinition: HarnessDefinition = {
       description: "Find exploitable security risks introduced by the change.",
       promptPath: join(promptDir, "security.md"),
       requiredCapabilities: ["readOnlyMode", "structuredOutput"],
-      timeoutMs: 180_000,
+      timeoutMs: 420_000,
     },
     {
       id: "performance",
       description: "Find meaningful performance regressions introduced by the change.",
       promptPath: join(promptDir, "performance.md"),
       requiredCapabilities: ["readOnlyMode", "structuredOutput"],
-      timeoutMs: 180_000,
+      timeoutMs: 300_000,
     },
     {
       id: "quality",
       description: "Find correctness and maintainability issues with clear behavioral impact.",
       promptPath: join(promptDir, "quality.md"),
       requiredCapabilities: ["readOnlyMode", "structuredOutput"],
-      timeoutMs: 180_000,
+      timeoutMs: 300_000,
     },
     {
       id: "compliance",
       description: "Check project conventions, RFCs, and AGENTS.md requirements.",
       promptPath: join(promptDir, "compliance.md"),
       requiredCapabilities: ["readOnlyMode", "structuredOutput"],
-      timeoutMs: 180_000,
+      timeoutMs: 240_000,
     },
   ],
 };
@@ -130,9 +131,11 @@ export async function runCodeReview(
     workspacePath,
     scratchpadPath,
     contextBundlePath: writtenContext.jsonPath,
+    strictMode: options.strict === true,
     metadata: {
       adapter: adapter.name,
       triage,
+      strict_mode: options.strict === true ? "true" : "false",
       ...options.metadata,
     },
   });
