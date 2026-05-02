@@ -69,8 +69,13 @@ test("keeps only verified findings for actionable reports", () => {
     id: "finding-2",
     validation: { status: "not_run", details: "No validation was attempted." },
   };
+  const weaklyValidated: Finding = {
+    ...verified,
+    id: "finding-3",
+    validation: { status: "verified", details: "looks fine" },
+  };
 
-  expect(actionableFindings([verified, unverified])).toEqual([verified]);
+  expect(actionableFindings([verified, unverified, weaklyValidated])).toEqual([verified]);
 });
 
 test("classifies small diffs as trivial", () => {

@@ -5,7 +5,14 @@ export interface ReportRenderer {
 }
 
 export function actionableFindings(findings: readonly Finding[]): readonly Finding[] {
-  return findings.filter((finding) => finding.validation.status === "verified");
+  return findings.filter(isActionableFinding);
+}
+
+export function isActionableFinding(finding: Finding): boolean {
+  if (finding.validation.status !== "verified") {
+    return false;
+  }
+  return hasSubstantiveValidationDetails(finding.validation.details);
 }
 
 export function dedupeFindings(findings: readonly Finding[]): readonly Finding[] {
@@ -139,6 +146,27 @@ function parseRoleList(value: string | undefined): readonly string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function hasSubstantiveValidationDetails(details: string): boolean {
+  const normalized = details.trim().toLowerCase();
+  if (normalized.length < 18) {
+    return false;
+  }
+  const evidenceSignals = [
+    "reproduced",
+    "validated",
+    "verified",
+    "inspection",
+    "trace",
+    "command",
+    "output",
+    "test",
+    "line",
+    "diff",
+    "path",
+  ];
+  return evidenceSignals.some((signal) => normalized.includes(signal));
 }
 
 const STOP_WORDS = new Set([
