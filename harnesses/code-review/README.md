@@ -20,6 +20,7 @@ bun run agents run code-review --adapter claude --model <model> --strict
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 ```
 
 ## Human-In-The-Loop Workflow
@@ -55,6 +56,8 @@ Consistency and replay mode:
 - `--context-bundle <path>` reuses a prior context bundle instead of collecting live PR/diff context again.
 - Replay mode is useful for comparing model behavior with stable input.
 - `result.json` metadata includes `vcs_mode`, `context_source`, and `context_fingerprint` for run-to-run comparison.
+- `--consensus <n>` runs `n` review passes and keeps only findings that recur in every pass.
+- Consensus values must be positive integers (`n >= 1`).
 
 Review summary examples:
 
@@ -138,6 +141,9 @@ Core artifacts:
 - `metadata.vcs_mode`: detected workspace mode (`jj`, `git`, or `unknown`)
 - `metadata.context_source`: `live` (collected) or `replay` (`--context-bundle`)
 - `metadata.context_fingerprint`: short hash for context-equivalence checks
+- `metadata.consensus_runs`: number of passes requested
+- `metadata.consensus_mode`: `off` or `intersection`
+- `metadata.consensus_dropped_findings`: count filtered by consensus
 - `reportPath` and `contextBundlePath`
 
 `events.jsonl` also includes periodic role heartbeat events (`type: tool`) with elapsed time and byte counts so long-running reviews can be diagnosed while still running.

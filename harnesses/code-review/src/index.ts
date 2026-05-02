@@ -25,6 +25,7 @@ import type { HarnessDefinition } from "@aguil/agents-orchestration";
 import {
   actionableFindings,
   dedupeFindings,
+  findingFingerprint,
   renderMarkdownReport,
   statusForFindings,
 } from "@aguil/agents-reporting";
@@ -43,6 +44,7 @@ export interface CodeReviewRunOptions {
   readonly runId?: string;
   readonly strict?: boolean;
   readonly contextBundlePath?: string;
+  readonly consensusRuns?: number;
   readonly adapter?: AgentAdapter;
   readonly metadata?: Readonly<Record<string, string>>;
 }
@@ -104,6 +106,7 @@ export async function runCodeReview(
   );
   const scratchpadPath = join(scratchpadRoot, runId);
   await ensureDirectory(scratchpadPath);
+  const consensusRuns = normalizeConsensusRuns(options.consensusRuns);
 
   const context = options.contextBundlePath === undefined
     ? await collectContextBundle(
@@ -130,37 +133,70 @@ export async function runCodeReview(
   await writeJsonFile(join(scratchpadPath, "triage.json"), { tier: triage });
 
   const adapter = options.adapter ?? new FakeAgentAdapter();
-  const orchestrator = new NativeBunOrchestrator({
-    definition: definitionForTriageWithCommands(triage, defaultAllowedCommands),
-    adapter,
-    eventSink: new JsonlFileEventSink(join(scratchpadPath, "events.jsonl")),
-    contextBundlePath: writtenContext.jsonPath,
-  });
+  const perPassResults: HarnessRunResult[] = [];
+  const passFindingSets: Array<readonly Finding[]> = [];
+  const baseMetadata = {
+    adapter: adapter.name,
+    triage,
+    strict_mode: options.strict === true ? "true" : "false",
+    vcs_mode: vcsMode,
+    context_source: options.contextBundlePath === undefined ? "live" : "replay",
+    context_fingerprint: contextFingerprint,
+    ...options.metadata,
+  };
 
-  const rawResult = await orchestrator.run({
-    runId,
-    harnessId: codeReviewHarnessDefinition.id,
-    workspacePath,
-    scratchpadPath,
-    contextBundlePath: writtenContext.jsonPath,
-    strictMode: options.strict === true,
-    metadata: {
-      adapter: adapter.name,
-      triage,
-      strict_mode: options.strict === true ? "true" : "false",
-      vcs_mode: vcsMode,
-      context_source: options.contextBundlePath === undefined ? "live" : "replay",
-      context_fingerprint: contextFingerprint,
-      ...options.metadata,
-    },
-  });
+  for (let index = 0; index < consensusRuns; index += 1) {
+    const passNumber = index + 1;
+    const passScratchpadPath = consensusRuns === 1
+      ? scratchpadPath
+      : join(scratchpadPath, "passes", `pass-${passNumber}`);
+    await ensureDirectory(passScratchpadPath);
+    const passRunId = consensusRuns === 1 ? runId : `${runId}-pass${passNumber}`;
 
-  const findings = dedupeFindings(actionableFindings(rawResult.findings));
+    const orchestrator = new NativeBunOrchestrator({
+      definition: definitionForTriageWithCommands(triage, defaultAllowedCommands),
+      adapter,
+      eventSink: new JsonlFileEventSink(join(passScratchpadPath, "events.jsonl")),
+      contextBundlePath: writtenContext.jsonPath,
+    });
+
+    const rawResult = await orchestrator.run({
+      runId: passRunId,
+      harnessId: codeReviewHarnessDefinition.id,
+      workspacePath,
+      scratchpadPath: passScratchpadPath,
+      contextBundlePath: writtenContext.jsonPath,
+      strictMode: options.strict === true,
+      metadata: {
+        ...baseMetadata,
+        consensus_runs: String(consensusRuns),
+        consensus_pass: String(passNumber),
+      },
+    });
+    perPassResults.push(rawResult);
+    passFindingSets.push(dedupeFindings(actionableFindings(rawResult.findings)));
+  }
+
+  const rawResult = combinePassResults(runId, perPassResults, baseMetadata);
+  const findings = consensusRuns > 1
+    ? intersectFindingsByFingerprint(passFindingSets)
+    : passFindingSets[0] ?? [];
+  const totalActionable = passFindingSets.reduce((sum, set) => sum + set.length, 0);
+  const consensusDropped = Math.max(0, totalActionable - findings.length);
+
+  const rawMetadata = {
+    ...(rawResult.metadata ?? {}),
+    consensus_runs: String(consensusRuns),
+    consensus_mode: consensusRuns > 1 ? "intersection" : "off",
+    consensus_dropped_findings: String(consensusDropped),
+  };
+
   const findingStatus = statusForFindings(findings);
   const result: HarnessRunResult = {
     ...rawResult,
     status: combineStatuses(rawResult.status, findingStatus),
     findings,
+    metadata: rawMetadata,
     artifacts: [...rawResult.artifacts, writtenContext.jsonPath, writtenContext.markdownPath],
   };
 
@@ -180,6 +216,77 @@ export async function runCodeReview(
     contextBundlePath: writtenContext.jsonPath,
     artifacts: [...result.artifacts, reportPath, resultPath],
   };
+}
+
+function combinePassResults(
+  runId: string,
+  passResults: readonly HarnessRunResult[],
+  metadata: Readonly<Record<string, string>>,
+): HarnessRunResult {
+  const findings = passResults.flatMap((result) => result.findings);
+  const artifacts = passResults.flatMap((result) => result.artifacts);
+  const hasError = passResults.some((result) => result.status === "error");
+  const hasFailed = passResults.some((result) => result.status === "failed");
+  const timedOutRoles = joinUniqueMetadataRoleList(passResults, "timed_out_roles");
+  const failedRoles = joinUniqueMetadataRoleList(passResults, "failed_roles");
+  const completedRoles = joinUniqueMetadataRoleList(passResults, "completed_roles");
+  const hasTimedOut = timedOutRoles.length > 0;
+
+  return {
+    runId,
+    status: hasError ? "error" : hasFailed ? "failed" : hasTimedOut ? "warnings" : "passed",
+    findings,
+    artifacts,
+    metadata: {
+      ...metadata,
+      timed_out_roles: timedOutRoles,
+      failed_roles: failedRoles,
+      completed_roles: completedRoles,
+    },
+  };
+}
+
+function joinUniqueMetadataRoleList(
+  passResults: readonly HarnessRunResult[],
+  key: "timed_out_roles" | "failed_roles" | "completed_roles",
+): string {
+  const values = new Set<string>();
+  for (const result of passResults) {
+    const raw = result.metadata?.[key] ?? "";
+    for (const role of raw.split(",").map((item) => item.trim()).filter(Boolean)) {
+      values.add(role);
+    }
+  }
+  return [...values].join(",");
+}
+
+function intersectFindingsByFingerprint(perPassFindings: readonly (readonly Finding[])[]): readonly Finding[] {
+  if (perPassFindings.length === 0) {
+    return [];
+  }
+  const requiredCount = perPassFindings.length;
+  const counts = new Map<string, { count: number; finding: Finding }>();
+
+  for (const set of perPassFindings) {
+    const seenInPass = new Set<string>();
+    for (const finding of set) {
+      const key = findingFingerprint(finding);
+      if (seenInPass.has(key)) {
+        continue;
+      }
+      seenInPass.add(key);
+      const entry = counts.get(key);
+      if (entry === undefined) {
+        counts.set(key, { count: 1, finding });
+      } else {
+        entry.count += 1;
+      }
+    }
+  }
+
+  return [...counts.values()]
+    .filter((entry) => entry.count === requiredCount)
+    .map((entry) => entry.finding);
 }
 
 export function createFakeCodeReviewAdapter(
@@ -260,7 +367,7 @@ async function loadContextBundleFromPath(path: string): Promise<ContextBundle> {
 async function detectWorkspaceVcsMode(workspacePath: string): Promise<"jj" | "git" | "unknown"> {
   const hasJj = await pathExists(join(workspacePath, ".jj"));
   const hasGit = await pathExists(join(workspacePath, ".git"));
-  if (hasJj && !hasGit) {
+  if (hasJj) {
     return "jj";
   }
   if (hasGit) {
@@ -286,4 +393,14 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function normalizeConsensusRuns(value: number | undefined): number {
+  if (value === undefined) {
+    return 1;
+  }
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`Invalid consensusRuns value: ${value}. Expected a positive integer.`);
+  }
+  return value;
 }

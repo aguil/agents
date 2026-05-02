@@ -15,6 +15,7 @@ Options:
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
   --context-bundle <path> Reuse an existing context bundle JSON for replay
+  --consensus <n>        Run n passes and keep recurring findings
   --adapter <name>       Execution adapter: fake, opencode, or claude (default: fake)
   --model <id>           Model passed to opencode/claude
   --agent <name>         OpenCode agent name
@@ -52,10 +53,18 @@ Options:
       },
     });
 
+    const consensusRuns = parseConsensusRuns(options.consensus);
+    if (options.consensus !== undefined && consensusRuns === undefined) {
+      console.error(`Invalid --consensus value: ${options.consensus}`);
+      console.error("Expected a positive integer greater than 0.");
+      return 1;
+    }
+
     const result = await runCodeReview({
       workspacePath: options.workspace,
       scratchpadRoot: options.scratchpad,
       contextBundlePath: options.contextBundle,
+      consensusRuns,
       strict: options.strict,
       adapter,
     });
@@ -100,6 +109,7 @@ interface CliOptions {
   readonly workspace?: string;
   readonly scratchpad?: string;
   readonly contextBundle?: string;
+  readonly consensus?: string;
   readonly adapter?: string;
   readonly model?: string;
   readonly agent?: string;
@@ -157,6 +167,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
     workspace: options.workspace,
     scratchpad: options.scratchpad,
     contextBundle: options["context-bundle"],
+    consensus: options.consensus,
     adapter: options.adapter,
     model: options.model,
     agent: options.agent,
@@ -170,6 +181,17 @@ function parseOptions(argv: readonly string[]): CliOptions {
     pure: flags.has("pure"),
     printLogs: flags.has("print-logs"),
   };
+}
+
+function parseConsensusRuns(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || `${parsed}` !== value.trim()) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function parseAdapterName(value: string | undefined): CodeReviewAdapterName | undefined {
