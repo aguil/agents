@@ -44,6 +44,7 @@ export interface CodeReviewRunOptions {
   readonly runId?: string;
   readonly strict?: boolean;
   readonly contextBundlePath?: string;
+  readonly reviewPrNumber?: number;
   readonly consensusRuns?: number;
   readonly adapter?: AgentAdapter;
   readonly metadata?: Readonly<Record<string, string>>;
@@ -111,7 +112,7 @@ export async function runCodeReview(
   const context = options.contextBundlePath === undefined
     ? await collectContextBundle(
       `${runId}-context`,
-      { workspacePath, scratchpadPath },
+      { workspacePath, scratchpadPath, pullRequestNumber: options.reviewPrNumber },
       [
         new PullRequestMetadataProvider(),
         new PullRequestReferencedDocsProvider(),

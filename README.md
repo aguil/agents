@@ -25,6 +25,7 @@ bun run agents run code-review --adapter claude --model <model>
 bun run agents run code-review --adapter claude --model <model> --strict
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
@@ -73,6 +74,7 @@ The code-review harness also attempts to auto-discover the active PR, ingest PR 
 ## Human In The Loop
 
 - Run review locally from your working branch.
+- Use `--review-pr <number>` when you want context and diff collection from a specific PR (including merged PRs).
 - Inspect `report.md` for human-readable findings and `result.json` for machine-readable status.
 - Fix code or mark rationale in your PR description/comments.
 - Re-run until output is acceptable.

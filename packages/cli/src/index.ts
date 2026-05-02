@@ -26,6 +26,7 @@ Options:
   --no-deterministic     Disable deterministic adapter defaults
   --strict               Fail run on any role error or timeout
   --pending-review       Create an unsubmitted GitHub PR review
+  --review-pr <number>   PR number used for review context and diff collection
   --pr <number>          PR number for pending review (auto-discover if omitted)
   --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
   --pure                 Run opencode without external plugins
@@ -65,11 +66,17 @@ Options:
       return 1;
     }
     const consensusRuns = requestedConsensusRuns ?? (options.pendingReview ? 3 : undefined);
+    const reviewPrNumber = parsePrNumber(options.reviewPr);
+    if (options.reviewPr !== undefined && reviewPrNumber === undefined) {
+      console.error(`Invalid --review-pr value: ${options.reviewPr}`);
+      return 1;
+    }
 
     const result = await runCodeReview({
       workspacePath: options.workspace,
       scratchpadRoot: options.scratchpad,
       contextBundlePath: options.contextBundle,
+      reviewPrNumber,
       consensusRuns,
       strict: options.strict,
       metadata: await buildDeterminismMetadata(adapterName, effectiveAdapter, options, deterministicEnabled),
@@ -124,6 +131,7 @@ interface CliOptions {
   readonly opencode?: string;
   readonly claude?: string;
   readonly claudeArgs?: string;
+  readonly reviewPr?: string;
   readonly pr?: string;
   readonly reviewSummary?: string;
   readonly noDeterministic: boolean;
@@ -197,6 +205,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
     opencode: options.opencode,
     claude: options.claude,
     claudeArgs: options["claude-args"],
+    reviewPr: options["review-pr"],
     pr: options.pr,
     reviewSummary: options["review-summary"],
     noDeterministic: flags.has("no-deterministic"),
