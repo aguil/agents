@@ -543,6 +543,7 @@ function hasTimedOut(data: unknown): boolean {
 export interface OpenCodeAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
+  readonly variant?: string;
   readonly agent?: string;
   readonly pure?: boolean;
   readonly printLogs?: boolean;
@@ -614,6 +615,9 @@ export function buildOpenCodeCommand(
 
   if (options.model !== undefined) {
     cmd.push("--model", options.model);
+  }
+  if (options.variant !== undefined) {
+    cmd.push("--variant", options.variant);
   }
   if (options.agent !== undefined) {
     cmd.push("--agent", options.agent);

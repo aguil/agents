@@ -452,7 +452,13 @@ test("builds opencode command behind the adapter boundary", () => {
       allowedCommands: ["bun test"],
     },
     "/scratch/roles/security/security.request.json",
-    { executable: "opencode-test", model: "provider/model", agent: "reviewer", pure: true },
+    {
+      executable: "opencode-test",
+      model: "provider/model",
+      variant: "minimal",
+      agent: "reviewer",
+      pure: true,
+    },
   );
 
   expect(command.slice(0, 6)).toEqual([
@@ -464,6 +470,7 @@ test("builds opencode command behind the adapter boundary", () => {
     "/repo",
   ]);
   expect(command).toContain("provider/model");
+  expect(command).toContain("minimal");
   expect(command).toContain("reviewer");
   expect(command).toContain("--pure");
   expect(command.at(-1)).toContain("security code-review specialist");

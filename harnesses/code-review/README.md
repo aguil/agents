@@ -21,6 +21,9 @@ bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
+bun run agents run code-review --adapter claude --model <model>
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --no-deterministic
 ```
 
 ## Human-In-The-Loop Workflow
@@ -58,6 +61,14 @@ Consistency and replay mode:
 - `result.json` metadata includes `vcs_mode`, `context_source`, and `context_fingerprint` for run-to-run comparison.
 - `--consensus <n>` runs `n` review passes and keeps only findings that recur in every pass.
 - Consensus values must be positive integers (`n >= 1`).
+
+Deterministic mode:
+
+- Deterministic mode is enabled by default and emits deterministic metadata in `result.json`.
+- For OpenCode, deterministic defaults enable `--pure`; use `--variant <id>` to pin a provider-specific effort profile.
+- For Claude, deterministic defaults are conservative and do not add extra CLI args unless you explicitly pass `--claude-args`.
+- Use `--no-deterministic` to opt out.
+- Determinism remains best-effort because seed/temperature/top-p controls are not currently surfaced by this harness CLI.
 
 Review summary examples:
 
@@ -144,6 +155,8 @@ Core artifacts:
 - `metadata.consensus_runs`: number of passes requested
 - `metadata.consensus_mode`: `off` or `intersection`
 - `metadata.consensus_dropped_findings`: count filtered by consensus
+- `metadata.deterministic_mode`: `true` when deterministic profile is enabled
+- `metadata.opencode_*` / `metadata.claude_*`: adapter-specific model/runtime settings and detected executable version
 - `reportPath` and `contextBundlePath`
 
 `events.jsonl` also includes periodic role heartbeat events (`type: tool`) with elapsed time and byte counts so long-running reviews can be diagnosed while still running.
