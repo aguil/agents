@@ -16,6 +16,9 @@ Run locally with:
 bun run agents run code-review --adapter fake
 bun run agents run code-review --adapter opencode --model <provider/model>
 bun run agents run code-review --adapter claude --model <model>
+bun run agents run code-review --adapter claude --model <model> --strict
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
 ```
 
 ## Human-In-The-Loop Workflow
@@ -34,10 +37,65 @@ Current HITL boundaries:
 - Humans decide which findings to act on.
 - Role timeouts are treated as partial coverage warnings, not fatal harness errors.
 
+Strict mode:
+
+- `--strict` changes timeout and role-error behavior to fail-fast.
+- In strict mode, any role timeout or role error produces overall `error` status.
+
+Pending review mode:
+
+- `--pending-review` deletes existing pending reviews authored by the current user on the target PR, then creates a fresh unsubmitted review.
+- Use `--pr <number>` to target a specific PR, otherwise the current branch PR is auto-discovered.
+- Use `--review-summary <triage|impact|evidence>` to choose the review body format (`triage` is the default).
+- Only anchorable findings (`file` + `line`) are posted as inline comments.
+
+Review summary examples:
+
+- `triage` (default): use when the author needs immediate prioritization. This format emphasizes near-term actions with "Fix Now" and "Follow-up" sections so work can be sequenced quickly.
+
+  ```bash
+  bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary triage
+  ```
+
+  ```markdown
+  ## At a Glance
+  ## Fix Now
+  ## Follow-up
+  ```
+
+- `impact`: use when the PR crosses subsystem boundaries or multiple reviewers. Grouping by impact area (security, runtime/performance, correctness/quality, docs/compliance) helps route issues to the right owners.
+
+  ```bash
+  bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary impact
+  ```
+
+  ```markdown
+  ## Impact Summary
+  ### Security
+  ### Runtime / Performance
+  ### Correctness / Quality
+  ### Documentation / Compliance
+  ```
+
+- `evidence`: use when the author needs deeper rationale before acting. The "Why / Evidence / Fix" format is best for contentious findings, subtle behavior changes, or fixes that require tradeoff discussion.
+
+  ```bash
+  bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary evidence
+  ```
+
+  ```markdown
+  ## Why / Evidence / Fix
+  ### Finding 1: <title>
+  - Why: ...
+  - Evidence: ...
+  - Suggested fix: ...
+  ```
+
 ## PR Context Discovery
 
 - The harness auto-discovers the related PR for the current branch with `gh pr view`.
 - It reads PR title and description/body into review context.
+- The review diff is built from the PR base branch patch (`<base>...HEAD`), not untracked `.review-agent` artifacts.
 - It extracts docs/links referenced in the PR description.
 - It auto-fetches referenced docs only when they match the tracked remote's host and org.
 - If PR discovery or doc fetching fails, review continues with non-fatal context warnings.
@@ -56,6 +114,7 @@ Core artifacts:
 - `context/bundle.json` and `context/bundle.md`: collected context presented to reviewers.
 - `context/bundle.*` includes PR metadata and referenced documentation fetch results.
 - `roles/<role>/<role>.request.json`: per-role execution request payload.
+- `roles/<role>/stdout.log` and `roles/<role>/stderr.log`: raw subprocess output for timeout/failure debugging.
 
 `result.json` shape:
 
@@ -66,7 +125,10 @@ Core artifacts:
 - `metadata.timed_out_roles`: comma-separated roles that timed out
 - `metadata.failed_roles`: comma-separated roles that failed
 - `metadata.completed_roles`: comma-separated roles that completed
+- `metadata.strict_mode`: `true` when strict mode is enabled
 - `reportPath` and `contextBundlePath`
+
+`events.jsonl` also includes periodic role heartbeat events (`type: tool`) with elapsed time and byte counts so long-running reviews can be diagnosed while still running.
 
 CLI exit code:
 

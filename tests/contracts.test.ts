@@ -11,8 +11,11 @@ import {
 import {
   changedFilesFromDiff,
   classifyDiff,
+  filterReviewDiff,
   extractReferencedDocumentation,
+  parseRemoteHeadBranch,
   parseGitRemoteUrl,
+  resolvePreferredBaseBranch,
   selectPreferredRemoteName,
   shouldFetchReferencedUrl,
 } from "@aguil/agents-context";
@@ -26,6 +29,11 @@ import {
 } from "@aguil/agents-execution";
 import { actionableFindings, dedupeFindings, statusForFindings } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
+import {
+  buildPendingReviewSummaryBody,
+  findingsToPendingReviewComments,
+  parseReviewSummaryStyle,
+} from "../packages/cli/src/index";
 
 test("serializes agent events as JSONL", () => {
   const event: AgentEvent = {
@@ -93,6 +101,46 @@ test("prefers tracking remote before origin", () => {
       remoteNames: ["origin", "upstream"],
     }),
   ).toBe("origin");
+});
+
+test("parses remote HEAD branch names", () => {
+  expect(parseRemoteHeadBranch("refs/remotes/origin/main\n")).toBe("main");
+  expect(parseRemoteHeadBranch(undefined)).toBeUndefined();
+});
+
+test("resolves preferred base branch from remote HEAD first", async () => {
+  const commands: string[] = [];
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "git" && cmd[1] === "symbolic-ref") {
+      return "refs/remotes/origin/main\n";
+    }
+    return undefined;
+  };
+
+  expect(await resolvePreferredBaseBranch("/repo", commandRunner, "origin")).toBe("main");
+  expect(commands.at(0)).toContain("refs/remotes/origin/HEAD");
+});
+
+test("filters harness artifacts out of review diff", () => {
+  const diff = `diff --git a/.review-agent/runs/foo/result.json b/.review-agent/runs/foo/result.json
+index a..b 100644
+--- a/.review-agent/runs/foo/result.json
++++ b/.review-agent/runs/foo/result.json
+@@ -1 +1 @@
+-old
++new
+diff --git a/src/app.ts b/src/app.ts
+index c..d 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-a
++b`;
+
+  const filtered = filterReviewDiff(diff);
+  expect(filtered).toContain("diff --git a/src/app.ts b/src/app.ts");
+  expect(filtered).not.toContain(".review-agent/runs/foo/result.json");
 });
 
 test("extracts referenced docs from PR descriptions", () => {
@@ -186,6 +234,114 @@ test("normalizes finding JSONL emitted by an agent", () => {
   expect(events).toHaveLength(1);
   expect(events[0]?.type).toBe("finding");
   expect(events[0]?.data).toEqual(finding);
+});
+
+test("creates pending PR review comments only for anchorable findings", () => {
+  const anchorable: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Anchored issue",
+    description: "A validated review finding.",
+    evidence: "The reproduction passed.",
+    sourceRole: "quality",
+    file: "src/app.ts",
+    line: 12,
+    validation: { status: "verified", details: "Reproduced locally." },
+  };
+  const summaryOnly: Finding = {
+    ...anchorable,
+    id: "finding-2",
+    file: undefined,
+  };
+
+  const comments = findingsToPendingReviewComments([anchorable, summaryOnly]);
+  expect(comments).toHaveLength(1);
+  expect(comments[0]).toEqual({
+    path: "src/app.ts",
+    line: 12,
+    side: "RIGHT",
+    body: expect.stringContaining("Anchored issue"),
+  });
+});
+
+test("defaults review summary style to triage", () => {
+  expect(parseReviewSummaryStyle(undefined)).toBe("triage");
+});
+
+test("rejects invalid review summary style", () => {
+  expect(parseReviewSummaryStyle("unknown")).toBeUndefined();
+});
+
+test("builds triage review summary body", () => {
+  const finding: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Anchored issue",
+    description: "A validated review finding.",
+    evidence: "The reproduction passed.",
+    sourceRole: "quality",
+    file: "src/app.ts",
+    line: 12,
+    validation: { status: "verified", details: "Reproduced locally." },
+  };
+
+  const body = buildPendingReviewSummaryBody({
+    style: "triage",
+    findings: [finding],
+    postedCommentCount: 1,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("## At a Glance");
+  expect(body).toContain("## Fix Now");
+});
+
+test("builds impact review summary body", () => {
+  const finding: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Perf issue",
+    description: "A validated review finding.",
+    evidence: "The reproduction passed.",
+    sourceRole: "performance",
+    file: "src/app.ts",
+    line: 12,
+    validation: { status: "verified", details: "Reproduced locally." },
+  };
+
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [finding],
+    postedCommentCount: 1,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("## Impact Summary");
+  expect(body).toContain("### Runtime / Performance");
+});
+
+test("builds evidence review summary body", () => {
+  const finding: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Doc mismatch",
+    description: "A validated review finding.",
+    evidence: "The reproduction passed.",
+    sourceRole: "compliance",
+    file: "README.md",
+    line: 12,
+    validation: { status: "verified", details: "Reproduced locally." },
+  };
+
+  const body = buildPendingReviewSummaryBody({
+    style: "evidence",
+    findings: [finding],
+    postedCommentCount: 1,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("## Why / Evidence / Fix");
+  expect(body).toContain("### Finding 1: Doc mismatch");
 });
 
 test("builds opencode command behind the adapter boundary", () => {
@@ -323,6 +479,53 @@ test("marks subprocess agents as timed out", async () => {
   }
 });
 
+test("captures subprocess stdout/stderr artifacts for debugging", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-streaming-"));
+  try {
+    const adapter = new SubprocessAgentAdapter({
+      name: "streaming-test-agent",
+      capabilities: {
+        streaming: true,
+        structuredOutput: true,
+        readOnlyMode: true,
+        mcp: false,
+        cancellation: true,
+      },
+      buildCommand: () => ({
+        cmd: [
+          process.execPath,
+          "--eval",
+          "console.log('stream-stdout'); console.error('stream-stderr');",
+        ],
+        cwd: tempDir,
+      }),
+      heartbeatIntervalMs: 5,
+    });
+
+    const run = await collectAgentRun(adapter, {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: tempDir,
+      contextBundlePath: join(tempDir, "context.json"),
+      scratchpadPath: tempDir,
+      timeoutMs: 1_000,
+      allowedCommands: [],
+    });
+
+    expect(run.events.some((event) => event.type === "stdout" && event.message === "stream-stdout")).toBe(
+      true,
+    );
+    expect(run.events.some((event) => event.type === "stderr" && event.message === "stream-stderr")).toBe(
+      true,
+    );
+    expect(await readFile(join(tempDir, "stdout.log"), "utf8")).toContain("stream-stdout");
+    expect(await readFile(join(tempDir, "stderr.log"), "utf8")).toContain("stream-stderr");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("handles missing subprocess binaries as adapter failures", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "agents-missing-binary-"));
   try {
@@ -451,9 +654,48 @@ test("treats timed out roles as warnings with partial coverage metadata", async 
     });
 
     expect(result.status).toBe("warnings");
+    expect(result.metadata?.strict_mode).toBe("false");
     expect(result.metadata?.timed_out_roles).toBe("quality");
     expect(result.metadata?.failed_roles).toBe("");
     expect(await readFile(result.reportPath, "utf8")).toContain("Execution Notes");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("strict mode fails run on timed out roles", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-timeout-strict-"));
+  try {
+    const result = await runCodeReview({
+      workspacePath: tempDir,
+      scratchpadRoot: join(tempDir, "scratchpad"),
+      runId: "test-timeout-run-strict",
+      strict: true,
+      adapter: {
+        name: "timeout-test-agent",
+        capabilities: () => ({
+          streaming: true,
+          structuredOutput: true,
+          readOnlyMode: true,
+          mcp: false,
+          cancellation: true,
+        }),
+        async *run(request) {
+          yield {
+            timestamp: "2026-05-02T00:00:00.000Z",
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "error" as const,
+            message: "timed out",
+            data: { reason: "timed_out", timeoutMs: 420_000 },
+          };
+        },
+      },
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.metadata?.strict_mode).toBe("true");
+    expect(result.metadata?.timed_out_roles).toBe("quality");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

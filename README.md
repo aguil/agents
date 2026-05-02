@@ -22,6 +22,23 @@ bun test
 bun run agents run code-review --adapter fake
 bun run agents run code-review --adapter opencode --model <provider/model>
 bun run agents run code-review --adapter claude --model <model>
+bun run agents run code-review --adapter claude --model <model> --strict
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
+```
+
+## Review Summary Options
+
+- `triage` (default): choose this when the PR author needs a fast, action-first queue. It surfaces what to fix immediately vs what can wait in follow-up.
+- `impact`: choose this when changes span multiple concerns or teams. It groups findings by domain (security, performance, quality, compliance) so owners can pick up the right slice quickly.
+- `evidence`: choose this when findings are nuanced, likely to be debated, or need stronger context. It expands each finding into "Why / Evidence / Fix" to support remediation decisions.
+
+Examples:
+
+```bash
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary triage
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary evidence
 ```
 
 ## Principles
@@ -46,6 +63,6 @@ The code-review harness also attempts to auto-discover the active PR, ingest PR 
 - Inspect `report.md` for human-readable findings and `result.json` for machine-readable status.
 - Fix code or mark rationale in your PR description/comments.
 - Re-run until output is acceptable.
-- Post findings to PR manually (auto-post is not implemented yet).
+- Optionally post findings as an unsubmitted PR review with `--pending-review`.
 
 See `harnesses/code-review/README.md` for the concrete run workflow and expected output artifacts.
