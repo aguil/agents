@@ -29,7 +29,12 @@ import {
   normalizeAgentOutputLine,
   validateFinding,
 } from "@aguil/agents-execution";
-import { actionableFindings, dedupeFindings, statusForFindings } from "@aguil/agents-reporting";
+import {
+  actionableFindings,
+  dedupeFindings,
+  findingFingerprint,
+  statusForFindings,
+} from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
 import {
   buildPendingReviewSummaryBody,
@@ -228,6 +233,30 @@ test("dedupes findings and derives severity status", () => {
 
   expect(deduped).toHaveLength(1);
   expect(statusForFindings(deduped)).toBe("failed");
+});
+
+test("dedupes semantically equivalent findings with phrasing drift", () => {
+  const base: Finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "Event sink does directory checks on every emitted event",
+    description: "Event sink runs ensureDirectory on every write and orchestration awaits each call.",
+    evidence: "JsonlFileEventSink.write calls ensureDirectory(dirname(path)) before appendFile.",
+    sourceRole: "performance",
+    file: "packages/telemetry/src/index.ts",
+    line: 18,
+    validation: { status: "verified", details: "Code-path review." },
+  };
+  const rephrased: Finding = {
+    ...base,
+    id: "finding-2",
+    title: "Per-event ensureDirectory adds avoidable filesystem overhead",
+    description: "Each telemetry event performs a directory check and the orchestrator waits on it.",
+    evidence: "The event sink performs ensureDirectory before appending JSONL for each event.",
+  };
+
+  expect(findingFingerprint(base).split("|")[0]).toBe("performance");
+  expect(dedupeFindings([base, rephrased])).toHaveLength(1);
 });
 
 test("validates finding shape before accepting agent output", () => {

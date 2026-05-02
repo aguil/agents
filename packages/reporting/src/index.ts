@@ -13,11 +13,7 @@ export function dedupeFindings(findings: readonly Finding[]): readonly Finding[]
   const deduped: Finding[] = [];
 
   for (const finding of sortFindings(findings)) {
-    const key = [
-      finding.file ?? "",
-      finding.line?.toString() ?? "",
-      finding.title.toLowerCase().trim(),
-    ].join(":");
+    const key = findingFingerprint(finding);
     if (seen.has(key)) {
       continue;
     }
@@ -26,6 +22,17 @@ export function dedupeFindings(findings: readonly Finding[]): readonly Finding[]
   }
 
   return deduped;
+}
+
+export function findingFingerprint(finding: Finding): string {
+  if (finding.file !== undefined && finding.line !== undefined) {
+    return [finding.sourceRole, `${finding.file}:${finding.line}`].join("|");
+  }
+  if (finding.file !== undefined) {
+    return [finding.sourceRole, finding.file, semanticSignature(finding.title)].join("|");
+  }
+  const semantic = semanticSignature([finding.title, finding.description, finding.evidence].join(" "));
+  return [finding.sourceRole, semantic].join("|");
 }
 
 export function statusForFindings(findings: readonly Finding[]): HarnessRunResult["status"] {
@@ -132,4 +139,58 @@ function parseRoleList(value: string | undefined): readonly string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+const STOP_WORDS = new Set([
+  "this",
+  "that",
+  "with",
+  "from",
+  "into",
+  "only",
+  "when",
+  "where",
+  "would",
+  "should",
+  "could",
+  "using",
+  "used",
+  "than",
+  "then",
+  "there",
+  "their",
+  "because",
+  "which",
+  "while",
+  "have",
+  "has",
+  "been",
+  "were",
+  "through",
+]);
+
+function semanticSignature(text: string): string {
+  const tokens = (text.toLowerCase().match(/[a-z0-9_]+/g) ?? [])
+    .filter((token) => token.length >= 4)
+    .filter((token) => !STOP_WORDS.has(token));
+  if (tokens.length === 0) {
+    return text.toLowerCase().trim().replace(/\s+/g, " ");
+  }
+
+  const counts = new Map<string, number>();
+  for (const token of tokens) {
+    counts.set(token, (counts.get(token) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => {
+      const byCount = right[1] - left[1];
+      if (byCount !== 0) {
+        return byCount;
+      }
+      return left[0].localeCompare(right[0]);
+    })
+    .slice(0, 8)
+    .map(([token]) => token)
+    .join(".");
 }
