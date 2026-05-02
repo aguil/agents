@@ -69,6 +69,8 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
       .join("\n");
   });
 
+  const executionNotes = buildExecutionNotes(result.metadata);
+
   return [
     "# Code Review Report",
     "",
@@ -76,6 +78,8 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
     `Status: ${result.status}`,
     `Summary: ${summary}`,
     "",
+    ...executionNotes,
+    ...executionNotes.length > 0 ? [""] : [],
     ...sections,
     "",
   ].join("\n");
@@ -93,4 +97,37 @@ function sortFindings(findings: readonly Finding[]): readonly Finding[] {
 
 function severityRank(severity: Finding["severity"]): number {
   return severity === "critical" ? 0 : 1;
+}
+
+function buildExecutionNotes(
+  metadata: Readonly<Record<string, string>> | undefined,
+): readonly string[] {
+  if (metadata === undefined) {
+    return [];
+  }
+
+  const timedOutRoles = parseRoleList(metadata.timed_out_roles);
+  const failedRoles = parseRoleList(metadata.failed_roles);
+  if (timedOutRoles.length === 0 && failedRoles.length === 0) {
+    return [];
+  }
+
+  const notes = ["## Execution Notes"];
+  if (timedOutRoles.length > 0) {
+    notes.push(`- Timed out roles: ${timedOutRoles.join(", ")}`);
+  }
+  if (failedRoles.length > 0) {
+    notes.push(`- Failed roles: ${failedRoles.join(", ")}`);
+  }
+  return notes;
+}
+
+function parseRoleList(value: string | undefined): readonly string[] {
+  if (value === undefined || value.trim().length === 0) {
+    return [];
+  }
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }

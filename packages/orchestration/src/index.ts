@@ -45,14 +45,32 @@ export class NativeBunOrchestrator implements Orchestrator {
     );
     const findings = outcomes.flatMap((outcome) => outcome.findings);
     const artifacts = outcomes.flatMap((outcome) => outcome.artifacts);
-    const hasErrors = outcomes.some((outcome) => outcome.failed);
+    const timedOutRoles = outcomes
+      .filter((outcome) => outcome.outcome === "timed_out")
+      .map((outcome) => outcome.roleId);
+    const failedRoles = outcomes
+      .filter((outcome) => outcome.outcome === "failed")
+      .map((outcome) => outcome.roleId);
+    const completedRoles = outcomes
+      .filter((outcome) => outcome.outcome === "completed")
+      .map((outcome) => outcome.roleId);
+
+    const metadata: Record<string, string> = {
+      ...(request.metadata ?? {}),
+      timed_out_roles: timedOutRoles.join(","),
+      failed_roles: failedRoles.join(","),
+      completed_roles: completedRoles.join(","),
+    };
 
     const result: HarnessRunResult = {
       runId: request.runId,
-      status: hasErrors ? "error" : statusFromFindings(findings),
+      status: statusFromOutcomes(findings, {
+        timedOutRoles,
+        failedRoles,
+      }),
       findings,
       artifacts,
-      metadata: request.metadata,
+      metadata,
     };
 
     await writeJsonFile(join(request.scratchpadPath, "result.raw.json"), result);
@@ -63,15 +81,16 @@ export class NativeBunOrchestrator implements Orchestrator {
     request: HarnessRunRequest,
     role: RoleDefinition,
   ): Promise<{
+    readonly roleId: string;
     readonly findings: readonly Finding[];
     readonly artifacts: readonly string[];
-    readonly failed: boolean;
+    readonly outcome: "completed" | "timed_out" | "failed";
   }> {
     const roleScratchpadPath = join(request.scratchpadPath, "roles", role.id);
     await ensureDirectory(roleScratchpadPath);
     const prompt = await readPrompt(role);
     const findings: Finding[] = [];
-    let failed = false;
+    let outcome: "completed" | "timed_out" | "failed" = "completed";
 
     const agentRequest: AgentRunRequest = {
       runId: request.runId,
@@ -92,14 +111,15 @@ export class NativeBunOrchestrator implements Orchestrator {
         findings.push(event.data);
       }
       if (event.type === "error") {
-        failed = true;
+        outcome = hasTimedOut(event.data) ? "timed_out" : "failed";
       }
     }
 
     return {
+      roleId: role.id,
       findings,
       artifacts: [roleScratchpadPath],
-      failed,
+      outcome,
     };
   }
 }
@@ -122,6 +142,34 @@ function statusFromFindings(findings: readonly Finding[]): HarnessRunResult["sta
     return "warnings";
   }
   return "passed";
+}
+
+function statusFromOutcomes(
+  findings: readonly Finding[],
+  outcomes: {
+    readonly timedOutRoles: readonly string[];
+    readonly failedRoles: readonly string[];
+  },
+): HarnessRunResult["status"] {
+  if (outcomes.failedRoles.length > 0) {
+    return "error";
+  }
+  const findingStatus = statusFromFindings(findings);
+  if (findingStatus === "failed") {
+    return "failed";
+  }
+  if (findingStatus === "warnings" || outcomes.timedOutRoles.length > 0) {
+    return "warnings";
+  }
+  return "passed";
+}
+
+function hasTimedOut(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { readonly reason?: unknown }).reason === "timed_out"
+  );
 }
 
 function assertAdapterCapabilities(adapter: AgentAdapter, definition: HarnessDefinition): void {

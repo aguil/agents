@@ -420,3 +420,41 @@ test("preserves adapter errors in final harness status", async () => {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("treats timed out roles as warnings with partial coverage metadata", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-timeout-"));
+  try {
+    const result = await runCodeReview({
+      workspacePath: tempDir,
+      scratchpadRoot: join(tempDir, "scratchpad"),
+      runId: "test-timeout-run",
+      adapter: {
+        name: "timeout-test-agent",
+        capabilities: () => ({
+          streaming: true,
+          structuredOutput: true,
+          readOnlyMode: true,
+          mcp: false,
+          cancellation: true,
+        }),
+        async *run(request) {
+          yield {
+            timestamp: "2026-05-02T00:00:00.000Z",
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "error" as const,
+            message: "timed out",
+            data: { reason: "timed_out", timeoutMs: 180_000 },
+          };
+        },
+      },
+    });
+
+    expect(result.status).toBe("warnings");
+    expect(result.metadata?.timed_out_roles).toBe("quality");
+    expect(result.metadata?.failed_roles).toBe("");
+    expect(await readFile(result.reportPath, "utf8")).toContain("Execution Notes");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

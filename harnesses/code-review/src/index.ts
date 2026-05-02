@@ -138,9 +138,10 @@ export async function runCodeReview(
   });
 
   const findings = dedupeFindings(actionableFindings(rawResult.findings));
+  const findingStatus = statusForFindings(findings);
   const result: HarnessRunResult = {
     ...rawResult,
-    status: rawResult.status === "error" ? "error" : statusForFindings(findings),
+    status: combineStatuses(rawResult.status, findingStatus),
     findings,
     artifacts: [...rawResult.artifacts, writtenContext.jsonPath, writtenContext.markdownPath],
   };
@@ -200,4 +201,20 @@ function parseTriageTier(value: string | undefined): ReviewTriageTier {
     return value;
   }
   return "lite";
+}
+
+function combineStatuses(
+  rawStatus: HarnessRunResult["status"],
+  findingStatus: HarnessRunResult["status"],
+): HarnessRunResult["status"] {
+  if (rawStatus === "error") {
+    return "error";
+  }
+  if (rawStatus === "failed" || findingStatus === "failed") {
+    return "failed";
+  }
+  if (rawStatus === "warnings" || findingStatus === "warnings") {
+    return "warnings";
+  }
+  return "passed";
 }
