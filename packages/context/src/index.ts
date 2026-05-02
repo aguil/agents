@@ -6,6 +6,7 @@ import { isAbsolute, join, resolve } from "node:path";
 export interface ContextRequest {
   readonly workspacePath: string;
   readonly diffPath?: string;
+  readonly pullRequestNumber?: number;
   readonly scratchpadPath: string;
 }
 
@@ -49,6 +50,12 @@ export interface RemoteScope {
 
 export interface ParsedGitRemoteUrl {
   readonly host: string;
+  readonly owner: string;
+  readonly repo: string;
+}
+
+interface PullRequestRepoScope {
+  readonly host?: string;
   readonly owner: string;
   readonly repo: string;
 }
@@ -103,7 +110,11 @@ export class PullRequestMetadataProvider implements ContextProvider {
   }
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const pullRequest = await discoverPullRequest(request.workspacePath, this.commandRunner);
+    const pullRequest = await discoverPullRequest(
+      request.workspacePath,
+      this.commandRunner,
+      request.pullRequestNumber,
+    );
     if (pullRequest === undefined) {
       return [
         {
@@ -140,7 +151,11 @@ export class PullRequestReferencedDocsProvider implements ContextProvider {
   }
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const pullRequest = await discoverPullRequest(request.workspacePath, this.commandRunner);
+    const pullRequest = await discoverPullRequest(
+      request.workspacePath,
+      this.commandRunner,
+      request.pullRequestNumber,
+    );
     if (pullRequest === undefined) {
       return [
         {
@@ -233,7 +248,7 @@ export class RepositoryDiffProvider implements ContextProvider {
           baseRef: undefined,
           strategy: "explicit_diff_path",
         }
-      : await collectReviewDiff(request.workspacePath, this.commandRunner);
+      : await collectReviewDiff(request.workspacePath, this.commandRunner, request.pullRequestNumber);
 
     return [
       {
@@ -334,12 +349,36 @@ export async function collectRepositoryDiff(workspacePath: string): Promise<stri
 export async function collectReviewDiff(
   workspacePath: string,
   commandRunner: CommandRunner = runCommand,
+  pullRequestNumber?: number,
 ): Promise<{
   readonly diff: string;
   readonly baseRef?: string;
   readonly strategy: string;
 }> {
-  const pullRequest = await discoverPullRequest(workspacePath, commandRunner);
+  if (pullRequestNumber !== undefined) {
+    const pullRequest = await discoverPullRequest(workspacePath, commandRunner, pullRequestNumber);
+    const remoteScope = await resolvePreferredRemoteScope(workspacePath, commandRunner);
+    const repoScope = pullRequest !== undefined
+      ? parsePullRequestRepoScope(pullRequest.url)
+      : undefined;
+    const patch = await fetchPullRequestPatch(
+      commandRunner,
+      workspacePath,
+      {
+        number: pullRequestNumber,
+        repoScope: repoScope ?? remoteScope,
+      },
+    );
+    if (patch !== undefined) {
+      return {
+        diff: filterReviewDiff(patch),
+        baseRef: undefined,
+        strategy: "explicit_pr_patch",
+      };
+    }
+  }
+
+  const pullRequest = await discoverPullRequest(workspacePath, commandRunner, pullRequestNumber);
   const remoteScope = await resolvePreferredRemoteScope(workspacePath, commandRunner);
   const baseCandidates = pullRequest?.baseRefName !== undefined
     ? [pullRequest.baseRefName]
@@ -376,6 +415,32 @@ export async function collectReviewDiff(
     baseRef: undefined,
     strategy: "working_copy_fallback",
   };
+}
+
+async function fetchPullRequestPatch(
+  commandRunner: CommandRunner,
+  workspacePath: string,
+  input: {
+    readonly number: number;
+    readonly repoScope?: PullRequestRepoScope;
+  },
+): Promise<string | undefined> {
+  const ownerRepo = input.repoScope !== undefined
+    ? `${input.repoScope.owner}/${input.repoScope.repo}`
+    : undefined;
+  if (ownerRepo === undefined) {
+    return undefined;
+  }
+
+  const args = [
+    "gh",
+    "api",
+    ...(input.repoScope?.host !== undefined ? ["--hostname", input.repoScope.host] : []),
+    "-H",
+    "Accept: application/vnd.github.v3.diff",
+    `repos/${ownerRepo}/pulls/${input.number}`,
+  ];
+  return commandRunner(args, workspacePath);
 }
 
 export function filterReviewDiff(diff: string): string {
@@ -466,9 +531,17 @@ export function parseRemoteHeadBranch(value: string | undefined): string | undef
 export async function discoverPullRequest(
   workspacePath: string,
   commandRunner: CommandRunner = runCommand,
+  pullRequestNumber?: number,
 ): Promise<PullRequestMetadata | undefined> {
   const json = await commandRunner(
-    ["gh", "pr", "view", "--json", "number,title,body,url,baseRefName"],
+    [
+      "gh",
+      "pr",
+      "view",
+      ...(pullRequestNumber !== undefined ? [String(pullRequestNumber)] : []),
+      "--json",
+      "number,title,body,url,baseRefName",
+    ],
     workspacePath,
   );
   if (json === undefined) {
@@ -587,6 +660,28 @@ export function parseGitRemoteUrl(value: string): ParsedGitRemoteUrl | undefined
       owner: sshLike[2] ?? "",
       repo: sshLike[3] ?? "",
     };
+  }
+}
+
+export function parsePullRequestRepoScope(url: string): PullRequestRepoScope | undefined {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.replace(/^\//, "").split("/");
+    if ((parts[2] ?? "") !== "pull") {
+      return undefined;
+    }
+    const owner = parts[0];
+    const repo = parts[1];
+    if (owner === undefined || owner.length === 0 || repo === undefined || repo.length === 0) {
+      return undefined;
+    }
+    return {
+      host: parsed.host,
+      owner,
+      repo,
+    };
+  } catch {
+    return undefined;
   }
 }
 

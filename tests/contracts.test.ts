@@ -11,11 +11,14 @@ import {
 import {
   changedFilesFromDiff,
   classifyDiff,
+  collectReviewDiff,
+  discoverPullRequest,
   filterReviewDiff,
   extractReferencedDocumentation,
   PullRequestReferencedDocsProvider,
   parseRemoteHeadBranch,
   parseGitRemoteUrl,
+  parsePullRequestRepoScope,
   resolvePreferredBaseBranch,
   selectPreferredRemoteName,
   shouldFetchReferencedUrl,
@@ -100,6 +103,15 @@ test("parses git remote URLs for host/org scope", () => {
   });
 });
 
+test("parses owner and repo from pull request URLs", () => {
+  expect(parsePullRequestRepoScope("https://github.com/aguil/agents/pull/42")).toEqual({
+    host: "github.com",
+    owner: "aguil",
+    repo: "agents",
+  });
+  expect(parsePullRequestRepoScope("https://github.com/aguil/agents/issues/42")).toBeUndefined();
+});
+
 test("prefers tracking remote before origin", () => {
   expect(
     selectPreferredRemoteName({
@@ -133,6 +145,85 @@ test("resolves preferred base branch from remote HEAD first", async () => {
 
   expect(await resolvePreferredBaseBranch("/repo", commandRunner, "origin")).toBe("main");
   expect(commands.at(0)).toContain("refs/remotes/origin/HEAD");
+});
+
+test("discovers pull request by explicit number", async () => {
+  const commands: string[] = [];
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    return JSON.stringify({
+      number: 42,
+      title: "Merged PR",
+      body: "Body",
+      url: "https://github.com/aguil/agents/pull/42",
+      baseRefName: "main",
+    });
+  };
+
+  const discovered = await discoverPullRequest("/repo", commandRunner, 42);
+  expect(discovered?.number).toBe(42);
+  expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName");
+});
+
+test("prefers explicit PR patch diff when review PR is provided", async () => {
+  const commands: string[] = [];
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 42,
+        title: "Merged PR",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/42",
+        baseRefName: "main",
+      });
+    }
+    if (cmd[0] === "gh" && cmd[1] === "api") {
+      return `diff --git a/.review-agent/runs/foo/result.json b/.review-agent/runs/foo/result.json
++ignored
+diff --git a/src/main.ts b/src/main.ts
++added`;
+    }
+    return undefined;
+  };
+
+  const result = await collectReviewDiff("/repo", commandRunner, 42);
+  expect(result.strategy).toBe("explicit_pr_patch");
+  expect(result.diff).toContain("diff --git a/src/main.ts b/src/main.ts");
+  expect(result.diff).not.toContain(".review-agent/runs/foo/result.json");
+  expect(commands).toContain(
+    "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
+  );
+});
+
+test("falls back to base diff when explicit PR patch is unavailable", async () => {
+  const commands: string[] = [];
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 42,
+        title: "Merged PR",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/42",
+        baseRefName: "main",
+      });
+    }
+    if (cmd[0] === "git" && cmd[1] === "diff" && cmd[3] === "main...HEAD") {
+      return "diff --git a/src/a.ts b/src/a.ts\n+new";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "api") {
+      return undefined;
+    }
+    return undefined;
+  };
+
+  const result = await collectReviewDiff("/repo", commandRunner, 42);
+  expect(result.strategy).toBe("pr_base_git");
+  expect(result.baseRef).toBe("main");
+  expect(commands).toContain(
+    "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
+  );
 });
 
 test("filters harness artifacts out of review diff", () => {
