@@ -12,6 +12,7 @@
     "paths": {
       "@aguil/agents-context": ["packages/context/src/index.ts"],
       "@aguil/agents-core": ["packages/core/src/index.ts"],
+      "@aguil/agents-code-review": ["harnesses/code-review/src/index.ts"],
       "@aguil/agents-execution": ["packages/execution/src/index.ts"],
       "@aguil/agents-orchestration": ["packages/orchestration/src/index.ts"],
       "@aguil/agents-reporting": ["packages/reporting/src/index.ts"],

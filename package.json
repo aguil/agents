@@ -9,6 +9,7 @@
     "harnesses/*"
   ],
   "scripts": {
+    "agents": "bun run packages/cli/src/index.ts",
     "check": "bun run typecheck",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

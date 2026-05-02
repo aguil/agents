@@ -1,5 +1,5 @@
 {
-  "name": "@aguil/agents-orchestration",
+  "name": "@aguil/agents-code-review",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,8 +7,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@aguil/agents-context": "workspace:*",
     "@aguil/agents-core": "workspace:*",
     "@aguil/agents-execution": "workspace:*",
+    "@aguil/agents-orchestration": "workspace:*",
+    "@aguil/agents-reporting": "workspace:*",
     "@aguil/agents-telemetry": "workspace:*"
   }
 }
