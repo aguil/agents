@@ -23,7 +23,7 @@ Options:
   --strict               Fail run on any role error or timeout
   --pending-review       Create an unsubmitted GitHub PR review
   --pr <number>          PR number for pending review (auto-discover if omitted)
-  --review-summary <id>  Review summary style: triage, impact, evidence (default: triage)
+  --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
   --pure                 Run opencode without external plugins
   --print-logs           Ask opencode to print logs to stderr`);
     return 0;
@@ -75,7 +75,7 @@ Options:
       const posted = await replacePendingPullRequestReview({
         findings: result.findings,
         prNumber,
-        reviewSummaryStyle: reviewSummaryStyle ?? "triage",
+        reviewSummaryStyle: reviewSummaryStyle ?? "impact",
       });
       console.log(
         `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} inline comments.`,
@@ -196,7 +196,7 @@ function parsePrNumber(value: string | undefined): number | undefined {
 
 export function parseReviewSummaryStyle(value: string | undefined): ReviewSummaryStyle | undefined {
   if (value === undefined) {
-    return "triage";
+    return "impact";
   }
   if (value === "triage" || value === "impact" || value === "evidence") {
     return value;

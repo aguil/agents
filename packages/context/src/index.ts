@@ -1,6 +1,6 @@
 import { ensureDirectory, writeJsonFile, writeTextFile } from "@aguil/agents-core";
 import type { ReviewTriageTier } from "@aguil/agents-core";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
 export interface ContextRequest {
@@ -459,8 +459,8 @@ export function parseRemoteHeadBranch(value: string | undefined): string | undef
     return undefined;
   }
   const trimmed = value.trim();
-  const parts = trimmed.split("/");
-  return parts.length >= 4 ? parts.at(-1) : undefined;
+  const match = /^refs\/remotes\/[^/]+\/(.+)$/.exec(trimmed);
+  return match?.[1];
 }
 
 export async function discoverPullRequest(
@@ -689,19 +689,24 @@ async function collectLocalReferencedDoc(
   localPath: string,
   index: number,
 ): Promise<ContextArtifact | undefined> {
-  const candidate = isAbsolute(localPath)
+  const candidatePath = isAbsolute(localPath)
     ? localPath
     : resolve(workspacePath, localPath.replace(/^\.\//, ""));
-  if (!isPathInsideWorkspace(candidate, workspacePath)) {
-    return undefined;
-  }
 
   try {
-    const content = await readFile(candidate, "utf8");
+    const [workspaceRealPath, candidateRealPath] = await Promise.all([
+      realpath(workspacePath),
+      realpath(candidatePath),
+    ]);
+    if (!isPathInsideWorkspace(candidateRealPath, workspaceRealPath)) {
+      return undefined;
+    }
+
+    const content = await readFile(candidateRealPath, "utf8");
     return {
       id: `pr-doc-local-${index + 1}`,
       title: `PR Referenced Local Doc: ${localPath}`,
-      path: candidate,
+      path: candidateRealPath,
       content,
     };
   } catch {

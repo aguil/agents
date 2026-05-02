@@ -29,8 +29,8 @@ bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
 
 ## Review Summary Options
 
-- `triage` (default): choose this when the PR author needs a fast, action-first queue. It surfaces what to fix immediately vs what can wait in follow-up.
-- `impact`: choose this when changes span multiple concerns or teams. It groups findings by domain (security, performance, quality, compliance) so owners can pick up the right slice quickly.
+- `triage`: choose this when the PR author needs a fast, action-first queue. It surfaces what to fix immediately vs what can wait in follow-up.
+- `impact` (default): choose this when changes span multiple concerns or teams. It groups findings by domain (security, performance, quality, compliance) so owners can pick up the right slice quickly.
 - `evidence`: choose this when findings are nuanced, likely to be debated, or need stronger context. It expands each finding into "Why / Evidence / Fix" to support remediation decisions.
 
 Examples:

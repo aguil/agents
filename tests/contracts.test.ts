@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,6 +13,7 @@ import {
   classifyDiff,
   filterReviewDiff,
   extractReferencedDocumentation,
+  PullRequestReferencedDocsProvider,
   parseRemoteHeadBranch,
   parseGitRemoteUrl,
   resolvePreferredBaseBranch,
@@ -105,6 +106,7 @@ test("prefers tracking remote before origin", () => {
 
 test("parses remote HEAD branch names", () => {
   expect(parseRemoteHeadBranch("refs/remotes/origin/main\n")).toBe("main");
+  expect(parseRemoteHeadBranch("refs/remotes/origin/release/2026.05\n")).toBe("release/2026.05");
   expect(parseRemoteHeadBranch(undefined)).toBeUndefined();
 });
 
@@ -173,6 +175,39 @@ test("fetch gating allows only same remote org links", () => {
     shouldFetchReferencedUrl("https://github.com/other-org/repo/blob/main/README.md", remoteScope)
       .allowed,
   ).toBe(false);
+});
+
+test("rejects PR-referenced local docs that escape workspace via symlink", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-doc-symlink-"));
+  const outside = await mkdtemp(join(tmpdir(), "agents-doc-outside-"));
+  try {
+    await writeFile(join(outside, "secret.txt"), "do-not-read", "utf8");
+    await symlink(join(outside, "secret.txt"), join(workspace, "docs-link.md"));
+
+    const provider = new PullRequestReferencedDocsProvider({
+      commandRunner: async (cmd) => {
+        if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+          return JSON.stringify({
+            number: 1,
+            title: "Test PR",
+            body: "See docs-link.md",
+            url: "https://github.com/aguil/agents/pull/1",
+          });
+        }
+        return undefined;
+      },
+    });
+
+    const artifacts = await provider.collect({
+      workspacePath: workspace,
+      scratchpadPath: workspace,
+    });
+
+    expect(artifacts.some((artifact) => artifact.title.startsWith("PR Referenced Local Doc:"))).toBe(false);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
 });
 
 test("dedupes findings and derives severity status", () => {
@@ -264,8 +299,8 @@ test("creates pending PR review comments only for anchorable findings", () => {
   });
 });
 
-test("defaults review summary style to triage", () => {
-  expect(parseReviewSummaryStyle(undefined)).toBe("triage");
+test("defaults review summary style to impact", () => {
+  expect(parseReviewSummaryStyle(undefined)).toBe("impact");
 });
 
 test("rejects invalid review summary style", () => {

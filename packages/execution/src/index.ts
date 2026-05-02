@@ -243,11 +243,14 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       );
     }, heartbeatInterval);
 
+    const stdoutWriter = new BatchedLogWriter(stdoutLogPath);
+    const stderrWriter = new BatchedLogWriter(stderrLogPath);
+
     const stdoutDrainer = drainProcessStream(proc.stdout, async (line) => {
       stdoutBytes += Buffer.byteLength(line, "utf8") + 1;
       lastOutputTimestamp = new Date().toISOString();
       stdoutTail.push(line);
-      await appendFile(stdoutLogPath, `${line}\n`, "utf8");
+      await stdoutWriter.writeLine(line);
       for (const event of normalizeAgentOutputLine(request, line)) {
         queue.push(event);
       }
@@ -257,7 +260,7 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       stderrBytes += Buffer.byteLength(line, "utf8") + 1;
       lastOutputTimestamp = new Date().toISOString();
       stderrTail.push(line);
-      await appendFile(stderrLogPath, `${line}\n`, "utf8");
+      await stderrWriter.writeLine(line);
       queue.push(
         createAgentEvent({
           runId: request.runId,
@@ -279,6 +282,7 @@ export class SubprocessAgentAdapter implements AgentAdapter {
         clearTimeout(hardKillTimer);
       }
       clearInterval(heartbeatTimer);
+      await Promise.all([stdoutWriter.flushAndClose(), stderrWriter.flushAndClose()]);
     }
 
     if (timedOut) {
@@ -773,6 +777,58 @@ class AsyncEventQueue<T> {
       }
       yield next.value;
     }
+  }
+}
+
+class BatchedLogWriter {
+  private buffer = "";
+  private flushPromise: Promise<void> | undefined;
+  private closed = false;
+
+  constructor(
+    private readonly path: string,
+    private readonly flushThresholdBytes = 16_384,
+    private readonly maxBufferBytes = 262_144,
+  ) {}
+
+  async writeLine(line: string): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.buffer += `${line}\n`;
+    const bufferBytes = Buffer.byteLength(this.buffer, "utf8");
+    if (bufferBytes >= this.flushThresholdBytes) {
+      this.flushSoon();
+    }
+    if (bufferBytes >= this.maxBufferBytes && this.flushPromise !== undefined) {
+      await this.flushPromise;
+      if (Buffer.byteLength(this.buffer, "utf8") >= this.flushThresholdBytes) {
+        this.flushSoon();
+      }
+    }
+  }
+
+  async flushAndClose(): Promise<void> {
+    this.closed = true;
+    this.flushSoon();
+    if (this.flushPromise !== undefined) {
+      await this.flushPromise;
+    }
+  }
+
+  private flushSoon(): void {
+    if (this.flushPromise !== undefined || this.buffer.length === 0) {
+      return;
+    }
+    const chunk = this.buffer;
+    this.buffer = "";
+    this.flushPromise = appendFile(this.path, chunk, "utf8")
+      .finally(() => {
+        this.flushPromise = undefined;
+        if (this.buffer.length > 0) {
+          this.flushSoon();
+        }
+      });
   }
 }
 

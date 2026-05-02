@@ -32,7 +32,7 @@ bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
 
 Current HITL boundaries:
 
-- The harness does not post PR comments automatically.
+- The harness does not post PR comments unless `--pending-review` is enabled.
 - The harness does not block merges by itself.
 - Humans decide which findings to act on.
 - Role timeouts are treated as partial coverage warnings, not fatal harness errors.
@@ -46,12 +46,12 @@ Pending review mode:
 
 - `--pending-review` deletes existing pending reviews authored by the current user on the target PR, then creates a fresh unsubmitted review.
 - Use `--pr <number>` to target a specific PR, otherwise the current branch PR is auto-discovered.
-- Use `--review-summary <triage|impact|evidence>` to choose the review body format (`triage` is the default).
+- Use `--review-summary <triage|impact|evidence>` to choose the review body format (`impact` is the default).
 - Only anchorable findings (`file` + `line`) are posted as inline comments.
 
 Review summary examples:
 
-- `triage` (default): use when the author needs immediate prioritization. This format emphasizes near-term actions with "Fix Now" and "Follow-up" sections so work can be sequenced quickly.
+- `triage`: use when the author needs immediate prioritization. This format emphasizes near-term actions with "Fix Now" and "Follow-up" sections so work can be sequenced quickly.
 
   ```bash
   bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary triage
@@ -63,7 +63,7 @@ Review summary examples:
   ## Follow-up
   ```
 
-- `impact`: use when the PR crosses subsystem boundaries or multiple reviewers. Grouping by impact area (security, runtime/performance, correctness/quality, docs/compliance) helps route issues to the right owners.
+- `impact` (default): use when the PR crosses subsystem boundaries or multiple reviewers. Grouping by impact area (security, runtime/performance, correctness/quality, docs/compliance) helps route issues to the right owners.
 
   ```bash
   bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary impact
