@@ -125,6 +125,9 @@ export async function runCodeReview(
   const triage = parseTriageTier(
     context.artifacts.find((artifact) => artifact.id === "triage")?.content,
   );
+  const reviewPrMetadata = parseReviewPrMetadataFromContext(
+    context.artifacts.find((artifact) => artifact.id === "diff-strategy")?.content,
+  );
   const vcsMode = await detectWorkspaceVcsMode(workspacePath);
   const defaultAllowedCommands = defaultCommandsForVcsMode(vcsMode);
   const contextFingerprint = createHash("sha256")
@@ -143,6 +146,13 @@ export async function runCodeReview(
     vcs_mode: vcsMode,
     context_source: options.contextBundlePath === undefined ? "live" : "replay",
     context_fingerprint: contextFingerprint,
+    ...(reviewPrMetadata === undefined
+      ? {}
+      : {
+          pr_number: String(reviewPrMetadata.number),
+          pr_reviewed_head_sha: reviewPrMetadata.headSha ?? "",
+          pr_reviewed_at: reviewPrMetadata.reviewedAt,
+        }),
     ...options.metadata,
   };
 
@@ -349,6 +359,39 @@ function parseTriageTier(value: string | undefined): ReviewTriageTier {
     return value;
   }
   return "lite";
+}
+
+function parseReviewPrMetadataFromContext(value: string | undefined): {
+  readonly number: number;
+  readonly headSha?: string;
+  readonly reviewedAt: string;
+} | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const number = extractTaggedValue(value, "PR Number:");
+  const reviewedAt = extractTaggedValue(value, "Reviewed At:");
+  if (number === undefined || reviewedAt === undefined) {
+    return undefined;
+  }
+  const parsedNumber = Number.parseInt(number, 10);
+  if (!Number.isInteger(parsedNumber) || parsedNumber < 1) {
+    return undefined;
+  }
+  const headShaValue = extractTaggedValue(value, "PR Head SHA:");
+  const headSha = headShaValue === undefined || headShaValue === "(unavailable)" || headShaValue.length === 0
+    ? undefined
+    : headShaValue;
+  return {
+    number: parsedNumber,
+    headSha,
+    reviewedAt,
+  };
+}
+
+function extractTaggedValue(value: string, tag: string): string | undefined {
+  const line = value.split(/\r?\n/).find((entry) => entry.startsWith(tag));
+  return line?.slice(tag.length).trim();
 }
 
 function combineStatuses(

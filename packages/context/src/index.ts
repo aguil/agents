@@ -54,6 +54,12 @@ export interface ParsedGitRemoteUrl {
   readonly repo: string;
 }
 
+interface ReviewPrMetadata {
+  readonly number: number;
+  readonly headSha?: string;
+  readonly reviewedAt: string;
+}
+
 interface PullRequestRepoScope {
   readonly host?: string;
   readonly owner: string;
@@ -242,13 +248,22 @@ export class RepositoryDiffProvider implements ContextProvider {
   constructor(private readonly commandRunner: CommandRunner = runCommand) {}
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const { diff, baseRef, strategy } = request.diffPath
+    const { diff, baseRef, strategy, reviewPr } = request.diffPath
       ? {
           diff: await readFile(request.diffPath, "utf8"),
           baseRef: undefined,
           strategy: "explicit_diff_path",
+          reviewPr: undefined,
         }
       : await collectReviewDiff(request.workspacePath, this.commandRunner, request.pullRequestNumber);
+
+    const reviewLines = reviewPr === undefined
+      ? []
+      : [
+          `PR Number: ${reviewPr.number}`,
+          `PR Head SHA: ${reviewPr.headSha ?? "(unavailable)"}`,
+          `Reviewed At: ${reviewPr.reviewedAt}`,
+        ];
 
     return [
       {
@@ -257,6 +272,7 @@ export class RepositoryDiffProvider implements ContextProvider {
         content: [
           `Strategy: ${strategy}`,
           `Base Ref: ${baseRef ?? "(none)"}`,
+          ...reviewLines,
         ].join("\n"),
       },
       {
@@ -354,6 +370,7 @@ export async function collectReviewDiff(
   readonly diff: string;
   readonly baseRef?: string;
   readonly strategy: string;
+  readonly reviewPr?: ReviewPrMetadata;
 }> {
   if (pullRequestNumber !== undefined) {
     const pullRequest = await discoverPullRequest(workspacePath, commandRunner, pullRequestNumber);
@@ -369,11 +386,20 @@ export async function collectReviewDiff(
         repoScope: repoScope ?? remoteScope,
       },
     );
+    const headSha = await fetchPullRequestHeadSha(commandRunner, workspacePath, {
+      number: pullRequestNumber,
+      repoScope: repoScope ?? remoteScope,
+    });
     if (patch !== undefined) {
       return {
         diff: filterReviewDiff(patch),
         baseRef: undefined,
         strategy: "explicit_pr_patch",
+        reviewPr: {
+          number: pullRequestNumber,
+          headSha: headSha?.trim(),
+          reviewedAt: new Date().toISOString(),
+        },
       };
     }
   }
@@ -415,6 +441,32 @@ export async function collectReviewDiff(
     baseRef: undefined,
     strategy: "working_copy_fallback",
   };
+}
+
+async function fetchPullRequestHeadSha(
+  commandRunner: CommandRunner,
+  workspacePath: string,
+  input: {
+    readonly number: number;
+    readonly repoScope?: PullRequestRepoScope;
+  },
+): Promise<string | undefined> {
+  const ownerRepo = input.repoScope !== undefined
+    ? `${input.repoScope.owner}/${input.repoScope.repo}`
+    : undefined;
+  if (ownerRepo === undefined) {
+    return undefined;
+  }
+
+  const args = [
+    "gh",
+    "api",
+    ...(input.repoScope?.host !== undefined ? ["--hostname", input.repoScope.host] : []),
+    `repos/${ownerRepo}/pulls/${input.number}`,
+    "--jq",
+    ".head.sha",
+  ];
+  return commandRunner(args, workspacePath);
 }
 
 async function fetchPullRequestPatch(

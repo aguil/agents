@@ -16,6 +16,7 @@ import {
   filterReviewDiff,
   extractReferencedDocumentation,
   PullRequestReferencedDocsProvider,
+  RepositoryDiffProvider,
   parseRemoteHeadBranch,
   parseGitRemoteUrl,
   parsePullRequestRepoScope,
@@ -179,6 +180,9 @@ test("prefers explicit PR patch diff when review PR is provided", async () => {
       });
     }
     if (cmd[0] === "gh" && cmd[1] === "api") {
+      if (cmd.includes("--jq")) {
+        return "deadbeefcafebabe\n";
+      }
       return `diff --git a/.review-agent/runs/foo/result.json b/.review-agent/runs/foo/result.json
 +ignored
 diff --git a/src/main.ts b/src/main.ts
@@ -189,8 +193,14 @@ diff --git a/src/main.ts b/src/main.ts
 
   const result = await collectReviewDiff("/repo", commandRunner, 42);
   expect(result.strategy).toBe("explicit_pr_patch");
+  expect(result.reviewPr?.number).toBe(42);
+  expect(result.reviewPr?.headSha).toBe("deadbeefcafebabe");
+  expect(result.reviewPr?.reviewedAt).toBeTruthy();
   expect(result.diff).toContain("diff --git a/src/main.ts b/src/main.ts");
   expect(result.diff).not.toContain(".review-agent/runs/foo/result.json");
+  expect(commands).toContain(
+    "gh api --hostname github.com repos/aguil/agents/pulls/42 --jq .head.sha",
+  );
   expect(commands).toContain(
     "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
   );
@@ -224,6 +234,38 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
   expect(commands).toContain(
     "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
   );
+});
+
+test("includes explicit PR metadata in diff strategy artifact", async () => {
+  const provider = new RepositoryDiffProvider(async (cmd) => {
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 42,
+        title: "Merged PR",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/42",
+        baseRefName: "main",
+      });
+    }
+    if (cmd[0] === "gh" && cmd[1] === "api" && cmd.includes("--jq")) {
+      return "0123456789abcdef";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "api") {
+      return "diff --git a/src/a.ts b/src/a.ts\n+new";
+    }
+    return undefined;
+  });
+
+  const artifacts = await provider.collect({
+    workspacePath: "/repo",
+    scratchpadPath: "/repo/.review-agent/runs/1",
+    pullRequestNumber: 42,
+  });
+  const strategy = artifacts.find((artifact) => artifact.id === "diff-strategy")?.content ?? "";
+  expect(strategy).toContain("Strategy: explicit_pr_patch");
+  expect(strategy).toContain("PR Number: 42");
+  expect(strategy).toContain("PR Head SHA: 0123456789abcdef");
+  expect(strategy).toContain("Reviewed At:");
 });
 
 test("filters harness artifacts out of review diff", () => {
