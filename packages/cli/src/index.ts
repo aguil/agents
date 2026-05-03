@@ -1,7 +1,7 @@
 import { createCodeReviewAdapter, runCodeReview } from "@aguil/agents-code-review";
 import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
 import type { Finding } from "@aguil/agents-core";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
@@ -26,6 +26,7 @@ Options:
   --no-deterministic     Disable deterministic adapter defaults
   --strict               Fail run on any role error or timeout
   --pending-review       Create an unsubmitted GitHub PR review
+  --no-confirm           Skip interactive confirmation prompts
   --review-pr <number>   PR number used for review context and diff collection
   --pr <number>          PR number for pending review (auto-discover if omitted)
   --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
@@ -84,6 +85,17 @@ Options:
     });
     console.log(`Code review ${result.status}. Report: ${result.reportPath}`);
 
+    try {
+      const staleCheck = await checkReviewPullRequestDivergence(result.metadata);
+      if (staleCheck.status === "diverged") {
+        console.warn(
+          `Warning: reviewed PR #${staleCheck.prNumber} is stale (${staleCheck.reviewedHeadSha.slice(0, 12)} -> ${staleCheck.currentHeadSha.slice(0, 12)}).`,
+        );
+      }
+    } catch {
+      // Non-fatal: staleness checks should not block review runs.
+    }
+
     if (options.pendingReview) {
       const prNumber = parsePrNumber(options.pr);
       if (options.pr !== undefined && prNumber === undefined) {
@@ -101,11 +113,24 @@ Options:
         findings: result.findings,
         prNumber,
         reviewSummaryStyle: reviewSummaryStyle ?? "impact",
+        reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
+        noConfirm: options.noConfirm,
       });
+      if (posted.cancelled === true) {
+        await updateRunResultMetadata(result.artifacts, {
+          pr_posting_head_sha: posted.currentHeadSha ?? "",
+          pr_head_diverged: posted.headDiverged ? "true" : "false",
+        });
+        return 0;
+      }
       console.log(
         `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} inline comments.`,
       );
       console.log(`Review URL: ${posted.url}`);
+      await updateRunResultMetadata(result.artifacts, {
+        pr_posting_head_sha: posted.currentHeadSha ?? "",
+        pr_head_diverged: posted.headDiverged ? "true" : "false",
+      });
     }
 
     return result.status === "error" ? 1 : 0;
@@ -134,6 +159,7 @@ interface CliOptions {
   readonly reviewPr?: string;
   readonly pr?: string;
   readonly reviewSummary?: string;
+  readonly noConfirm: boolean;
   readonly noDeterministic: boolean;
   readonly strict: boolean;
   readonly pendingReview: boolean;
@@ -157,10 +183,19 @@ interface GitHubPendingReviewCommentInput {
 }
 
 interface PendingReviewPosted {
+  readonly cancelled?: false;
   readonly reviewId: number;
   readonly prNumber: number;
   readonly commentCount: number;
   readonly url: string;
+  readonly currentHeadSha?: string;
+  readonly headDiverged: boolean;
+}
+
+interface PendingReviewCancelled {
+  readonly cancelled: true;
+  readonly currentHeadSha?: string;
+  readonly headDiverged: boolean;
 }
 
 interface EffectiveAdapterOptions {
@@ -208,6 +243,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
     reviewPr: options["review-pr"],
     pr: options.pr,
     reviewSummary: options["review-summary"],
+    noConfirm: flags.has("no-confirm"),
     noDeterministic: flags.has("no-deterministic"),
     strict: flags.has("strict"),
     pendingReview: flags.has("pending-review"),
@@ -341,10 +377,33 @@ async function replacePendingPullRequestReview(input: {
   readonly findings: readonly Finding[];
   readonly prNumber?: number;
   readonly reviewSummaryStyle: ReviewSummaryStyle;
-}): Promise<PendingReviewPosted> {
+  readonly reviewedHeadSha?: string;
+  readonly noConfirm: boolean;
+}): Promise<PendingReviewPosted | PendingReviewCancelled> {
   const repo = await getRepoNameWithOwner();
   const login = await getViewerLogin();
   const prNumber = input.prNumber ?? await getCurrentPullRequestNumber(repo);
+  const reviewedHeadSha = input.reviewedHeadSha?.trim();
+  const currentHeadSha = await fetchPullRequestHeadSha(repo, prNumber);
+  const headDiverged = reviewedHeadSha !== undefined && reviewedHeadSha.length > 0
+    && currentHeadSha !== undefined
+    && reviewedHeadSha !== currentHeadSha;
+
+  if (headDiverged) {
+    console.warn(
+      `Warning: PR #${prNumber} has updates after this review context (${reviewedHeadSha.slice(0, 12)} -> ${currentHeadSha.slice(0, 12)}).`,
+    );
+    const confirmed = await confirmProceedAfterStaleness(input.noConfirm);
+    if (!confirmed) {
+      console.log("Skipped pending review publish.");
+      return {
+        cancelled: true,
+        currentHeadSha,
+        headDiverged,
+      };
+    }
+  }
+
   const rawComments = findingsToPendingReviewComments(input.findings);
   const diffContext = await loadPullRequestDiffContext(repo, prNumber);
   const comments = rawComments
@@ -383,7 +442,68 @@ async function replacePendingPullRequestReview(input: {
     prNumber,
     commentCount: comments.length,
     url: created.html_url,
+    currentHeadSha,
+    headDiverged,
   };
+}
+
+async function checkReviewPullRequestDivergence(
+  metadata: Readonly<Record<string, string>> | undefined,
+): Promise<
+  | { readonly status: "unavailable" }
+  | {
+      readonly status: "ok" | "diverged";
+      readonly prNumber: number;
+      readonly reviewedHeadSha: string;
+      readonly currentHeadSha: string;
+    }
+> {
+  if (metadata === undefined) {
+    return { status: "unavailable" };
+  }
+  const prNumber = parsePrNumber(metadata.pr_number);
+  const reviewedHeadSha = metadata.pr_reviewed_head_sha?.trim();
+  if (prNumber === undefined || reviewedHeadSha === undefined || reviewedHeadSha.length === 0) {
+    return { status: "unavailable" };
+  }
+
+  const repo = await getRepoNameWithOwner();
+  const currentHeadSha = await fetchPullRequestHeadSha(repo, prNumber);
+  if (currentHeadSha === undefined || currentHeadSha.length === 0) {
+    return { status: "unavailable" };
+  }
+
+  return {
+    status: reviewedHeadSha === currentHeadSha ? "ok" : "diverged",
+    prNumber,
+    reviewedHeadSha,
+    currentHeadSha,
+  };
+}
+
+async function confirmProceedAfterStaleness(noConfirm: boolean): Promise<boolean> {
+  if (noConfirm) {
+    return true;
+  }
+  if (process.platform === "win32") {
+    console.warn("Interactive prompt is unsupported on Windows. Re-run with --no-confirm.");
+    return false;
+  }
+  if (process.stdin.isTTY !== true) {
+    console.warn("Non-interactive stdin detected. Re-run with --no-confirm to post anyway.");
+    return false;
+  }
+  process.stdout.write("Post pending review anyway? [y/N] ");
+  const reader = Bun.stdin.stream().getReader();
+  try {
+    const { value } = await reader.read();
+    const answer = value === undefined ? "" : new TextDecoder().decode(value).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  } catch {
+    return false;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export function buildPendingReviewSummaryBody(input: {
@@ -530,6 +650,38 @@ async function getCurrentPullRequestNumber(repo: string): Promise<number> {
     throw new Error("Could not resolve current PR number from gh pr view.");
   }
   return view.number;
+}
+
+async function fetchPullRequestHeadSha(repo: string, prNumber: number): Promise<string | undefined> {
+  const output = await runCommand([
+    "gh",
+    "api",
+    `repos/${repo}/pulls/${prNumber}`,
+    "--jq",
+    ".head.sha",
+  ]);
+  const value = output?.trim();
+  return value === undefined || value.length === 0 ? undefined : value;
+}
+
+async function updateRunResultMetadata(
+  artifacts: readonly string[],
+  entries: Readonly<Record<string, string>>,
+): Promise<void> {
+  const resultPath = artifacts.find((artifact) => artifact.endsWith("/result.json"));
+  if (resultPath === undefined) {
+    return;
+  }
+  const raw = await readFile(resultPath, "utf8");
+  const parsed = JSON.parse(raw) as {
+    readonly metadata?: Record<string, string>;
+    [key: string]: unknown;
+  };
+  const metadata = {
+    ...(parsed.metadata ?? {}),
+    ...entries,
+  };
+  await writeFile(resultPath, `${JSON.stringify({ ...parsed, metadata }, null, 2)}\n`, "utf8");
 }
 
 async function getRepoNameWithOwner(): Promise<string> {

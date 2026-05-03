@@ -26,6 +26,7 @@ bun run agents run code-review --adapter claude --model <model> --strict
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1 --pending-review --no-confirm
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
@@ -54,6 +55,19 @@ bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary evidence
 ```
+
+## Rate Limits and CI Usage
+
+- A `--review-pr` + `--pending-review` run typically performs around 7-8 GitHub API requests.
+- Authenticated users usually get 5,000 REST requests/hour (higher on some Enterprise plans), so this remains well within normal usage.
+- GitHub Actions `GITHUB_TOKEN` has lower limits per repository; use batching and avoid per-commit review loops in busy repos.
+- Check quota with `gh api rate_limit` if you hit `403`/`429` responses.
+- The CLI does not auto-retry or backoff on GitHub rate-limit responses.
+
+Windows note:
+
+- Windows is currently unsupported for interactive review-post confirmation prompts.
+- Use `--no-confirm` in Windows/CI environments.
 
 ## Principles
 
