@@ -70,7 +70,7 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
       ? `Location: ${finding.file}${finding.line ? `:${finding.line}` : ""}`
       : "";
     return [
-      `## ${index + 1}. ${finding.severity.toUpperCase()}: ${finding.title}`,
+      `## ${index + 1}. ${severityEmoji(finding.severity)} ${finding.title}`,
       location,
       `Source: ${finding.sourceRole}`,
       "",
@@ -112,6 +112,10 @@ function sortFindings(findings: readonly Finding[]): readonly Finding[] {
 
 function severityRank(severity: Finding["severity"]): number {
   return severity === "critical" ? 0 : 1;
+}
+
+function severityEmoji(severity: Finding["severity"]): string {
+  return severity === "critical" ? "🔴" : "⚠️";
 }
 
 function buildExecutionNotes(

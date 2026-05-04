@@ -37,6 +37,7 @@ import {
   actionableFindings,
   dedupeFindings,
   findingFingerprint,
+  renderMarkdownReport,
   statusForFindings,
 } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
@@ -631,6 +632,39 @@ test("builds evidence review summary body", () => {
 
   expect(body).toContain("## Why / Evidence / Fix");
   expect(body).toContain("### Finding 1: Doc mismatch");
+});
+
+test("renders severity emojis in markdown report", () => {
+  const critical: Finding = {
+    id: "finding-critical",
+    severity: "critical",
+    title: "Critical security issue",
+    description: "A critical problem.",
+    evidence: "Evidence here.",
+    sourceRole: "security",
+    validation: { status: "verified", details: "Validated." },
+  };
+  const warning: Finding = {
+    id: "finding-warning",
+    severity: "warning",
+    title: "Warning performance issue",
+    description: "A warning problem.",
+    evidence: "Evidence here.",
+    sourceRole: "performance",
+    validation: { status: "verified", details: "Validated." },
+  };
+
+  const report = renderMarkdownReport({
+    runId: "run-1",
+    status: "failed",
+    findings: [critical, warning],
+    artifacts: [],
+  });
+
+  expect(report).toContain("## 1. 🔴 Critical security issue");
+  expect(report).toContain("## 2. ⚠️ Warning performance issue");
+  expect(report).not.toContain("CRITICAL:");
+  expect(report).not.toContain("WARNING:");
 });
 
 test("builds opencode command behind the adapter boundary", () => {
