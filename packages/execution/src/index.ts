@@ -148,6 +148,7 @@ export interface SubprocessAgentAdapterOptions {
   readonly capabilities: AdapterCapabilities;
   buildCommand(request: AgentRunRequest, requestPath: string): CommandSpec;
   readonly heartbeatIntervalMs?: number;
+  readonly idleWarningThresholdMs?: number;
 }
 
 export class SubprocessAgentAdapter implements AgentAdapter {
@@ -225,19 +226,29 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       : undefined;
 
     const heartbeatInterval = this.options.heartbeatIntervalMs ?? 15_000;
+    const idleWarningThresholdMs = this.options.idleWarningThresholdMs ?? 90_000;
     const heartbeatTimer = setInterval(() => {
+      const elapsedMs = Date.now() - startedAtMs;
+      const lastOutputMs = lastOutputTimestamp === undefined
+        ? startedAtMs
+        : Date.parse(lastOutputTimestamp);
+      const idleDurationMs = Date.now() - lastOutputMs;
+      const isIdle = idleDurationMs >= idleWarningThresholdMs;
       queue.push(
         createAgentEvent({
           runId: request.runId,
           roleId: request.roleId,
           type: "tool",
-          message: `${this.name} heartbeat`,
+          message: isIdle
+            ? `${this.name} idle warning (${Math.floor(idleDurationMs / 1000)}s without output)`
+            : `${this.name} heartbeat`,
           data: {
-            kind: "heartbeat",
-            elapsedMs: Date.now() - startedAtMs,
+            kind: isIdle ? "idle_warning" : "heartbeat",
+            elapsedMs,
             stdoutBytes,
             stderrBytes,
             lastOutputTimestamp,
+            ...(isIdle ? { idleDurationMs } : {}),
           },
         }),
       );
