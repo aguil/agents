@@ -90,7 +90,7 @@ The code-review harness also attempts to auto-discover the active PR, ingest PR 
 ## Human In The Loop
 
 - Run review locally from your working branch.
-- Use `--review-pr <number>` when you want context and diff collection from a specific PR (including merged PRs).
+- Use `--review-pr <number>` when you want context and diff collection from a specific PR (including merged PRs); PR lookups use the repo from `--workspace`.
 - Inspect `report.md` for human-readable findings and `result.json` for machine-readable status.
 - Fix code or mark rationale in your PR description/comments.
 - Re-run until output is acceptable.
