@@ -27,6 +27,8 @@ bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1 --pending-review --no-confirm
+bun run agents run code-review --post-only
+bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/result.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal

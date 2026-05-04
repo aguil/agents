@@ -21,6 +21,8 @@ bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1 --pending-review --no-confirm
+bun run agents run code-review --post-only
+bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/result.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
@@ -58,6 +60,15 @@ Pending review mode:
 - Use `--review-summary <triage|impact|evidence>` to choose the review body format (`impact` is the default).
 - Only anchorable findings (`file` + `line`) are posted as inline comments.
 - Before posting, the CLI checks if the PR head moved since context collection; stale postings require confirmation unless `--no-confirm` is set.
+
+Post-only mode:
+
+- `--post-only` publishes findings from an existing `result.json` without rerunning the review model.
+- By default it auto-discovers the latest `.review-agent/runs/<run-id>/result.json` in the workspace.
+- Use `--result <path>` to choose a specific result artifact.
+- Post-only requires `pr_number` and `pr_reviewed_head_sha` metadata in the stored result; runs without `--review-pr` are rejected.
+- Post-only keeps reviews pending (unsubmitted) exactly like `--pending-review`.
+- Post-only does not mutate the selected `result.json`.
 
 Consistency and replay mode:
 
