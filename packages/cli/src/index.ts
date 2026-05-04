@@ -1,8 +1,8 @@
 import { createCodeReviewAdapter, runCodeReview } from "@aguil/agents-code-review";
 import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
 import type { Finding } from "@aguil/agents-core";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, readFile, rm, writeFile, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
   if (argv.includes("--help") || argv.length === 0) {
@@ -26,6 +26,8 @@ Options:
   --no-deterministic     Disable deterministic adapter defaults
   --strict               Fail run on any role error or timeout
   --pending-review       Create an unsubmitted GitHub PR review
+  --post-only            Post findings from an existing run result
+  --result <path>        Result JSON path (auto-discovers latest by default)
   --no-confirm           Skip interactive confirmation prompts
   --review-pr <number>   PR number used for review context and diff collection
   --pr <number>          PR number for pending review (auto-discover if omitted)
@@ -37,6 +39,9 @@ Options:
 
   if (argv[0] === "run" && argv[1] === "code-review") {
     const options = parseOptions(argv.slice(2));
+    if (options.postOnly) {
+      return runPostOnly(options);
+    }
     const adapterName = parseAdapterName(options.adapter);
     if (adapterName === undefined) {
       console.error(`Unsupported adapter: ${options.adapter}`);
@@ -148,6 +153,7 @@ interface CliOptions {
   readonly workspace?: string;
   readonly scratchpad?: string;
   readonly contextBundle?: string;
+  readonly result?: string;
   readonly consensus?: string;
   readonly adapter?: string;
   readonly model?: string;
@@ -159,6 +165,7 @@ interface CliOptions {
   readonly reviewPr?: string;
   readonly pr?: string;
   readonly reviewSummary?: string;
+  readonly postOnly: boolean;
   readonly noConfirm: boolean;
   readonly noDeterministic: boolean;
   readonly strict: boolean;
@@ -232,6 +239,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
     workspace: options.workspace,
     scratchpad: options.scratchpad,
     contextBundle: options["context-bundle"],
+    result: options.result,
     consensus: options.consensus,
     adapter: options.adapter,
     model: options.model,
@@ -243,6 +251,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
     reviewPr: options["review-pr"],
     pr: options.pr,
     reviewSummary: options["review-summary"],
+    postOnly: flags.has("post-only"),
     noConfirm: flags.has("no-confirm"),
     noDeterministic: flags.has("no-deterministic"),
     strict: flags.has("strict"),
@@ -339,6 +348,125 @@ function parsePrNumber(value: string | undefined): number | undefined {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+interface StoredReviewResult {
+  readonly findings: readonly Finding[];
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+async function runPostOnly(options: CliOptions): Promise<number> {
+  if (options.pendingReview) {
+    console.warn("Ignoring --pending-review because --post-only already publishes a pending review.");
+  }
+  const explicitPrNumber = parsePrNumber(options.pr);
+  if (options.pr !== undefined && explicitPrNumber === undefined) {
+    console.error(`Invalid --pr value: ${options.pr}`);
+    return 1;
+  }
+
+  const reviewSummaryStyle = parseReviewSummaryStyle(options.reviewSummary);
+  if (options.reviewSummary !== undefined && reviewSummaryStyle === undefined) {
+    console.error(`Invalid --review-summary value: ${options.reviewSummary}`);
+    console.error("Expected one of: triage, impact, evidence.");
+    return 1;
+  }
+
+  const workspacePath = resolve(options.workspace ?? process.cwd());
+  const resultPath = options.result === undefined
+    ? await discoverLatestResultPath(workspacePath)
+    : resolve(options.result);
+  if (resultPath === undefined) {
+    console.error("Could not auto-discover a prior run result. Pass --result <path>.");
+    return 1;
+  }
+  console.log(`Using stored review result: ${resultPath}`);
+
+  let loaded: StoredReviewResult;
+  try {
+    loaded = await loadStoredReviewResult(resultPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    return 1;
+  }
+  const metadata = loaded.metadata ?? {};
+  const metadataPrNumber = parsePrNumber(metadata.pr_number);
+  const reviewedHeadSha = metadata.pr_reviewed_head_sha?.trim();
+  if (metadataPrNumber === undefined || reviewedHeadSha === undefined || reviewedHeadSha.length === 0) {
+    console.error("Selected result is missing PR metadata required for stale checks.");
+    console.error("Re-run with --review-pr to capture pr_number and pr_reviewed_head_sha.");
+    return 1;
+  }
+  const prNumber = explicitPrNumber ?? metadataPrNumber;
+  if (explicitPrNumber !== undefined && explicitPrNumber !== metadataPrNumber) {
+    console.warn(
+      `Warning: posting run from PR #${metadataPrNumber} to PR #${explicitPrNumber}.`,
+    );
+  }
+
+  const posted = await replacePendingPullRequestReview({
+    findings: loaded.findings,
+    prNumber,
+    reviewSummaryStyle: reviewSummaryStyle ?? "impact",
+    reviewedHeadSha,
+    noConfirm: options.noConfirm,
+  });
+  if (posted.cancelled === true) {
+    return 0;
+  }
+  console.log(
+    `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} inline comments.`,
+  );
+  console.log(`Review URL: ${posted.url}`);
+  if (posted.headDiverged) {
+    console.warn("Posted against updated PR head after confirmation.");
+  }
+  return 0;
+}
+
+export async function discoverLatestResultPath(workspacePath: string): Promise<string | undefined> {
+  const runsRoot = join(workspacePath, ".review-agent", "runs");
+  let entries: readonly (string | Uint8Array)[];
+  try {
+    entries = await readdir(runsRoot);
+  } catch {
+    return undefined;
+  }
+  const runDirectories = entries
+    .map((entry) => typeof entry === "string" ? entry : Buffer.from(entry).toString("utf8"))
+    .filter((entry) => entry.startsWith("code-review-"))
+    .sort()
+    .reverse();
+  for (const runDirectory of runDirectories) {
+    const candidate = join(runsRoot, runDirectory, "result.json");
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+export async function loadStoredReviewResult(resultPath: string): Promise<StoredReviewResult> {
+  const raw = await readFile(resultPath, "utf8");
+  const parsed = JSON.parse(raw) as {
+    readonly findings?: unknown;
+    readonly metadata?: unknown;
+  };
+  if (!Array.isArray(parsed.findings)) {
+    throw new Error(`Invalid result JSON at ${resultPath}: missing findings array.`);
+  }
+  const findings = parsed.findings as Finding[];
+  const metadata = typeof parsed.metadata === "object" && parsed.metadata !== null
+    ? parsed.metadata as Record<string, string>
+    : undefined;
+  return {
+    findings,
+    metadata,
+  };
 }
 
 export function parseReviewSummaryStyle(value: string | undefined): ReviewSummaryStyle | undefined {

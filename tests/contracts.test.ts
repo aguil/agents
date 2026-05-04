@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -42,7 +42,9 @@ import {
 import { serializeEvent } from "@aguil/agents-telemetry";
 import {
   buildPendingReviewSummaryBody,
+  discoverLatestResultPath,
   findingsToPendingReviewComments,
+  loadStoredReviewResult,
   parseReviewSummaryStyle,
 } from "../packages/cli/src/index";
 
@@ -498,6 +500,65 @@ test("defaults review summary style to impact", () => {
 
 test("rejects invalid review summary style", () => {
   expect(parseReviewSummaryStyle("unknown")).toBeUndefined();
+});
+
+test("loads stored review result findings and metadata", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-post-only-load-"));
+  try {
+    const path = join(workspace, "result.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        findings: [
+          {
+            id: "finding-1",
+            severity: "warning",
+            title: "Stored issue",
+            description: "A validated review finding.",
+            evidence: "The reproduction passed.",
+            sourceRole: "quality",
+            validation: { status: "verified", details: "Reproduced locally." },
+          },
+        ],
+        metadata: {
+          pr_number: "1",
+          pr_reviewed_head_sha: "deadbeef",
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadStoredReviewResult(path);
+    expect(loaded.findings).toHaveLength(1);
+    expect(loaded.metadata?.pr_number).toBe("1");
+    expect(loaded.metadata?.pr_reviewed_head_sha).toBe("deadbeef");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("discovers latest run result path", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-post-only-discover-"));
+  try {
+    const runsRoot = join(workspace, ".review-agent", "runs");
+    await mkdir(join(runsRoot, "code-review-20260501120000-aaaa"), { recursive: true });
+    await mkdir(join(runsRoot, "code-review-20260502120000-bbbb"), { recursive: true });
+    await writeFile(
+      join(runsRoot, "code-review-20260501120000-aaaa", "result.json"),
+      "{}\n",
+      "utf8",
+    );
+    await writeFile(
+      join(runsRoot, "code-review-20260502120000-bbbb", "result.json"),
+      "{}\n",
+      "utf8",
+    );
+
+    const discovered = await discoverLatestResultPath(workspace);
+    expect(discovered).toBe(join(runsRoot, "code-review-20260502120000-bbbb", "result.json"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("builds triage review summary body", () => {
