@@ -55,7 +55,7 @@ Pending review mode:
 
 - `--pending-review` deletes existing pending reviews authored by the current user on the target PR, then creates a fresh unsubmitted review.
 - Use `--pr <number>` to target a specific PR, otherwise the current branch PR is auto-discovered.
-- Use `--review-pr <number>` to collect review context/diff from a specific PR (including merged PRs); PR lookups use the repo from `--workspace`.
+- Use `--review-pr <number>` to collect review context/diff from a specific PR (including merged PRs); PR lookups use the repo from `--workspace` and auto-resolve jj workspace pointers to canonical colocated repos for git/gh commands.
 - `--no-confirm` skips interactive stale-review confirmation prompts (recommended for CI).
 - Use `--review-summary <triage|impact|evidence>` to choose the review body format (`impact` is the default).
 - Only anchorable findings (`file` + `line`) are posted as inline comments.

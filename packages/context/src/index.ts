@@ -1,5 +1,6 @@
 import { ensureDirectory, writeJsonFile, writeTextFile } from "@aguil/agents-core";
 import type { ReviewTriageTier } from "@aguil/agents-core";
+import { resolveGitAwarePath } from "@aguil/agents-core";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -466,7 +467,7 @@ async function fetchPullRequestHeadSha(
     "--jq",
     ".head.sha",
   ];
-  return commandRunner(args, workspacePath);
+  return commandRunner(args, workspacePath, { gitAware: true });
 }
 
 async function fetchPullRequestPatch(
@@ -492,7 +493,7 @@ async function fetchPullRequestPatch(
     "Accept: application/vnd.github.v3.diff",
     `repos/${ownerRepo}/pulls/${input.number}`,
   ];
-  return commandRunner(args, workspacePath);
+  return commandRunner(args, workspacePath, { gitAware: true });
 }
 
 export function filterReviewDiff(diff: string): string {
@@ -536,6 +537,7 @@ export async function resolvePreferredBaseBranch(
     const headRef = await commandRunner(
       ["git", "symbolic-ref", `refs/remotes/${remoteName}/HEAD`],
       workspacePath,
+      { gitAware: true },
     );
     const branch = parseRemoteHeadBranch(headRef);
     if (branch !== undefined) {
@@ -549,7 +551,7 @@ export async function resolvePreferredBaseBranch(
     "master",
   ]);
   for (const candidate of candidates) {
-    const exists = await commandRunner(["git", "rev-parse", "--verify", candidate], workspacePath);
+    const exists = await commandRunner(["git", "rev-parse", "--verify", candidate], workspacePath, { gitAware: true });
     if (exists !== undefined) {
       return candidate;
     }
@@ -595,6 +597,7 @@ export async function discoverPullRequest(
       "number,title,body,url,baseRefName",
     ],
     workspacePath,
+    { gitAware: true },
   );
   if (json === undefined) {
     return undefined;
@@ -637,7 +640,7 @@ export async function resolvePreferredRemoteScope(
     return undefined;
   }
 
-  const remoteUrl = await commandRunner(["git", "remote", "get-url", selected], workspacePath);
+  const remoteUrl = await commandRunner(["git", "remote", "get-url", selected], workspacePath, { gitAware: true });
   if (remoteUrl === undefined) {
     return undefined;
   }
@@ -661,6 +664,7 @@ export async function resolveTrackingRemoteName(
   const upstream = await commandRunner(
     ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     workspacePath,
+    { gitAware: true },
   );
   if (upstream === undefined) {
     return undefined;
@@ -821,7 +825,7 @@ async function listRemoteNames(
   workspacePath: string,
   commandRunner: CommandRunner,
 ): Promise<readonly string[]> {
-  const output = await commandRunner(["git", "remote"], workspacePath);
+  const output = await commandRunner(["git", "remote"], workspacePath, { gitAware: true });
   if (output === undefined) {
     return [];
   }
@@ -943,11 +947,39 @@ function looksLikeDocumentationPath(value: string): boolean {
 type CommandRunner = (
   cmd: readonly string[],
   cwd: string,
+  options?: { readonly gitAware?: boolean },
 ) => Promise<string | undefined>;
 
-async function runCommand(cmd: readonly string[], cwd: string): Promise<string | undefined> {
+const gitAwareWorkspaceCache = new Map<string, Promise<string>>();
+const emittedGitAwareWarnings = new Set<string>();
+
+async function resolveGitAwareCwd(cwd: string): Promise<string> {
+  const cached = gitAwareWorkspaceCache.get(cwd);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const pending = (async () => {
+    const resolved = await resolveGitAwarePath(cwd);
+    if (resolved.warning !== undefined && !emittedGitAwareWarnings.has(resolved.warning)) {
+      emittedGitAwareWarnings.add(resolved.warning);
+      console.warn(resolved.warning);
+    }
+    return resolved.gitAwarePath;
+  })();
+
+  gitAwareWorkspaceCache.set(cwd, pending);
+  return pending;
+}
+
+async function runCommand(
+  cmd: readonly string[],
+  cwd: string,
+  options: { readonly gitAware?: boolean } = {},
+): Promise<string | undefined> {
   try {
-    const proc = Bun.spawn({ cmd: [...cmd], cwd, stdout: "pipe", stderr: "pipe" });
+    const resolvedCwd = options.gitAware === true ? await resolveGitAwareCwd(cwd) : cwd;
+    const proc = Bun.spawn({ cmd: [...cmd], cwd: resolvedCwd, stdout: "pipe", stderr: "pipe" });
     const [stdout, exitCode] = await Promise.all([
       readProcessText(proc.stdout),
       proc.exited,

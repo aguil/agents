@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1205,6 +1206,91 @@ test("strict mode fails run on timed out roles", async () => {
     expect(result.status).toBe("error");
     expect(result.metadata?.strict_mode).toBe("true");
     expect(result.metadata?.timed_out_roles).toBe("quality");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath keeps colocated repo paths", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-colocated-"));
+  try {
+    await mkdir(join(tempDir, ".git"), { recursive: true });
+    const result = await resolveGitAwarePath(tempDir);
+    expect(result.gitAwarePath).toBe(tempDir);
+    expect(result.isJjWorkspace).toBe(false);
+    expect(result.resolvedFromPointer).toBe(false);
+    expect(result.warning).toBeUndefined();
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath treats git worktree .git files as git-aware", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-worktree-"));
+  try {
+    await writeFile(join(tempDir, ".git"), "gitdir: /tmp/worktree/.git\n", "utf8");
+    const result = await resolveGitAwarePath(tempDir);
+    expect(result.gitAwarePath).toBe(tempDir);
+    expect(result.isJjWorkspace).toBe(false);
+    expect(result.resolvedFromPointer).toBe(false);
+    expect(result.warning).toBeUndefined();
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath resolves canonical repo from jj pointer", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-jj-"));
+  try {
+    const canonicalRepo = join(tempDir, "repos", "github.com", "acme", "demo");
+    const workspace = join(tempDir, "projects", "feat", "task", "demo");
+    await mkdir(join(canonicalRepo, ".jj"), { recursive: true });
+    await mkdir(join(canonicalRepo, ".git"), { recursive: true });
+    await mkdir(join(workspace, ".jj"), { recursive: true });
+    const pointer = "../../../../../repos/github.com/acme/demo/.jj/repo\n";
+    await writeFile(join(workspace, ".jj", "repo"), pointer, "utf8");
+
+    const result = await resolveGitAwarePath(workspace);
+    expect(result.gitAwarePath).toBe(canonicalRepo);
+    expect(result.isJjWorkspace).toBe(true);
+    expect(result.resolvedFromPointer).toBe(true);
+    expect(result.warning).toBeUndefined();
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath warns and falls back when jj pointer is empty", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-empty-"));
+  try {
+    await mkdir(join(tempDir, ".jj"), { recursive: true });
+    await writeFile(join(tempDir, ".jj", "repo"), "\n", "utf8");
+
+    const result = await resolveGitAwarePath(tempDir);
+    expect(result.gitAwarePath).toBe(tempDir);
+    expect(result.isJjWorkspace).toBe(true);
+    expect(result.resolvedFromPointer).toBe(false);
+    expect(result.warning).toContain("pointer");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath warns and falls back when canonical .git is missing", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-missing-git-"));
+  try {
+    const canonicalRepo = join(tempDir, "repos", "github.com", "acme", "demo");
+    const workspace = join(tempDir, "projects", "feat", "task", "demo");
+    await mkdir(join(canonicalRepo, ".jj"), { recursive: true });
+    await mkdir(join(workspace, ".jj"), { recursive: true });
+    const pointer = "../../../../../repos/github.com/acme/demo/.jj/repo\n";
+    await writeFile(join(workspace, ".jj", "repo"), pointer, "utf8");
+
+    const result = await resolveGitAwarePath(workspace);
+    expect(result.gitAwarePath).toBe(workspace);
+    expect(result.isJjWorkspace).toBe(true);
+    expect(result.resolvedFromPointer).toBe(false);
+    expect(result.warning).toContain("was not found");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

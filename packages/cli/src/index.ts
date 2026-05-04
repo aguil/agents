@@ -1,5 +1,6 @@
 import { createCodeReviewAdapter, runCodeReview } from "@aguil/agents-code-review";
 import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
+import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { Finding } from "@aguil/agents-core";
 import { access, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -799,7 +800,7 @@ async function fetchPullRequestHeadSha(repo: string, prNumber: number, workspace
     `repos/${repo}/pulls/${prNumber}`,
     "--jq",
     ".head.sha",
-  ], workspacePath);
+  ], workspacePath, { gitAware: true });
   const value = output?.trim();
   return value === undefined || value.length === 0 ? undefined : value;
 }
@@ -876,9 +877,10 @@ async function ghApi<T>(
 }
 
 async function runGh<T>(args: readonly string[], workspacePath?: string): Promise<T> {
+  const gitAware = await resolveGitAwareCwd(workspacePath);
   const proc = Bun.spawn({
     cmd: ["gh", ...args],
-    cwd: resolveWorkspaceCwd(workspacePath),
+    cwd: gitAware,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -901,7 +903,7 @@ async function runGh<T>(args: readonly string[], workspacePath?: string): Promis
 async function resolveRepoNameWithOwnerFromRemote(workspacePath?: string): Promise<string | undefined> {
   const remoteUrl = (
     await runCommand(["jj", "git", "remote", "list"], workspacePath) ??
-    await runCommand(["git", "remote", "get-url", "origin"], workspacePath)
+    await runCommand(["git", "remote", "get-url", "origin"], workspacePath, { gitAware: true })
   )?.trim();
   if (remoteUrl === undefined || remoteUrl.length === 0) {
     return undefined;
@@ -935,11 +937,41 @@ function resolveWorkspaceCwd(workspacePath?: string): string {
   return workspacePath === undefined ? process.cwd() : resolve(workspacePath);
 }
 
-async function runCommand(cmd: readonly string[], workspacePath?: string): Promise<string | undefined> {
+const gitAwareWorkspaceCache = new Map<string, Promise<string>>();
+const emittedGitAwareWarnings = new Set<string>();
+
+async function resolveGitAwareCwd(workspacePath?: string): Promise<string> {
+  const cwd = resolveWorkspaceCwd(workspacePath);
+  const cached = gitAwareWorkspaceCache.get(cwd);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const pending = (async () => {
+    const resolved = await resolveGitAwarePath(cwd);
+    if (resolved.warning !== undefined && !emittedGitAwareWarnings.has(resolved.warning)) {
+      emittedGitAwareWarnings.add(resolved.warning);
+      console.warn(resolved.warning);
+    }
+    return resolved.gitAwarePath;
+  })();
+
+  gitAwareWorkspaceCache.set(cwd, pending);
+  return pending;
+}
+
+async function runCommand(
+  cmd: readonly string[],
+  workspacePath?: string,
+  options: { readonly gitAware?: boolean } = {},
+): Promise<string | undefined> {
   try {
+    const cwd = options.gitAware === true
+      ? await resolveGitAwareCwd(workspacePath)
+      : resolveWorkspaceCwd(workspacePath);
     const proc = Bun.spawn({
       cmd: [...cmd],
-      cwd: resolveWorkspaceCwd(workspacePath),
+      cwd,
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

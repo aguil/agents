@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 export type HarnessStatus = "passed" | "warnings" | "failed" | "error";
 export type FindingSeverity = "critical" | "warning";
@@ -69,6 +69,13 @@ export interface AgentEvent {
   readonly data?: unknown;
 }
 
+export interface GitAwarePathResult {
+  readonly gitAwarePath: string;
+  readonly isJjWorkspace: boolean;
+  readonly resolvedFromPointer: boolean;
+  readonly warning?: string;
+}
+
 export function nowIso(date: Date = new Date()): string {
   return date.toISOString();
 }
@@ -108,4 +115,70 @@ export async function writeJsonFile(path: string, value: unknown): Promise<strin
 
 export async function readJsonFile<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
+}
+
+export async function resolveGitAwarePath(workspacePath: string): Promise<GitAwarePathResult> {
+  const resolvedWorkspacePath = resolve(workspacePath);
+  const gitPath = join(resolvedWorkspacePath, ".git");
+  try {
+    await access(gitPath);
+    return {
+      gitAwarePath: resolvedWorkspacePath,
+      isJjWorkspace: false,
+      resolvedFromPointer: false,
+    };
+  } catch {
+    // Continue and check for a jj workspace pointer.
+  }
+
+  const jjRepoPointerPath = join(resolvedWorkspacePath, ".jj", "repo");
+  let pointer: string;
+  try {
+    pointer = (await readFile(jjRepoPointerPath, "utf8")).trim();
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? String((error as { readonly code?: unknown }).code)
+      : undefined;
+    if (code === "ENOENT") {
+      return {
+        gitAwarePath: resolvedWorkspacePath,
+        isJjWorkspace: false,
+        resolvedFromPointer: false,
+      };
+    }
+    return {
+      gitAwarePath: resolvedWorkspacePath,
+      isJjWorkspace: false,
+      resolvedFromPointer: false,
+      warning: `Warning: failed to read jj workspace pointer at ${jjRepoPointerPath}; using workspace path for git/gh commands.`,
+    };
+  }
+
+  if (pointer.length === 0) {
+    return {
+      gitAwarePath: resolvedWorkspacePath,
+      isJjWorkspace: true,
+      resolvedFromPointer: false,
+      warning: `Warning: jj workspace pointer at ${jjRepoPointerPath} is empty; using workspace path for git/gh commands.`,
+    };
+  }
+
+  const canonicalJjRepoPath = resolve(dirname(jjRepoPointerPath), pointer);
+  const canonicalRepoPath = dirname(dirname(canonicalJjRepoPath));
+  const canonicalGitPath = join(canonicalRepoPath, ".git");
+  try {
+    await access(canonicalGitPath);
+    return {
+      gitAwarePath: canonicalRepoPath,
+      isJjWorkspace: true,
+      resolvedFromPointer: true,
+    };
+  } catch {
+    return {
+      gitAwarePath: resolvedWorkspacePath,
+      isJjWorkspace: true,
+      resolvedFromPointer: false,
+      warning: `Warning: jj workspace pointer resolved to ${canonicalRepoPath}, but ${canonicalGitPath} was not found; using workspace path for git/gh commands.`,
+    };
+  }
 }
