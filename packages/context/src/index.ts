@@ -40,6 +40,7 @@ export interface PullRequestMetadata {
   readonly body: string;
   readonly url: string;
   readonly baseRefName?: string;
+  readonly headRefOid?: string;
 }
 
 export interface RemoteScope {
@@ -387,21 +388,33 @@ export async function collectReviewDiff(
         repoScope: repoScope ?? remoteScope,
       },
     );
-    const headSha = await fetchPullRequestHeadSha(commandRunner, workspacePath, {
+    const headSha = pullRequest?.headRefOid ?? await fetchPullRequestHeadSha(commandRunner, workspacePath, {
       number: pullRequestNumber,
       repoScope: repoScope ?? remoteScope,
     });
+    const requestedReviewPr: ReviewPrMetadata = {
+      number: pullRequestNumber,
+      headSha: headSha?.trim(),
+      reviewedAt: new Date().toISOString(),
+    };
     if (patch !== undefined) {
       return {
         diff: filterReviewDiff(patch),
         baseRef: undefined,
         strategy: "explicit_pr_patch",
-        reviewPr: {
-          number: pullRequestNumber,
-          headSha: headSha?.trim(),
-          reviewedAt: new Date().toISOString(),
-        },
+        reviewPr: requestedReviewPr,
       };
+    }
+
+    const fallback = await collectReviewDiffFallback(
+      workspacePath,
+      commandRunner,
+      pullRequestNumber,
+      pullRequest?.baseRefName,
+      requestedReviewPr,
+    );
+    if (fallback !== undefined) {
+      return fallback;
     }
   }
 
@@ -441,6 +454,59 @@ export async function collectReviewDiff(
     diff: filterReviewDiff(workingDiff),
     baseRef: undefined,
     strategy: "working_copy_fallback",
+  };
+}
+
+async function collectReviewDiffFallback(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+  pullRequestNumber: number,
+  baseRefName: string | undefined,
+  reviewPr: ReviewPrMetadata,
+): Promise<{
+  readonly diff: string;
+  readonly baseRef?: string;
+  readonly strategy: string;
+  readonly reviewPr?: ReviewPrMetadata;
+} | undefined> {
+  const remoteScope = await resolvePreferredRemoteScope(workspacePath, commandRunner);
+  const baseCandidates = baseRefName !== undefined
+    ? [baseRefName]
+    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteScope?.remoteName);
+
+  for (const baseRef of dedupeStrings(baseCandidates)) {
+    const gitDiff = await commandRunner(
+      ["git", "diff", "--no-ext-diff", `${baseRef}...HEAD`],
+      workspacePath,
+    );
+    if (gitDiff !== undefined) {
+      return {
+        diff: filterReviewDiff(gitDiff),
+        baseRef,
+        strategy: "pr_base_git",
+        reviewPr,
+      };
+    }
+
+    for (const jjBase of toJjBaseCandidates(baseRef, remoteScope?.remoteName)) {
+      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
+      if (jjDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(jjDiff),
+          baseRef: jjBase,
+          strategy: "pr_base_jj",
+          reviewPr,
+        };
+      }
+    }
+  }
+
+  const workingDiff = await collectRepositoryDiff(workspacePath);
+  return {
+    diff: filterReviewDiff(workingDiff),
+    baseRef: undefined,
+    strategy: "working_copy_fallback",
+    reviewPr,
   };
 }
 
@@ -594,7 +660,7 @@ export async function discoverPullRequest(
       "view",
       ...(pullRequestNumber !== undefined ? [String(pullRequestNumber)] : []),
       "--json",
-      "number,title,body,url,baseRefName",
+      "number,title,body,url,baseRefName,headRefOid",
     ],
     workspacePath,
     { gitAware: true },
@@ -620,6 +686,7 @@ export async function discoverPullRequest(
         body: parsed.body,
         url: parsed.url,
         baseRefName: typeof parsed.baseRefName === "string" ? parsed.baseRefName : undefined,
+        headRefOid: typeof parsed.headRefOid === "string" ? parsed.headRefOid : undefined,
       };
   } catch {
     return undefined;
@@ -980,8 +1047,9 @@ async function runCommand(
   try {
     const resolvedCwd = options.gitAware === true ? await resolveGitAwareCwd(cwd) : cwd;
     const proc = Bun.spawn({ cmd: [...cmd], cwd: resolvedCwd, stdout: "pipe", stderr: "pipe" });
-    const [stdout, exitCode] = await Promise.all([
+    const [stdout, stderr, exitCode] = await Promise.all([
       readProcessText(proc.stdout),
+      readProcessText(proc.stderr),
       proc.exited,
     ]);
     return exitCode === 0 ? stdout : undefined;

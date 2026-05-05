@@ -41,6 +41,7 @@ import {
   dedupeFindings,
   findingFingerprint,
   renderMarkdownReport,
+  severityEmoji,
   statusForFindings,
 } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
@@ -169,7 +170,7 @@ test("discovers pull request by explicit number", async () => {
 
   const discovered = await discoverPullRequest("/repo", commandRunner, 42);
   expect(discovered?.number).toBe(42);
-  expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName");
+  expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName,headRefOid");
 });
 
 test("prefers explicit PR patch diff when review PR is provided", async () => {
@@ -587,6 +588,9 @@ test("builds triage review summary body", () => {
 
   expect(body).toContain("## At a Glance");
   expect(body).toContain("## Fix Now");
+  expect(body).toContain("🔴 0 critical, ⚠️ 1 warning");
+  expect(body).toContain("- ⚠️ Anchored issue (src/app.ts:12)");
+  expect(body).toContain("- ✅ No follow-up findings.");
 });
 
 test("builds impact review summary body", () => {
@@ -611,6 +615,10 @@ test("builds impact review summary body", () => {
 
   expect(body).toContain("## Impact Summary");
   expect(body).toContain("### Runtime / Performance");
+  expect(body).toContain("- ⚠️ Perf issue (src/app.ts:12)");
+  expect(body).toContain("- ✅ No security findings.");
+  expect(body).toContain("- ✅ No quality findings.");
+  expect(body).toContain("- ✅ No compliance findings.");
 });
 
 test("builds evidence review summary body", () => {
@@ -634,7 +642,115 @@ test("builds evidence review summary body", () => {
   });
 
   expect(body).toContain("## Why / Evidence / Fix");
-  expect(body).toContain("### Finding 1: Doc mismatch");
+  expect(body).toContain("### Finding 1: ⚠️ Doc mismatch");
+});
+
+test("formats pending review comments with severity emojis", () => {
+  const findings: Finding[] = [
+    {
+      id: "finding-critical",
+      severity: "critical",
+      title: "Critical issue",
+      description: "A critical validated finding.",
+      evidence: "Critical evidence.",
+      sourceRole: "security",
+      file: "src/security.ts",
+      line: 7,
+      validation: { status: "verified", details: "Reproduced locally." },
+    },
+    {
+      id: "finding-warning",
+      severity: "warning",
+      title: "Warning issue",
+      description: "A warning validated finding.",
+      evidence: "Warning evidence.",
+      sourceRole: "quality",
+      file: "src/quality.ts",
+      line: 9,
+      validation: { status: "verified", details: "Reproduced locally." },
+    },
+  ];
+
+  const comments = findingsToPendingReviewComments(findings);
+
+  expect(comments[0]?.body).toContain("### 🔴 Critical issue");
+  expect(comments[0]?.body).not.toContain("CRITICAL:");
+  expect(comments[1]?.body).toContain("### ⚠️ Warning issue");
+  expect(comments[1]?.body).not.toContain("WARNING:");
+});
+
+test("builds evidence review summary no-findings body with green check", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "evidence",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("✅ No findings - code looks good!");
+});
+
+test("builds impact review summary no-findings body with green check", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("## Impact Summary");
+  expect(body).toContain("✅ No findings - code looks good!");
+  expect(body).not.toContain("### Security");
+});
+
+test("builds triage review summary no-findings body with green check", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "triage",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("## At a Glance");
+  expect(body).toContain("🔴 0 critical, ⚠️ 0 warning");
+  expect(body).toContain("✅ No findings - code looks good!");
+  expect(body).not.toContain("## Fix Now");
+});
+
+test("formats subsection empty states with green check emoji", () => {
+  const securityFinding: Finding = {
+    id: "finding-1",
+    severity: "critical",
+    title: "Security issue",
+    description: "A security finding.",
+    evidence: "Evidence here.",
+    sourceRole: "security",
+    file: "src/app.ts",
+    line: 10,
+    validation: { status: "verified", details: "Verified." },
+  };
+
+  const impactBody = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [securityFinding],
+    postedCommentCount: 1,
+    skippedUnanchorable: 0,
+  });
+
+  expect(impactBody).toContain("- 🔴 Security issue (src/app.ts:10)");
+  expect(impactBody).toContain("- ✅ No performance findings.");
+  expect(impactBody).toContain("- ✅ No quality findings.");
+  expect(impactBody).toContain("- ✅ No compliance findings.");
+
+  const triageBody = buildPendingReviewSummaryBody({
+    style: "triage",
+    findings: [securityFinding],
+    postedCommentCount: 1,
+    skippedUnanchorable: 0,
+  });
+
+  expect(triageBody).toContain("- 🔴 Security issue (src/app.ts:10)");
+  expect(triageBody).toContain("- ✅ No follow-up findings.");
 });
 
 test("renders severity emojis in markdown report", () => {
@@ -668,6 +784,12 @@ test("renders severity emojis in markdown report", () => {
   expect(report).toContain("## 2. ⚠️ Warning performance issue");
   expect(report).not.toContain("CRITICAL:");
   expect(report).not.toContain("WARNING:");
+});
+
+test("uses unknown severity fallback emoji", () => {
+  expect(severityEmoji("critical")).toBe("🔴");
+  expect(severityEmoji("warning")).toBe("⚠️");
+  expect(severityEmoji("info" as Finding["severity"])).toBe("❓");
 });
 
 test("builds opencode command behind the adapter boundary", () => {

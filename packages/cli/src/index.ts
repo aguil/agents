@@ -2,8 +2,9 @@ import { createCodeReviewAdapter, runCodeReview } from "@aguil/agents-code-revie
 import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
+import { severityEmoji } from "@aguil/agents-reporting";
 import { access, readFile, rm, writeFile, readdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
   if (argv.includes("--help") || argv.length === 0) {
@@ -180,10 +181,6 @@ Options:
   return 1;
 }
 
-if (import.meta.main) {
-  process.exitCode = await main();
-}
-
 interface CliOptions {
   readonly workspace?: string;
   readonly scratchpad?: string;
@@ -344,7 +341,7 @@ function printVerboseFindingSummary(findings: readonly Finding[]): void {
       : finding.line === undefined
       ? finding.file
       : `${finding.file}:${finding.line}`;
-    console.log(`- [${finding.severity}] ${location} - ${summarizeFindingMessage(finding.title)}`);
+    console.log(`- ${severityEmoji(finding.severity)} ${location} - ${summarizeFindingMessage(finding.title)}`);
   }
   if (findings.length > shown.length) {
     console.log(`- ... ${findings.length - shown.length} more`);
@@ -695,7 +692,7 @@ export function findingsToPendingReviewComments(findings: readonly Finding[]): r
 
 function formatPendingReviewBody(finding: Finding): string {
   return [
-    `### ${finding.severity.toUpperCase()}: ${finding.title}`,
+    `### ${severityEmoji(finding.severity)} ${finding.title}`,
     "",
     finding.description,
     "",
@@ -870,21 +867,29 @@ function renderTriageSummary(
 ): string {
   const critical = findings.filter((finding) => finding.severity === "critical");
   const warnings = findings.filter((finding) => finding.severity === "warning");
-  const fixNow = [...critical, ...warnings].slice(0, 2);
-  const followUp = [...critical, ...warnings].slice(2, 6);
-
-  return [
+  const lines = [
     "## At a Glance",
-    `- Findings: ${findings.length} (${critical.length} critical, ${warnings.length} warning)`,
+    `- Findings: ${findings.length} (🔴 ${critical.length} critical, ⚠️ ${warnings.length} warning)`,
     `- Inline comments posted: ${postedCommentCount}`,
     `- Skipped outside PR diff: ${skippedUnanchorable}`,
+  ];
+
+  if (findings.length === 0) {
+    lines.push("", "✅ No findings - code looks good!");
+    return lines.join("\n");
+  }
+
+  const fixNow = [...critical, ...warnings].slice(0, 2);
+  const followUp = [...critical, ...warnings].slice(2, 6);
+  lines.push(
     "",
     "## Fix Now",
     ...formatFindingBullets(fixNow, "No immediate findings."),
     "",
     "## Follow-up",
     ...formatFindingBullets(followUp, "No follow-up findings."),
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function renderImpactSummary(
@@ -892,6 +897,18 @@ function renderImpactSummary(
   postedCommentCount: number,
   skippedUnanchorable: number,
 ): string {
+  const lines = [
+    "## Impact Summary",
+    `- Total findings: ${findings.length}`,
+    `- Inline comments posted: ${postedCommentCount}`,
+    `- Skipped outside PR diff: ${skippedUnanchorable}`,
+  ];
+
+  if (findings.length === 0) {
+    lines.push("", "✅ No findings - code looks good!");
+    return lines.join("\n");
+  }
+
   const groups: Record<Finding["sourceRole"], Finding[]> = {
     security: [],
     performance: [],
@@ -903,11 +920,7 @@ function renderImpactSummary(
     groups[finding.sourceRole].push(finding);
   }
 
-  return [
-    "## Impact Summary",
-    `- Total findings: ${findings.length}`,
-    `- Inline comments posted: ${postedCommentCount}`,
-    `- Skipped outside PR diff: ${skippedUnanchorable}`,
+  lines.push(
     "",
     "### Security",
     ...formatFindingBullets(groups.security, "No security findings."),
@@ -920,7 +933,8 @@ function renderImpactSummary(
     "",
     "### Documentation / Compliance",
     ...formatFindingBullets(groups.compliance, "No compliance findings."),
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function renderEvidenceSummary(
@@ -936,14 +950,14 @@ function renderEvidenceSummary(
   ];
 
   if (findings.length === 0) {
-    lines.push("", "No findings were generated.");
+    lines.push("", "✅ No findings - code looks good!");
     return lines.join("\n");
   }
 
   for (const [index, finding] of findings.slice(0, 6).entries()) {
     lines.push(
       "",
-      `### Finding ${index + 1}: ${finding.title}`,
+      `### Finding ${index + 1}: ${severityEmoji(finding.severity)} ${finding.title}`,
       `- Why: ${finding.description}`,
       `- Evidence: ${finding.evidence}`,
       `- Suggested fix: ${suggestFixFromRole(finding.sourceRole)}`,
@@ -955,13 +969,13 @@ function renderEvidenceSummary(
 
 function formatFindingBullets(findings: readonly Finding[], emptyLine: string): readonly string[] {
   if (findings.length === 0) {
-    return [`- ${emptyLine}`];
+    return [`- ✅ ${emptyLine}`];
   }
   return findings.map((finding) => {
     const location = finding.file !== undefined && finding.line !== undefined
       ? ` (${finding.file}:${finding.line})`
       : "";
-    return `- ${finding.title}${location}`;
+    return `- ${severityEmoji(finding.severity)} ${finding.title}${location}`;
   });
 }
 
@@ -1077,27 +1091,54 @@ async function ghApi<T>(
 }
 
 async function runGh<T>(args: readonly string[], workspacePath?: string): Promise<T> {
-  const gitAware = await resolveGitAwareCwd(workspacePath);
-  const proc = Bun.spawn({
-    cmd: ["gh", ...args],
-    cwd: gitAware,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const gitAware = await resolveGhCwd(workspacePath);
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const proc = Bun.spawn({
+      cmd: ["gh", ...args],
+      cwd: gitAware,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    readProcessText(proc.stdout),
-    readProcessText(proc.stderr),
-    proc.exited,
-  ]);
-  if (exitCode !== 0) {
-    throw new Error(`gh ${args.join(" ")} failed: ${stderr.trim() || `exit code ${exitCode}`}`);
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readProcessText(proc.stdout),
+      readProcessText(proc.stderr),
+      proc.exited,
+    ]);
+    if (exitCode === 0) {
+      if (stdout.trim().length === 0) {
+        return undefined as T;
+      }
+      return JSON.parse(stdout) as T;
+    }
+
+    const message = stderr.trim() || `exit code ${exitCode}`;
+    const isTransientNetwork =
+      /error connecting to api\.github\.com/i.test(message) ||
+      /\bTLS handshake timeout\b/i.test(message) ||
+      /\btimeout\b/i.test(message) ||
+      /\btemporarily unavailable\b/i.test(message) ||
+      /\bconnection reset\b/i.test(message) ||
+      /\bconnection refused\b/i.test(message) ||
+      /\bEOF\b/i.test(message) ||
+      /\bno such host\b/i.test(message) ||
+      /\bnetwork is unreachable\b/i.test(message);
+    if (!isTransientNetwork || attempt === maxAttempts) {
+      throw new Error(`gh ${args.join(" ")} failed: ${message}`);
+    }
   }
-  if (stdout.trim().length === 0) {
-    return undefined as T;
+
+  throw new Error(`gh ${args.join(" ")} failed: exhausted retries`);
+}
+
+async function resolveGhCwd(workspacePath?: string): Promise<string> {
+  const jjGitRoot = (await runCommand(["jj", "git", "root"], workspacePath))?.trim();
+  if (jjGitRoot !== undefined && jjGitRoot.length > 0) {
+    return dirname(jjGitRoot);
   }
-  return JSON.parse(stdout) as T;
+  return resolveGitAwareCwd(workspacePath);
 }
 
 async function resolveRepoNameWithOwnerFromRemote(workspacePath?: string): Promise<string | undefined> {
@@ -1206,6 +1247,10 @@ interface GitHubPullRequestReview {
 interface GitHubPullRequestFile {
   readonly filename: string;
   readonly patch?: string;
+}
+
+if (import.meta.main) {
+  process.exitCode = await main();
 }
 
 type PullRequestDiffContext = ReadonlyMap<string, ReadonlyMap<number, number>>;
