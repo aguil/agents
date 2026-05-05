@@ -13,28 +13,13 @@ agents/
   packages/         Shared contracts and runtime infrastructure.
 ```
 
-## Commands
+## Quick Start
 
 ```bash
 bun install
 bun run build
 bun run typecheck
 bun test
-bun run agents run code-review --adapter fake
-bun run agents run code-review --adapter opencode --model <provider/model>
-bun run agents run code-review --adapter claude --model <model>
-bun run agents run code-review --adapter claude --model <model> --strict
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1 --pending-review --no-confirm
-bun run agents run code-review --post-only
-bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/result.json
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
-bun run agents run code-review --adapter claude --model <model>
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --no-deterministic
 ```
 
 ## Prebuilt CLI
@@ -56,41 +41,6 @@ Then run reviews from your work-repo terminal with the bundled launcher:
 
 See `BUILD.md` for details.
 
-## Deterministic Runs
-
-- Deterministic mode is enabled by default and records deterministic metadata in `result.json`.
-- OpenCode deterministic defaults force `--pure` and support optional `--variant <id>` pinning.
-- Claude deterministic defaults are conservative: no extra arguments are injected beyond what you explicitly provide.
-- Use `--no-deterministic` to opt out.
-- Determinism is still best-effort because OpenCode/Claude CLI surfaces do not currently expose seed/temperature/top-p controls here.
-
-## Review Summary Options
-
-- `triage`: choose this when the PR author needs a fast, action-first queue. It surfaces what to fix immediately vs what can wait in follow-up.
-- `impact` (default): choose this when changes span multiple concerns or teams. It groups findings by domain (security, performance, quality, compliance) so owners can pick up the right slice quickly.
-- `evidence`: choose this when findings are nuanced, likely to be debated, or need stronger context. It expands each finding into "Why / Evidence / Fix" to support remediation decisions.
-
-Examples:
-
-```bash
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary triage
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary evidence
-```
-
-## Rate Limits and CI Usage
-
-- A `--review-pr` + `--pending-review` run typically performs around 7-8 GitHub API requests.
-- Authenticated users usually get 5,000 REST requests/hour (higher on some Enterprise plans), so this remains well within normal usage.
-- GitHub Actions `GITHUB_TOKEN` has lower limits per repository; use batching and avoid per-commit review loops in busy repos.
-- Check quota with `gh api rate_limit` if you hit `403`/`429` responses.
-- The CLI does not auto-retry or backoff on GitHub rate-limit responses.
-
-Windows note:
-
-- Windows is currently unsupported for interactive review-post confirmation prompts.
-- Use `--no-confirm` in Windows/CI environments.
-
 ## Principles
 
 - Bun/TypeScript is the default runtime and implementation language.
@@ -103,17 +53,8 @@ Windows note:
 
 - `harnesses/code-review`: multi-role code review using native Bun orchestration, JSONL events, scratchpad artifacts, risk-tier triage, and an agent-agnostic execution adapter.
 
-The `fake` adapter is deterministic and intended for local smoke tests. The `opencode` and `claude` adapters shell out to their CLIs and normalize emitted finding JSONL into harness events.
+The `fake` adapter is deterministic and intended for local smoke tests. The `opencode`, `claude`, and `cursor` adapters shell out to their CLIs and normalize emitted finding JSONL into harness events.
 
 The code-review harness also attempts to auto-discover the active PR, ingest PR title/description, and fetch PR-referenced docs scoped to the configured tracking-remote org.
 
-## Human In The Loop
-
-- Run review locally from your working branch.
-- Use `--review-pr <number>` when you want context and diff collection from a specific PR (including merged PRs); PR lookups use the repo from `--workspace`.
-- Inspect `report.md` for human-readable findings and `result.json` for machine-readable status.
-- Fix code or mark rationale in your PR description/comments.
-- Re-run until output is acceptable.
-- Optionally post findings as an unsubmitted PR review with `--pending-review`.
-
-See `harnesses/code-review/README.md` for the concrete run workflow and expected output artifacts.
+See `harnesses/code-review/README.md` for code-review commands, adapter examples, model references, and workflow details.

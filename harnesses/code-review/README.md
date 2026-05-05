@@ -4,31 +4,131 @@ Multi-agent code review harness built on the shared Bun/TypeScript runtime.
 
 The harness runs role-specialized reviewers in parallel through an agent-agnostic execution adapter. OpenCode, Claude Code, Cursor CLI, and pi.dev can be added as adapters without changing the code-review workflow.
 
-The first implementation includes:
+The current implementation includes:
 
 - `FakeAgentAdapter` for deterministic tests and local smoke runs.
-- `OpenCodeAdapter` for real opt-in reviewer sessions through `opencode run --format json`.
+- `OpenCodeAdapter` for opt-in reviewer sessions through `opencode run --format json`.
 - `ClaudeCodeAdapter` for opt-in Claude Code subprocess sessions.
+- `CursorAdapter` for opt-in Cursor CLI subprocess sessions.
 
-Run locally with:
+## Quick Start
+
+```bash
+# Deterministic smoke test (no provider/API calls)
+bun run agents run code-review --adapter fake
+
+# Real review runs
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
+bun run agents run code-review --adapter claude --model claude-sonnet-4
+bun run agents run code-review --adapter cursor --model sonnet-4
+```
+
+## Adapter Examples
+
+### OpenCode
+
+```bash
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --agent code-review
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --no-deterministic
+```
+
+Common model IDs:
+
+- `opencode/gpt-5.3-codex`
+- `opencode/gpt-4.5`
+- `opencode/claude-sonnet-4`
+- `opencode/o1`
+
+Discover models with `opencode models` (or `opencode models <provider>`).
+
+### Claude
+
+```bash
+bun run agents run code-review --adapter claude --model claude-sonnet-4
+bun run agents run code-review --adapter claude --model claude-opus-4
+bun run agents run code-review --adapter claude --model claude-haiku-4
+bun run agents run code-review --adapter claude --claude-args "-p,{prompt},--model,claude-sonnet-4"
+```
+
+Common model IDs:
+
+- `claude-sonnet-4`
+- `claude-opus-4`
+- `claude-haiku-4`
+
+### Cursor
+
+```bash
+bun run agents run code-review --adapter cursor --model sonnet-4
+bun run agents run code-review --adapter cursor --model sonnet-4-thinking --cursor-mode plan
+bun run agents run code-review --adapter cursor --model gpt-5 --cursor "$(which agent)"
+bun run agents run code-review --adapter cursor --cursor-args "--print,--output-format,stream-json,--workspace,{workspace},--trust,--force,{prompt}"
+```
+
+Common model IDs:
+
+- `sonnet-4`
+- `sonnet-4-thinking`
+- `gpt-5`
+- `o1`
+
+Discover models with `agent models`.
+
+### Fake
 
 ```bash
 bun run agents run code-review --adapter fake
-bun run agents run code-review --adapter opencode --model <provider/model>
-bun run agents run code-review --adapter claude --model <model>
-bun run agents run code-review --adapter claude --model <model> --strict
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1 --pending-review --no-confirm
-bun run agents run code-review --post-only
-bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/result.json
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
-bun run agents run code-review --adapter claude --model <model>
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --no-deterministic
 ```
+
+## Choosing an Adapter
+
+- `fake`: local smoke tests and CI checks with deterministic output.
+- `opencode`: multi-provider flexibility and variant pinning.
+- `claude`: direct Claude Code CLI workflows.
+- `cursor`: direct Cursor CLI workflows with MCP support.
+
+## Common Workflows
+
+```bash
+# Local debugging and adapter smoke tests
+bun run agents run code-review --adapter cursor --model sonnet-4 --dry-run --verbose --show-commands
+
+# Review context from a specific PR (including merged PRs)
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 42
+
+# Create (or replace) pending review comments on the PR
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 42 --pending-review --pr 42 --no-confirm
+
+# Replay from captured context for consistency checks
+bun run agents run code-review --adapter claude --model claude-sonnet-4 --context-bundle .review-agent/runs/<run-id>/context/bundle.json
+
+# Multi-pass consensus run
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
+
+# Publish existing findings without re-running models
+bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/result.json
+```
+
+## Troubleshooting
+
+```bash
+# Verify adapter executables are installed and callable
+which opencode && opencode --version
+which claude && claude --version
+which agent && agent --version
+
+# Inspect raw adapter output for failures/timeouts
+cat .review-agent/runs/<run-id>/roles/<role>/stderr.log
+cat .review-agent/runs/<run-id>/roles/<role>/stdout.log
+
+# Re-run with command/event visibility
+bun run agents run code-review --adapter cursor --model sonnet-4 --dry-run --verbose --show-commands
+```
+
+For Cursor custom templates, keep `--trust` in `--cursor-args` for non-interactive runs.
+When using `--dry-run`, inspect artifacts under `.review-agent/dry-run/<run-id>/`.
 
 ## Human-In-The-Loop Workflow
 
@@ -83,10 +183,12 @@ Deterministic mode:
 - Deterministic mode is enabled by default and emits deterministic metadata in `result.json`.
 - For OpenCode, deterministic defaults enable `--pure`; use `--variant <id>` to pin a provider-specific effort profile.
 - For Claude, deterministic defaults are conservative and do not add extra CLI args unless you explicitly pass `--claude-args`.
+- For Cursor, deterministic defaults use `--print --output-format stream-json --trust --force` and rely on Cursor's default `agent` mode.
+- Cursor non-interactive runs require a trusted workspace. If you override `--cursor-args`, keep `--trust` in the template.
 - Use `--no-deterministic` to opt out.
 - Determinism remains best-effort because seed/temperature/top-p controls are not currently surfaced by this harness CLI.
 
-Review summary examples:
+## Review Summary Examples
 
 - `triage`: use when the author needs immediate prioritization. This format emphasizes near-term actions with "Fix Now" and "Follow-up" sections so work can be sequenced quickly.
 
@@ -181,19 +283,19 @@ Core artifacts:
 - `metadata.pr_head_diverged`: `true` if posting happened after PR head changed
 - `reportPath` and `contextBundlePath`
 
-Rate limiting:
+## Rate Limiting
 
 - A full `--review-pr` + `--pending-review` flow usually performs around 7-8 GitHub API requests.
 - Check quota with `gh api rate_limit` if you encounter `403`/`429` responses.
 - The CLI does not currently implement automatic rate-limit retries/backoff.
 
-Known limitations:
+## Known Limitations
 
 - Windows interactive prompt support is currently unavailable; use `--no-confirm`.
 
 `events.jsonl` also includes periodic role heartbeat events (`type: tool`) with elapsed time and byte counts so long-running reviews can be diagnosed while still running.
 
-CLI exit code:
+## CLI Exit Code
 
 - `0` when status is `passed`, `warnings`, or `failed`
 - `1` when status is `error` (for example: adapter spawn failure or fatal orchestration error)
@@ -206,7 +308,7 @@ Use this template when posting manual HITL review output to a pull request:
 ## Code Review Harness (HITL)
 
 - Run ID: `<run-id>`
-- Adapter: `<fake|opencode|claude>`
+- Adapter: `<fake|opencode|claude|cursor>`
 - Triage Tier: `<trivial|lite|full>`
 - Status: `<passed|warnings|failed|error>`
 

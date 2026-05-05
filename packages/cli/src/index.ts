@@ -1,7 +1,7 @@
 import { createCodeReviewAdapter, runCodeReview } from "@aguil/agents-code-review";
 import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
 import { resolveGitAwarePath } from "@aguil/agents-core";
-import type { Finding } from "@aguil/agents-core";
+import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { access, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -15,15 +15,21 @@ Commands:
 Options:
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
+  --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
   --context-bundle <path> Reuse an existing context bundle JSON for replay
   --consensus <n>        Run n passes and keep recurring findings (default: 3 with --pending-review)
-  --adapter <name>       Execution adapter: fake, opencode, or claude (default: fake)
-  --model <id>           Model passed to opencode/claude
+  --adapter <name>       Execution adapter: fake, opencode, claude, or cursor (default: fake)
+  --model <id>           Model passed to opencode/claude/cursor
   --variant <id>         OpenCode variant (provider-specific effort profile)
   --agent <name>         OpenCode agent name
   --opencode <path>      OpenCode executable (default: opencode)
   --claude <path>        Claude Code executable (default: claude)
   --claude-args <value>  Comma-separated arg template for Claude (supports {prompt})
+  --cursor <path>        Cursor CLI executable (default: agent)
+  --cursor-args <value>  Comma-separated arg template for Cursor (supports {prompt}; keep --trust)
+  --cursor-mode <mode>   Cursor mode: agent, plan, or ask
+  --verbose, -v          Print compact progress and finding summaries
+  --show-commands        Print adapter commands before and after execution
   --no-deterministic     Disable deterministic adapter defaults
   --strict               Fail run on any role error or timeout
   --pending-review       Create an unsubmitted GitHub PR review
@@ -48,6 +54,12 @@ Options:
       console.error(`Unsupported adapter: ${options.adapter}`);
       return 1;
     }
+    const cursorMode = parseCursorMode(options.cursorMode);
+    if (options.cursorMode !== undefined && cursorMode === undefined) {
+      console.error(`Invalid --cursor-mode value: ${options.cursorMode}`);
+      console.error("Expected one of: agent, plan, ask.");
+      return 1;
+    }
     const deterministicEnabled = !options.noDeterministic;
     const effectiveAdapter = resolveEffectiveAdapterOptions(options, adapterName, deterministicEnabled);
     const adapter = createCodeReviewAdapter(adapterName, {
@@ -64,6 +76,13 @@ Options:
         model: effectiveAdapter.claude.model,
         argsTemplate: effectiveAdapter.claude.argsTemplate,
       },
+      cursor: {
+        executable: options.cursor,
+        model: effectiveAdapter.cursor.model,
+        argsTemplate: effectiveAdapter.cursor.argsTemplate,
+        mode: cursorMode ?? effectiveAdapter.cursor.mode,
+        force: effectiveAdapter.cursor.force,
+      },
     });
 
     const requestedConsensusRuns = parseConsensusRuns(options.consensus);
@@ -72,24 +91,38 @@ Options:
       console.error("Expected a positive integer greater than 0.");
       return 1;
     }
-    const consensusRuns = requestedConsensusRuns ?? (options.pendingReview ? 3 : undefined);
+    const pendingReviewEnabled = options.pendingReview && !options.dryRun;
+    const consensusRuns = requestedConsensusRuns ?? (pendingReviewEnabled ? 3 : undefined);
     const reviewPrNumber = parsePrNumber(options.reviewPr);
     if (options.reviewPr !== undefined && reviewPrNumber === undefined) {
       console.error(`Invalid --review-pr value: ${options.reviewPr}`);
       return 1;
     }
 
+    if (options.verbose) {
+      console.log(`Starting code review with adapter '${adapterName}'.`);
+    }
+
     const result = await runCodeReview({
       workspacePath: options.workspace,
-      scratchpadRoot: options.scratchpad,
+      scratchpadRoot: resolveScratchpadRoot(options),
       contextBundlePath: options.contextBundle,
       reviewPrNumber,
       consensusRuns,
       strict: options.strict,
       metadata: await buildDeterminismMetadata(adapterName, effectiveAdapter, options, deterministicEnabled),
       adapter,
+      onEvent: createRunEventLogger(options),
     });
-    console.log(`Code review ${result.status}. Report: ${result.reportPath}`);
+    if (options.verbose) {
+      printVerboseFindingSummary(result.findings);
+      console.log(`Code review ${result.status}.`);
+      console.log(`Report: ${result.reportPath}`);
+    } else if (options.dryRun) {
+      console.log(`Dry-run ${result.status}. Report: ${result.reportPath}`);
+    } else {
+      console.log(`Code review ${result.status}. Report: ${result.reportPath}`);
+    }
 
     try {
       const staleCheck = await checkReviewPullRequestDivergence(result.metadata, options.workspace);
@@ -102,7 +135,7 @@ Options:
       // Non-fatal: staleness checks should not block review runs.
     }
 
-    if (options.pendingReview) {
+    if (pendingReviewEnabled) {
       const prNumber = parsePrNumber(options.pr);
       if (options.pr !== undefined && prNumber === undefined) {
         console.error(`Invalid --pr value: ${options.pr}`);
@@ -154,6 +187,7 @@ if (import.meta.main) {
 interface CliOptions {
   readonly workspace?: string;
   readonly scratchpad?: string;
+  readonly dryRun: boolean;
   readonly contextBundle?: string;
   readonly result?: string;
   readonly consensus?: string;
@@ -164,6 +198,11 @@ interface CliOptions {
   readonly opencode?: string;
   readonly claude?: string;
   readonly claudeArgs?: string;
+  readonly cursor?: string;
+  readonly cursorArgs?: string;
+  readonly cursorMode?: string;
+  readonly verbose: boolean;
+  readonly showCommands: boolean;
   readonly reviewPr?: string;
   readonly pr?: string;
   readonly reviewSummary?: string;
@@ -218,6 +257,12 @@ interface EffectiveAdapterOptions {
     readonly model?: string;
     readonly argsTemplate?: readonly string[];
   };
+  readonly cursor: {
+    readonly model?: string;
+    readonly argsTemplate?: readonly string[];
+    readonly mode?: "agent" | "plan" | "ask";
+    readonly force: boolean;
+  };
 }
 
 function parseOptions(argv: readonly string[]): CliOptions {
@@ -225,6 +270,10 @@ function parseOptions(argv: readonly string[]): CliOptions {
   const flags = new Set<string>();
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === "-v") {
+      flags.add("verbose");
+      continue;
+    }
     if (!arg.startsWith("--")) {
       continue;
     }
@@ -240,6 +289,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
   return {
     workspace: options.workspace,
     scratchpad: options.scratchpad,
+    dryRun: flags.has("dry-run"),
     contextBundle: options["context-bundle"],
     result: options.result,
     consensus: options.consensus,
@@ -250,6 +300,11 @@ function parseOptions(argv: readonly string[]): CliOptions {
     opencode: options.opencode,
     claude: options.claude,
     claudeArgs: options["claude-args"],
+    cursor: options.cursor,
+    cursorArgs: options["cursor-args"],
+    cursorMode: options["cursor-mode"],
+    verbose: flags.has("verbose"),
+    showCommands: flags.has("show-commands"),
     reviewPr: options["review-pr"],
     pr: options.pr,
     reviewSummary: options["review-summary"],
@@ -261,6 +316,127 @@ function parseOptions(argv: readonly string[]): CliOptions {
     pure: flags.has("pure"),
     printLogs: flags.has("print-logs"),
   };
+}
+
+function resolveScratchpadRoot(options: CliOptions): string | undefined {
+  if (options.scratchpad !== undefined) {
+    return options.scratchpad;
+  }
+  if (!options.dryRun) {
+    return undefined;
+  }
+  const workspacePath = resolve(options.workspace ?? process.cwd());
+  return join(workspacePath, ".review-agent", "dry-run");
+}
+
+function printVerboseFindingSummary(findings: readonly Finding[]): void {
+  if (findings.length === 0) {
+    console.log("Findings: none.");
+    return;
+  }
+
+  console.log(`Findings (${findings.length}):`);
+  const limit = 10;
+  const shown = findings.slice(0, limit);
+  for (const finding of shown) {
+    const location = finding.file === undefined
+      ? "(no file)"
+      : finding.line === undefined
+      ? finding.file
+      : `${finding.file}:${finding.line}`;
+    console.log(`- [${finding.severity}] ${location} - ${summarizeFindingMessage(finding.title)}`);
+  }
+  if (findings.length > shown.length) {
+    console.log(`- ... ${findings.length - shown.length} more`);
+  }
+}
+
+function summarizeFindingMessage(message: string): string {
+  const firstSentence = message.split(/[.!?]\s/, 1)[0]?.trim();
+  return firstSentence && firstSentence.length > 0 ? firstSentence : message.trim();
+}
+
+function createRunEventLogger(options: CliOptions): ((event: AgentEvent) => void) | undefined {
+  if (!options.verbose && !options.showCommands) {
+    return undefined;
+  }
+
+  return (event) => {
+    if (options.showCommands && event.type === "tool") {
+      const commandData = parseCommandEventData(event.data);
+      if (commandData?.phase === "before") {
+        console.log(`[${event.roleId}] command (before): ${formatCommand(commandData.cmd)}`);
+      }
+    }
+
+    if (options.showCommands && (event.type === "completed" || event.type === "error")) {
+      const completionData = parseCommandCompletionData(event.data);
+      if (completionData !== undefined) {
+        const durationLabel = completionData.elapsedMs === undefined
+          ? "duration=unknown"
+          : `duration=${Math.round(completionData.elapsedMs)}ms`;
+        const exitLabel = completionData.exitCode === undefined
+          ? "exit=unknown"
+          : `exit=${completionData.exitCode}`;
+        console.log(`[${event.roleId}] command (after): ${formatCommand(completionData.command)} (${exitLabel}, ${durationLabel})`);
+      }
+    }
+
+    if (!options.verbose) {
+      return;
+    }
+    if (event.type === "started") {
+      console.log(`[${event.roleId}] started`);
+    }
+    if (event.type === "completed") {
+      console.log(`[${event.roleId}] completed`);
+    }
+    if (event.type === "error") {
+      console.log(`[${event.roleId}] error: ${event.message ?? "unknown error"}`);
+    }
+  };
+}
+
+function parseCommandEventData(data: unknown): { readonly phase: string; readonly cmd: readonly string[] } | undefined {
+  if (typeof data !== "object" || data === null) {
+    return undefined;
+  }
+  const phase = (data as { readonly phase?: unknown }).phase;
+  const cmd = (data as { readonly cmd?: unknown }).cmd;
+  if (typeof phase !== "string" || !Array.isArray(cmd) || !cmd.every((part) => typeof part === "string")) {
+    return undefined;
+  }
+  return { phase, cmd };
+}
+
+function parseCommandCompletionData(data: unknown): {
+  readonly command: readonly string[];
+  readonly exitCode?: number;
+  readonly elapsedMs?: number;
+} | undefined {
+  if (typeof data !== "object" || data === null) {
+    return undefined;
+  }
+  const command = (data as { readonly command?: unknown }).command;
+  if (!Array.isArray(command) || !command.every((part) => typeof part === "string")) {
+    return undefined;
+  }
+  const exitCodeValue = (data as { readonly exitCode?: unknown }).exitCode;
+  const elapsedMsValue = (data as { readonly elapsedMs?: unknown }).elapsedMs;
+  const exitCode = typeof exitCodeValue === "number" ? exitCodeValue : undefined;
+  const elapsedMs = typeof elapsedMsValue === "number" ? elapsedMsValue : undefined;
+  return { command, exitCode, elapsedMs };
+}
+
+function formatCommand(cmd: readonly string[]): string {
+  return cmd.map(quoteCommandPart).join(" ");
+}
+
+function quoteCommandPart(part: string): string {
+  if (/^[A-Za-z0-9_./:=+-]+$/.test(part)) {
+    return part;
+  }
+  return JSON.stringify(part);
 }
 
 function parseConsensusRuns(value: string | undefined): number | undefined {
@@ -275,8 +451,18 @@ function parseConsensusRuns(value: string | undefined): number | undefined {
 }
 
 function parseAdapterName(value: string | undefined): CodeReviewAdapterName | undefined {
-  if (value === undefined || value === "fake" || value === "opencode" || value === "claude") {
+  if (value === undefined || value === "fake" || value === "opencode" || value === "claude" || value === "cursor") {
     return value ?? "fake";
+  }
+  return undefined;
+}
+
+function parseCursorMode(value: string | undefined): "agent" | "plan" | "ask" | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "agent" || value === "plan" || value === "ask") {
+    return value;
   }
   return undefined;
 }
@@ -308,6 +494,12 @@ function resolveEffectiveAdapterOptions(
       model: options.model,
       argsTemplate: parseCommaSeparated(options.claudeArgs),
     },
+    cursor: {
+      model: options.model,
+      argsTemplate: parseCommaSeparated(options.cursorArgs),
+      mode: parseCursorMode(options.cursorMode),
+      force: true,
+    },
   };
 }
 
@@ -333,6 +525,14 @@ async function buildDeterminismMetadata(
     metadata.claude_model = effective.claude.model ?? "";
     metadata.claude_args_template = effective.claude.argsTemplate?.join(",") ?? "";
     metadata.claude_version = await detectExecutableVersion(options.claude ?? "claude");
+  }
+
+  if (adapterName === "cursor") {
+    metadata.cursor_model = effective.cursor.model ?? "";
+    metadata.cursor_args_template = effective.cursor.argsTemplate?.join(",") ?? "";
+    metadata.cursor_mode = effective.cursor.mode ?? "";
+    metadata.cursor_force = effective.cursor.force ? "true" : "false";
+    metadata.cursor_version = await detectExecutableVersion(options.cursor ?? "agent");
   }
 
   return metadata;

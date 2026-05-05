@@ -28,6 +28,8 @@ import {
 import {
   SubprocessAgentAdapter,
   buildClaudeCodeCommand,
+  buildCursorCommand,
+  buildCursorPrompt,
   buildOpenCodeCommand,
   buildOpenCodePrompt,
   collectAgentRun,
@@ -752,6 +754,116 @@ test("builds claude command behind the adapter boundary", () => {
   expect(command[2]).toContain("quality specialist");
 });
 
+test("builds cursor command behind the adapter boundary", () => {
+  const command = buildCursorCommand(
+    {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: "/repo",
+      contextBundlePath: "/scratch/context.json",
+      scratchpadPath: "/scratch/roles/quality",
+      timeoutMs: 1_000,
+      allowedCommands: ["bun test"],
+    },
+    "/scratch/roles/quality/quality.request.json",
+    {
+      executable: "agent-test",
+      model: "cursor-model",
+      mode: "agent",
+      force: true,
+      sandbox: "enabled",
+    },
+  );
+
+  expect(command[0]).toBe("agent-test");
+  expect(command).toContain("--print");
+  expect(command).toContain("--output-format");
+  expect(command).toContain("stream-json");
+  expect(command).toContain("--workspace");
+  expect(command).toContain("/repo");
+  expect(command).toContain("--trust");
+  expect(command).toContain("--force");
+  expect(command).toContain("--model");
+  expect(command).toContain("cursor-model");
+  expect(command).toContain("--sandbox");
+  expect(command).toContain("enabled");
+  expect(command.at(-1)).toContain("quality specialist");
+});
+
+test("adds cursor --mode only for non-default modes", () => {
+  const command = buildCursorCommand(
+    {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: "/repo",
+      contextBundlePath: "/scratch/context.json",
+      scratchpadPath: "/scratch/roles/quality",
+      timeoutMs: 1_000,
+      allowedCommands: ["bun test"],
+    },
+    "/scratch/roles/quality/quality.request.json",
+    {
+      executable: "agent-test",
+      mode: "plan",
+    },
+  );
+
+  expect(command).toContain("--mode");
+  expect(command).toContain("plan");
+});
+
+test("builds cursor command from a custom args template", () => {
+  const command = buildCursorCommand(
+    {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: "/repo",
+      contextBundlePath: "/scratch/context.json",
+      scratchpadPath: "/scratch/roles/quality",
+      timeoutMs: 1_000,
+      allowedCommands: ["bun test"],
+    },
+    "/scratch/roles/quality/quality.request.json",
+    {
+      executable: "agent-test",
+      argsTemplate: ["--print", "--workspace", "{workspace}", "--mode", "ask"],
+    },
+  );
+
+  expect(command).toEqual([
+    "agent-test",
+    "--print",
+    "--workspace",
+    "/repo",
+    "--mode",
+    "ask",
+    expect.stringContaining("quality specialist"),
+  ]);
+});
+
+test("reuses claude-style prompt guidance for cursor", () => {
+  const prompt = buildCursorPrompt(
+    {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: "/repo",
+      contextBundlePath: "/scratch/context.json",
+      scratchpadPath: "/scratch/roles/quality",
+      timeoutMs: 1_000,
+      allowedCommands: ["jj diff"],
+      metadata: { vcs_mode: "jj" },
+    },
+    "/scratch/roles/quality/quality.request.json",
+  );
+
+  expect(prompt).toContain("workspace uses jujutsu");
+  expect(prompt).toContain("Emit each finding as a single JSON line");
+});
+
 test("uses fewer reviewer roles for lower-risk triage tiers", () => {
   expect(definitionForTriage("trivial").roles.map((role) => role.id)).toEqual(["quality"]);
   expect(definitionForTriage("lite").roles.map((role) => role.id)).toEqual([
@@ -874,6 +986,56 @@ test("captures subprocess stdout/stderr artifacts for debugging", async () => {
   }
 });
 
+test("emits command events before and after subprocess execution", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-command-events-"));
+  try {
+    const adapter = new SubprocessAgentAdapter({
+      name: "command-event-agent",
+      capabilities: {
+        streaming: true,
+        structuredOutput: true,
+        readOnlyMode: true,
+        mcp: false,
+        cancellation: true,
+      },
+      buildCommand: () => ({
+        cmd: [process.execPath, "--eval", "console.log('ok')"],
+        cwd: tempDir,
+      }),
+    });
+
+    const run = await collectAgentRun(adapter, {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: tempDir,
+      contextBundlePath: join(tempDir, "context.json"),
+      scratchpadPath: tempDir,
+      timeoutMs: 1_000,
+      allowedCommands: [],
+    });
+
+    const beforeEvent = run.events.find((event) =>
+      event.type === "tool" &&
+      typeof event.data === "object" &&
+      event.data !== null &&
+      (event.data as { readonly kind?: string }).kind === "command" &&
+      (event.data as { readonly phase?: string }).phase === "before"
+    );
+    const completionEvent = run.events.find((event) =>
+      event.type === "completed" &&
+      typeof event.data === "object" &&
+      event.data !== null &&
+      Array.isArray((event.data as { readonly command?: unknown }).command)
+    );
+
+    expect(beforeEvent).toBeDefined();
+    expect(completionEvent).toBeDefined();
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("handles missing subprocess binaries as adapter failures", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "agents-missing-binary-"));
   try {
@@ -932,6 +1094,28 @@ test("runs the code-review harness with a fake adapter", async () => {
     expect(result.status).toBe("warnings");
     expect(result.findings).toEqual([finding]);
     expect(await readFile(result.reportPath, "utf8")).toContain("Verified harness issue");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("forwards adapter events through runCodeReview onEvent callback", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-on-event-"));
+  try {
+    const eventTypes: string[] = [];
+    const result = await runCodeReview({
+      workspacePath: tempDir,
+      scratchpadRoot: join(tempDir, "scratchpad"),
+      runId: "test-on-event-run",
+      adapter: createFakeCodeReviewAdapter(),
+      onEvent(event) {
+        eventTypes.push(event.type);
+      },
+    });
+
+    expect(result.status).toBe("passed");
+    expect(eventTypes).toContain("started");
+    expect(eventTypes).toContain("completed");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
