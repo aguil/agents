@@ -31,6 +31,7 @@ export interface NativeBunOrchestratorOptions {
   readonly adapter: AgentAdapter;
   readonly eventSink?: EventSink;
   readonly contextBundlePath: string;
+  readonly embeddedPrompts?: Readonly<Record<string, string>>;
 }
 
 export class NativeBunOrchestrator implements Orchestrator {
@@ -90,7 +91,7 @@ export class NativeBunOrchestrator implements Orchestrator {
   }> {
     const roleScratchpadPath = join(request.scratchpadPath, "roles", role.id);
     await ensureDirectory(roleScratchpadPath);
-    const prompt = await readPrompt(role);
+    const prompt = await readPrompt(role, this.options.embeddedPrompts);
     const findings: Finding[] = [];
     let outcome: "completed" | "timed_out" | "failed" = "completed";
 
@@ -126,9 +127,16 @@ export class NativeBunOrchestrator implements Orchestrator {
   }
 }
 
-async function readPrompt(role: RoleDefinition): Promise<string> {
+async function readPrompt(
+  role: RoleDefinition,
+  embeddedPrompts?: Readonly<Record<string, string>>,
+): Promise<string> {
   if (role.prompt !== undefined) {
     return role.prompt;
+  }
+  const embeddedPrompt = embeddedPrompts?.[role.id];
+  if (typeof embeddedPrompt === "string") {
+    return embeddedPrompt;
   }
   if (role.promptPath !== undefined) {
     return readFile(role.promptPath, "utf8");
