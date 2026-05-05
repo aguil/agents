@@ -178,6 +178,18 @@ export class SubprocessAgentAdapter implements AgentAdapter {
     });
 
     const command = this.options.buildCommand(request, requestPath);
+    yield createAgentEvent({
+      runId: request.runId,
+      roleId: request.roleId,
+      type: "tool",
+      message: `${this.name} command prepared`,
+      data: {
+        kind: "command",
+        phase: "before",
+        cmd: command.cmd,
+        cwd: command.cwd ?? request.workspacePath,
+      },
+    });
     let proc: ReturnType<typeof Bun.spawn>;
     try {
       proc = Bun.spawn({
@@ -307,6 +319,8 @@ export class SubprocessAgentAdapter implements AgentAdapter {
           timeoutMs: request.timeoutMs,
           elapsedMs: Date.now() - startedAtMs,
           exitCode,
+          command: command.cmd,
+          cwd: command.cwd ?? request.workspacePath,
           stdoutBytes,
           stderrBytes,
           lastOutputTimestamp,
@@ -329,6 +343,16 @@ export class SubprocessAgentAdapter implements AgentAdapter {
         roleId: request.roleId,
         type: "completed",
         message: `${this.name} completed ${request.roleId}`,
+        data: {
+          elapsedMs: Date.now() - startedAtMs,
+          exitCode,
+          command: command.cmd,
+          cwd: command.cwd ?? request.workspacePath,
+          stdoutBytes,
+          stderrBytes,
+          stdoutLogPath,
+          stderrLogPath,
+        },
       }));
       queue.close();
       for await (const event of queue) {
@@ -344,6 +368,9 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       message: `${this.name} exited with code ${exitCode}`,
       data: {
         exitCode,
+        elapsedMs: Date.now() - startedAtMs,
+        command: command.cmd,
+        cwd: command.cwd ?? request.workspacePath,
         stdoutBytes,
         stderrBytes,
         lastOutputTimestamp,
@@ -566,6 +593,15 @@ export interface ClaudeCodeAdapterOptions {
   readonly argsTemplate?: readonly string[];
 }
 
+export interface CursorAdapterOptions {
+  readonly executable?: string;
+  readonly model?: string;
+  readonly argsTemplate?: readonly string[];
+  readonly mode?: "agent" | "plan" | "ask";
+  readonly force?: boolean;
+  readonly sandbox?: "enabled" | "disabled";
+}
+
 export class OpenCodeAdapter extends SubprocessAgentAdapter {
   constructor(options: OpenCodeAdapterOptions = {}) {
     super({
@@ -598,6 +634,25 @@ export class ClaudeCodeAdapter extends SubprocessAgentAdapter {
       },
       buildCommand: (request, requestPath) => ({
         cmd: buildClaudeCodeCommand(request, requestPath, options),
+        cwd: request.workspacePath,
+      }),
+    });
+  }
+}
+
+export class CursorAdapter extends SubprocessAgentAdapter {
+  constructor(options: CursorAdapterOptions = {}) {
+    super({
+      name: "cursor",
+      capabilities: {
+        streaming: true,
+        structuredOutput: true,
+        readOnlyMode: true,
+        mcp: true,
+        cancellation: true,
+      },
+      buildCommand: (request, requestPath) => ({
+        cmd: buildCursorCommand(request, requestPath, options),
         cwd: request.workspacePath,
       }),
     });
@@ -747,6 +802,53 @@ Required finding shape (example with formatting):
 {"finding":{"id":"${request.roleId}-duplicate-calls","severity":"warning","title":"Fallback repeats expensive PR discovery","description":"Function re-runs discovery when patch fetch fails.\n\nThis adds avoidable process calls on a latency-sensitive path.","evidence":"Explicit-PR block calls at lines 359-360.\n\nFallback path repeats at lines 381-382.","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"Verified by control-flow inspection.\n\nDuplicate calls are unconditional on fallback path."},"file":"src/index.ts","line":381}}
 
 If no verified critical or warning findings exist, do not emit any finding JSON line.`;
+}
+
+export function buildCursorCommand(
+  request: AgentRunRequest,
+  requestPath: string,
+  options: CursorAdapterOptions = {},
+): readonly string[] {
+  const prompt = buildCursorPrompt(request, requestPath);
+  const substitutions: Record<string, string> = {
+    workspace: request.workspacePath,
+    context_bundle: request.contextBundlePath,
+    request: requestPath,
+    role: request.roleId,
+    model: options.model ?? "",
+    prompt,
+  };
+
+  const template = options.argsTemplate ?? [
+    "--print",
+    "--output-format",
+    "stream-json",
+    "--workspace",
+    "{workspace}",
+    "--trust",
+    ...(options.force === false ? [] : ["--force"]),
+    ...(options.mode !== undefined && options.mode !== "agent" ? ["--mode", options.mode] : []),
+    ...(options.sandbox !== undefined ? ["--sandbox", options.sandbox] : []),
+    ...(options.model !== undefined ? ["--model", "{model}"] : []),
+    "{prompt}",
+  ];
+
+  const args = template.map((arg) => substituteTemplateArg(arg, substitutions));
+  const hasPrompt = template.some((arg) => arg.includes("{prompt}"));
+  const cmd = [options.executable ?? "agent", ...args];
+
+  if (!hasPrompt) {
+    cmd.push(prompt);
+  }
+
+  return cmd;
+}
+
+export function buildCursorPrompt(
+  request: AgentRunRequest,
+  requestPath: string,
+): string {
+  return buildClaudeCodePrompt(request, requestPath);
 }
 
 function substituteTemplateArg(

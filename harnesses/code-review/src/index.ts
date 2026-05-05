@@ -8,16 +8,18 @@ import {
   writeContextBundle,
 } from "@aguil/agents-context";
 import {
+  type AgentEvent,
   createRunId,
   ensureDirectory,
   writeJsonFile,
   writeTextFile,
 } from "@aguil/agents-core";
 import type { Finding, HarnessRunResult, ReviewTriageTier } from "@aguil/agents-core";
-import { ClaudeCodeAdapter, FakeAgentAdapter, OpenCodeAdapter } from "@aguil/agents-execution";
+import { ClaudeCodeAdapter, CursorAdapter, FakeAgentAdapter, OpenCodeAdapter } from "@aguil/agents-execution";
 import type {
   AgentAdapter,
   ClaudeCodeAdapterOptions,
+  CursorAdapterOptions,
   OpenCodeAdapterOptions,
 } from "@aguil/agents-execution";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
@@ -49,13 +51,15 @@ export interface CodeReviewRunOptions {
   readonly consensusRuns?: number;
   readonly adapter?: AgentAdapter;
   readonly metadata?: Readonly<Record<string, string>>;
+  readonly onEvent?: (event: AgentEvent) => void | Promise<void>;
 }
 
-export type CodeReviewAdapterName = "fake" | "opencode" | "claude";
+export type CodeReviewAdapterName = "fake" | "opencode" | "claude" | "cursor";
 
 export interface CodeReviewAdapterOptions {
   readonly opencode?: OpenCodeAdapterOptions;
   readonly claude?: ClaudeCodeAdapterOptions;
+  readonly cursor?: CursorAdapterOptions;
 }
 
 export interface CodeReviewRunResult extends HarnessRunResult {
@@ -165,10 +169,18 @@ export async function runCodeReview(
     await ensureDirectory(passScratchpadPath);
     const passRunId = consensusRuns === 1 ? runId : `${runId}-pass${passNumber}`;
 
+    const fileEventSink = new JsonlFileEventSink(join(passScratchpadPath, "events.jsonl"));
     const orchestrator = new NativeBunOrchestrator({
       definition: definitionForTriageWithCommands(triage, defaultAllowedCommands),
       adapter,
-      eventSink: new JsonlFileEventSink(join(passScratchpadPath, "events.jsonl")),
+      eventSink: options.onEvent === undefined
+        ? fileEventSink
+        : {
+            async write(event) {
+              await fileEventSink.write(event);
+              await options.onEvent?.(event);
+            },
+          },
       contextBundlePath: writtenContext.jsonPath,
       embeddedPrompts: EMBEDDED_PROMPTS,
     });
@@ -331,6 +343,9 @@ export function createCodeReviewAdapter(
   }
   if (name === "claude") {
     return new ClaudeCodeAdapter(options.claude);
+  }
+  if (name === "cursor") {
+    return new CursorAdapter(options.cursor);
   }
   return new FakeAgentAdapter();
 }
