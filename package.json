@@ -10,7 +10,14 @@
   ],
   "scripts": {
     "agents": "bun run packages/cli/src/index.ts",
+    "build": "bun build packages/cli/src/index.ts --outfile=dist/index.js --target=bun",
     "check": "bun run typecheck",
+    "preagents": "bun run prepare-prompts",
+    "postbuild": "bun run scripts/create-launcher.ts",
+    "prebuild": "bun run prepare-prompts",
+    "prepare-prompts": "bun run scripts/embed-prompts.ts",
+    "pretest": "bun run prepare-prompts",
+    "pretypecheck": "bun run prepare-prompts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

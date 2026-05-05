@@ -30,6 +30,7 @@ import {
   statusForFindings,
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
+import { EMBEDDED_PROMPTS } from "./embedded-prompts";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -169,6 +170,7 @@ export async function runCodeReview(
       adapter,
       eventSink: new JsonlFileEventSink(join(passScratchpadPath, "events.jsonl")),
       contextBundlePath: writtenContext.jsonPath,
+      embeddedPrompts: EMBEDDED_PROMPTS,
     });
 
     const rawResult = await orchestrator.run({

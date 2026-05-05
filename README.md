@@ -17,6 +17,7 @@ agents/
 
 ```bash
 bun install
+bun run build
 bun run typecheck
 bun test
 bun run agents run code-review --adapter fake
@@ -35,6 +36,25 @@ bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
 bun run agents run code-review --adapter claude --model <model>
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --no-deterministic
 ```
+
+## Prebuilt CLI
+
+When running reviews from another terminal/host checkout of `aguil/agents`, build once after pulling updates:
+
+```bash
+cd /path/to/aguil/agents
+bun run build
+```
+
+Then run reviews from your work-repo terminal with the bundled launcher:
+
+```bash
+/path/to/aguil/agents/dist/agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
+```
+
+`dist/` is gitignored, so the build stays local to each host checkout.
+
+See `BUILD.md` for details.
 
 ## Deterministic Runs
 

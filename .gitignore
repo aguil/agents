@@ -1,5 +1,6 @@
 node_modules/
 dist/
+harnesses/code-review/src/embedded-prompts.ts
 coverage/
 .review-agent/
 .env
