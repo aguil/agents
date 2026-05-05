@@ -148,6 +148,7 @@ export interface SubprocessAgentAdapterOptions {
   readonly capabilities: AdapterCapabilities;
   buildCommand(request: AgentRunRequest, requestPath: string): CommandSpec;
   readonly heartbeatIntervalMs?: number;
+  readonly idleWarningThresholdMs?: number;
 }
 
 export class SubprocessAgentAdapter implements AgentAdapter {
@@ -225,19 +226,29 @@ export class SubprocessAgentAdapter implements AgentAdapter {
       : undefined;
 
     const heartbeatInterval = this.options.heartbeatIntervalMs ?? 15_000;
+    const idleWarningThresholdMs = this.options.idleWarningThresholdMs ?? 90_000;
     const heartbeatTimer = setInterval(() => {
+      const elapsedMs = Date.now() - startedAtMs;
+      const lastOutputMs = lastOutputTimestamp === undefined
+        ? startedAtMs
+        : Date.parse(lastOutputTimestamp);
+      const idleDurationMs = Date.now() - lastOutputMs;
+      const isIdle = idleDurationMs >= idleWarningThresholdMs;
       queue.push(
         createAgentEvent({
           runId: request.runId,
           roleId: request.roleId,
           type: "tool",
-          message: `${this.name} heartbeat`,
+          message: isIdle
+            ? `${this.name} idle warning (${Math.floor(idleDurationMs / 1000)}s without output)`
+            : `${this.name} heartbeat`,
           data: {
-            kind: "heartbeat",
-            elapsedMs: Date.now() - startedAtMs,
+            kind: isIdle ? "idle_warning" : "heartbeat",
+            elapsedMs,
             stdoutBytes,
             stderrBytes,
             lastOutputTimestamp,
+            ...(isIdle ? { idleDurationMs } : {}),
           },
         }),
       );
@@ -658,8 +669,14 @@ ${vcsGuidance}
 - Do not report nitpicks, style preferences, or speculative hardening ideas.
 - Every finding must include validation details. Use validation.status "verified" only when you validated the issue.
 
-When you find an issue, emit it as a JSON line exactly shaped like:
-{"finding":{"id":"${request.roleId}-short-stable-id","severity":"warning","title":"Concise title","description":"What is wrong and why it matters","evidence":"Specific code or command evidence","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"How this was validated"},"file":"path/to/file.ts","line":1}}
+- Formatting guidelines for findings:
+- Break description into readable paragraphs when covering multiple aspects (use \n between sentences).
+- For evidence with multiple code locations, list each reference on a new line with line numbers.
+- Keep validation details concise but specific; separate distinct validation steps with newlines.
+- Use natural prose for single-point findings; use bullet points (- prefix) only when listing 3+ items.
+
+When you find an issue, emit it as a JSON line shaped like this example:
+{"finding":{"id":"${request.roleId}-duplicate-calls","severity":"warning","title":"Fallback repeats expensive PR discovery","description":"Function re-runs discovery when patch fetch fails.\n\nThis adds avoidable process calls on a latency-sensitive path.","evidence":"Explicit-PR block calls at lines 359-360.\n\nFallback path repeats at lines 381-382.","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"Verified by control-flow inspection.\n\nDuplicate calls are unconditional on fallback path."},"file":"src/index.ts","line":381}}
 
 If there are no verified critical or warning findings, do not emit a finding line.`;
 }
@@ -720,8 +737,14 @@ ${vcsGuidance}
 - Ignore style-only feedback and speculative nitpicks.
 - Emit each finding as a single JSON line with a top-level \"finding\" object.
 
-Required finding shape:
-{"finding":{"id":"${request.roleId}-short-stable-id","severity":"warning","title":"Concise title","description":"What is wrong and why it matters","evidence":"Specific code or command evidence","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"How this was validated"},"file":"path/to/file.ts","line":1}}
+- Formatting guidelines for findings:
+- Break description into readable paragraphs when covering multiple aspects (use \n between sentences).
+- For evidence with multiple code locations, list each reference on a new line with line numbers.
+- Keep validation details concise but specific; separate distinct validation steps with newlines.
+- Use natural prose for single-point findings; use bullet points (- prefix) only when listing 3+ items.
+
+Required finding shape (example with formatting):
+{"finding":{"id":"${request.roleId}-duplicate-calls","severity":"warning","title":"Fallback repeats expensive PR discovery","description":"Function re-runs discovery when patch fetch fails.\n\nThis adds avoidable process calls on a latency-sensitive path.","evidence":"Explicit-PR block calls at lines 359-360.\n\nFallback path repeats at lines 381-382.","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"Verified by control-flow inspection.\n\nDuplicate calls are unconditional on fallback path."},"file":"src/index.ts","line":381}}
 
 If no verified critical or warning findings exist, do not emit any finding JSON line.`;
 }

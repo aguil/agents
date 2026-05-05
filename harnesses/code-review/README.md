@@ -19,6 +19,10 @@ bun run agents run code-review --adapter claude --model <model>
 bun run agents run code-review --adapter claude --model <model> --strict
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --review-summary impact
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 1 --pending-review --no-confirm
+bun run agents run code-review --post-only
+bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/result.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
@@ -51,8 +55,20 @@ Pending review mode:
 
 - `--pending-review` deletes existing pending reviews authored by the current user on the target PR, then creates a fresh unsubmitted review.
 - Use `--pr <number>` to target a specific PR, otherwise the current branch PR is auto-discovered.
+- Use `--review-pr <number>` to collect review context/diff from a specific PR (including merged PRs); PR lookups use the repo from `--workspace` and auto-resolve jj workspace pointers to canonical colocated repos for git/gh commands.
+- `--no-confirm` skips interactive stale-review confirmation prompts (recommended for CI).
 - Use `--review-summary <triage|impact|evidence>` to choose the review body format (`impact` is the default).
 - Only anchorable findings (`file` + `line`) are posted as inline comments.
+- Before posting, the CLI checks if the PR head moved since context collection; stale postings require confirmation unless `--no-confirm` is set.
+
+Post-only mode:
+
+- `--post-only` publishes findings from an existing `result.json` without rerunning the review model.
+- By default it auto-discovers the latest `.review-agent/runs/<run-id>/result.json` in the workspace.
+- Use `--result <path>` to choose a specific result artifact.
+- Post-only requires `pr_number` and `pr_reviewed_head_sha` metadata in the stored result; runs without `--review-pr` are rejected.
+- Post-only keeps reviews pending (unsubmitted) exactly like `--pending-review`.
+- Post-only does not mutate the selected `result.json`.
 
 Consistency and replay mode:
 
@@ -115,6 +131,7 @@ Review summary examples:
 ## PR Context Discovery
 
 - The harness auto-discovers the related PR for the current branch with `gh pr view`.
+- If `--review-pr <number>` is provided, the harness fetches PR metadata/diff from that PR directly.
 - It reads PR title and description/body into review context.
 - The review diff is built from the PR base branch patch (`<base>...HEAD`), not untracked `.review-agent` artifacts.
 - It extracts docs/links referenced in the PR description.
@@ -157,7 +174,22 @@ Core artifacts:
 - `metadata.consensus_dropped_findings`: count filtered by consensus
 - `metadata.deterministic_mode`: `true` when deterministic profile is enabled
 - `metadata.opencode_*` / `metadata.claude_*`: adapter-specific model/runtime settings and detected executable version
+- `metadata.pr_number`: PR number when `--review-pr` is used
+- `metadata.pr_reviewed_head_sha`: PR head SHA captured during context collection
+- `metadata.pr_reviewed_at`: ISO-8601 timestamp when PR patch context was collected
+- `metadata.pr_posting_head_sha`: PR head SHA seen immediately before posting (`--pending-review`)
+- `metadata.pr_head_diverged`: `true` if posting happened after PR head changed
 - `reportPath` and `contextBundlePath`
+
+Rate limiting:
+
+- A full `--review-pr` + `--pending-review` flow usually performs around 7-8 GitHub API requests.
+- Check quota with `gh api rate_limit` if you encounter `403`/`429` responses.
+- The CLI does not currently implement automatic rate-limit retries/backoff.
+
+Known limitations:
+
+- Windows interactive prompt support is currently unavailable; use `--no-confirm`.
 
 `events.jsonl` also includes periodic role heartbeat events (`type: tool`) with elapsed time and byte counts so long-running reviews can be diagnosed while still running.
 

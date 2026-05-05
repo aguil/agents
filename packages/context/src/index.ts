@@ -1,11 +1,13 @@
 import { ensureDirectory, writeJsonFile, writeTextFile } from "@aguil/agents-core";
 import type { ReviewTriageTier } from "@aguil/agents-core";
+import { resolveGitAwarePath } from "@aguil/agents-core";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
 export interface ContextRequest {
   readonly workspacePath: string;
   readonly diffPath?: string;
+  readonly pullRequestNumber?: number;
   readonly scratchpadPath: string;
 }
 
@@ -49,6 +51,18 @@ export interface RemoteScope {
 
 export interface ParsedGitRemoteUrl {
   readonly host: string;
+  readonly owner: string;
+  readonly repo: string;
+}
+
+interface ReviewPrMetadata {
+  readonly number: number;
+  readonly headSha?: string;
+  readonly reviewedAt: string;
+}
+
+interface PullRequestRepoScope {
+  readonly host?: string;
   readonly owner: string;
   readonly repo: string;
 }
@@ -103,7 +117,11 @@ export class PullRequestMetadataProvider implements ContextProvider {
   }
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const pullRequest = await discoverPullRequest(request.workspacePath, this.commandRunner);
+    const pullRequest = await discoverPullRequest(
+      request.workspacePath,
+      this.commandRunner,
+      request.pullRequestNumber,
+    );
     if (pullRequest === undefined) {
       return [
         {
@@ -140,7 +158,11 @@ export class PullRequestReferencedDocsProvider implements ContextProvider {
   }
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const pullRequest = await discoverPullRequest(request.workspacePath, this.commandRunner);
+    const pullRequest = await discoverPullRequest(
+      request.workspacePath,
+      this.commandRunner,
+      request.pullRequestNumber,
+    );
     if (pullRequest === undefined) {
       return [
         {
@@ -227,13 +249,22 @@ export class RepositoryDiffProvider implements ContextProvider {
   constructor(private readonly commandRunner: CommandRunner = runCommand) {}
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const { diff, baseRef, strategy } = request.diffPath
+    const { diff, baseRef, strategy, reviewPr } = request.diffPath
       ? {
           diff: await readFile(request.diffPath, "utf8"),
           baseRef: undefined,
           strategy: "explicit_diff_path",
+          reviewPr: undefined,
         }
-      : await collectReviewDiff(request.workspacePath, this.commandRunner);
+      : await collectReviewDiff(request.workspacePath, this.commandRunner, request.pullRequestNumber);
+
+    const reviewLines = reviewPr === undefined
+      ? []
+      : [
+          `PR Number: ${reviewPr.number}`,
+          `PR Head SHA: ${reviewPr.headSha ?? "(unavailable)"}`,
+          `Reviewed At: ${reviewPr.reviewedAt}`,
+        ];
 
     return [
       {
@@ -242,6 +273,7 @@ export class RepositoryDiffProvider implements ContextProvider {
         content: [
           `Strategy: ${strategy}`,
           `Base Ref: ${baseRef ?? "(none)"}`,
+          ...reviewLines,
         ].join("\n"),
       },
       {
@@ -334,12 +366,46 @@ export async function collectRepositoryDiff(workspacePath: string): Promise<stri
 export async function collectReviewDiff(
   workspacePath: string,
   commandRunner: CommandRunner = runCommand,
+  pullRequestNumber?: number,
 ): Promise<{
   readonly diff: string;
   readonly baseRef?: string;
   readonly strategy: string;
+  readonly reviewPr?: ReviewPrMetadata;
 }> {
-  const pullRequest = await discoverPullRequest(workspacePath, commandRunner);
+  if (pullRequestNumber !== undefined) {
+    const pullRequest = await discoverPullRequest(workspacePath, commandRunner, pullRequestNumber);
+    const remoteScope = await resolvePreferredRemoteScope(workspacePath, commandRunner);
+    const repoScope = pullRequest !== undefined
+      ? parsePullRequestRepoScope(pullRequest.url)
+      : undefined;
+    const patch = await fetchPullRequestPatch(
+      commandRunner,
+      workspacePath,
+      {
+        number: pullRequestNumber,
+        repoScope: repoScope ?? remoteScope,
+      },
+    );
+    const headSha = await fetchPullRequestHeadSha(commandRunner, workspacePath, {
+      number: pullRequestNumber,
+      repoScope: repoScope ?? remoteScope,
+    });
+    if (patch !== undefined) {
+      return {
+        diff: filterReviewDiff(patch),
+        baseRef: undefined,
+        strategy: "explicit_pr_patch",
+        reviewPr: {
+          number: pullRequestNumber,
+          headSha: headSha?.trim(),
+          reviewedAt: new Date().toISOString(),
+        },
+      };
+    }
+  }
+
+  const pullRequest = await discoverPullRequest(workspacePath, commandRunner, pullRequestNumber);
   const remoteScope = await resolvePreferredRemoteScope(workspacePath, commandRunner);
   const baseCandidates = pullRequest?.baseRefName !== undefined
     ? [pullRequest.baseRefName]
@@ -376,6 +442,58 @@ export async function collectReviewDiff(
     baseRef: undefined,
     strategy: "working_copy_fallback",
   };
+}
+
+async function fetchPullRequestHeadSha(
+  commandRunner: CommandRunner,
+  workspacePath: string,
+  input: {
+    readonly number: number;
+    readonly repoScope?: PullRequestRepoScope;
+  },
+): Promise<string | undefined> {
+  const ownerRepo = input.repoScope !== undefined
+    ? `${input.repoScope.owner}/${input.repoScope.repo}`
+    : undefined;
+  if (ownerRepo === undefined) {
+    return undefined;
+  }
+
+  const args = [
+    "gh",
+    "api",
+    ...(input.repoScope?.host !== undefined ? ["--hostname", input.repoScope.host] : []),
+    `repos/${ownerRepo}/pulls/${input.number}`,
+    "--jq",
+    ".head.sha",
+  ];
+  return commandRunner(args, workspacePath, { gitAware: true });
+}
+
+async function fetchPullRequestPatch(
+  commandRunner: CommandRunner,
+  workspacePath: string,
+  input: {
+    readonly number: number;
+    readonly repoScope?: PullRequestRepoScope;
+  },
+): Promise<string | undefined> {
+  const ownerRepo = input.repoScope !== undefined
+    ? `${input.repoScope.owner}/${input.repoScope.repo}`
+    : undefined;
+  if (ownerRepo === undefined) {
+    return undefined;
+  }
+
+  const args = [
+    "gh",
+    "api",
+    ...(input.repoScope?.host !== undefined ? ["--hostname", input.repoScope.host] : []),
+    "-H",
+    "Accept: application/vnd.github.v3.diff",
+    `repos/${ownerRepo}/pulls/${input.number}`,
+  ];
+  return commandRunner(args, workspacePath, { gitAware: true });
 }
 
 export function filterReviewDiff(diff: string): string {
@@ -419,6 +537,7 @@ export async function resolvePreferredBaseBranch(
     const headRef = await commandRunner(
       ["git", "symbolic-ref", `refs/remotes/${remoteName}/HEAD`],
       workspacePath,
+      { gitAware: true },
     );
     const branch = parseRemoteHeadBranch(headRef);
     if (branch !== undefined) {
@@ -432,7 +551,7 @@ export async function resolvePreferredBaseBranch(
     "master",
   ]);
   for (const candidate of candidates) {
-    const exists = await commandRunner(["git", "rev-parse", "--verify", candidate], workspacePath);
+    const exists = await commandRunner(["git", "rev-parse", "--verify", candidate], workspacePath, { gitAware: true });
     if (exists !== undefined) {
       return candidate;
     }
@@ -466,10 +585,19 @@ export function parseRemoteHeadBranch(value: string | undefined): string | undef
 export async function discoverPullRequest(
   workspacePath: string,
   commandRunner: CommandRunner = runCommand,
+  pullRequestNumber?: number,
 ): Promise<PullRequestMetadata | undefined> {
   const json = await commandRunner(
-    ["gh", "pr", "view", "--json", "number,title,body,url,baseRefName"],
+    [
+      "gh",
+      "pr",
+      "view",
+      ...(pullRequestNumber !== undefined ? [String(pullRequestNumber)] : []),
+      "--json",
+      "number,title,body,url,baseRefName",
+    ],
     workspacePath,
+    { gitAware: true },
   );
   if (json === undefined) {
     return undefined;
@@ -512,7 +640,7 @@ export async function resolvePreferredRemoteScope(
     return undefined;
   }
 
-  const remoteUrl = await commandRunner(["git", "remote", "get-url", selected], workspacePath);
+  const remoteUrl = await commandRunner(["git", "remote", "get-url", selected], workspacePath, { gitAware: true });
   if (remoteUrl === undefined) {
     return undefined;
   }
@@ -536,6 +664,7 @@ export async function resolveTrackingRemoteName(
   const upstream = await commandRunner(
     ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     workspacePath,
+    { gitAware: true },
   );
   if (upstream === undefined) {
     return undefined;
@@ -587,6 +716,28 @@ export function parseGitRemoteUrl(value: string): ParsedGitRemoteUrl | undefined
       owner: sshLike[2] ?? "",
       repo: sshLike[3] ?? "",
     };
+  }
+}
+
+export function parsePullRequestRepoScope(url: string): PullRequestRepoScope | undefined {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.replace(/^\//, "").split("/");
+    if ((parts[2] ?? "") !== "pull") {
+      return undefined;
+    }
+    const owner = parts[0];
+    const repo = parts[1];
+    if (owner === undefined || owner.length === 0 || repo === undefined || repo.length === 0) {
+      return undefined;
+    }
+    return {
+      host: parsed.host,
+      owner,
+      repo,
+    };
+  } catch {
+    return undefined;
   }
 }
 
@@ -674,7 +825,7 @@ async function listRemoteNames(
   workspacePath: string,
   commandRunner: CommandRunner,
 ): Promise<readonly string[]> {
-  const output = await commandRunner(["git", "remote"], workspacePath);
+  const output = await commandRunner(["git", "remote"], workspacePath, { gitAware: true });
   if (output === undefined) {
     return [];
   }
@@ -796,11 +947,39 @@ function looksLikeDocumentationPath(value: string): boolean {
 type CommandRunner = (
   cmd: readonly string[],
   cwd: string,
+  options?: { readonly gitAware?: boolean },
 ) => Promise<string | undefined>;
 
-async function runCommand(cmd: readonly string[], cwd: string): Promise<string | undefined> {
+const gitAwareWorkspaceCache = new Map<string, Promise<string>>();
+const emittedGitAwareWarnings = new Set<string>();
+
+async function resolveGitAwareCwd(cwd: string): Promise<string> {
+  const cached = gitAwareWorkspaceCache.get(cwd);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const pending = (async () => {
+    const resolved = await resolveGitAwarePath(cwd);
+    if (resolved.warning !== undefined && !emittedGitAwareWarnings.has(resolved.warning)) {
+      emittedGitAwareWarnings.add(resolved.warning);
+      console.warn(resolved.warning);
+    }
+    return resolved.gitAwarePath;
+  })();
+
+  gitAwareWorkspaceCache.set(cwd, pending);
+  return pending;
+}
+
+async function runCommand(
+  cmd: readonly string[],
+  cwd: string,
+  options: { readonly gitAware?: boolean } = {},
+): Promise<string | undefined> {
   try {
-    const proc = Bun.spawn({ cmd: [...cmd], cwd, stdout: "pipe", stderr: "pipe" });
+    const resolvedCwd = options.gitAware === true ? await resolveGitAwareCwd(cwd) : cwd;
+    const proc = Bun.spawn({ cmd: [...cmd], cwd: resolvedCwd, stdout: "pipe", stderr: "pipe" });
     const [stdout, exitCode] = await Promise.all([
       readProcessText(proc.stdout),
       proc.exited,

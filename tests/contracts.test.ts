@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
+import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,11 +12,15 @@ import {
 import {
   changedFilesFromDiff,
   classifyDiff,
+  collectReviewDiff,
+  discoverPullRequest,
   filterReviewDiff,
   extractReferencedDocumentation,
   PullRequestReferencedDocsProvider,
+  RepositoryDiffProvider,
   parseRemoteHeadBranch,
   parseGitRemoteUrl,
+  parsePullRequestRepoScope,
   resolvePreferredBaseBranch,
   selectPreferredRemoteName,
   shouldFetchReferencedUrl,
@@ -33,12 +38,15 @@ import {
   actionableFindings,
   dedupeFindings,
   findingFingerprint,
+  renderMarkdownReport,
   statusForFindings,
 } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
 import {
   buildPendingReviewSummaryBody,
+  discoverLatestResultPath,
   findingsToPendingReviewComments,
+  loadStoredReviewResult,
   parseReviewSummaryStyle,
 } from "../packages/cli/src/index";
 
@@ -100,6 +108,15 @@ test("parses git remote URLs for host/org scope", () => {
   });
 });
 
+test("parses owner and repo from pull request URLs", () => {
+  expect(parsePullRequestRepoScope("https://github.com/aguil/agents/pull/42")).toEqual({
+    host: "github.com",
+    owner: "aguil",
+    repo: "agents",
+  });
+  expect(parsePullRequestRepoScope("https://github.com/aguil/agents/issues/42")).toBeUndefined();
+});
+
 test("prefers tracking remote before origin", () => {
   expect(
     selectPreferredRemoteName({
@@ -133,6 +150,126 @@ test("resolves preferred base branch from remote HEAD first", async () => {
 
   expect(await resolvePreferredBaseBranch("/repo", commandRunner, "origin")).toBe("main");
   expect(commands.at(0)).toContain("refs/remotes/origin/HEAD");
+});
+
+test("discovers pull request by explicit number", async () => {
+  const commands: string[] = [];
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    return JSON.stringify({
+      number: 42,
+      title: "Merged PR",
+      body: "Body",
+      url: "https://github.com/aguil/agents/pull/42",
+      baseRefName: "main",
+    });
+  };
+
+  const discovered = await discoverPullRequest("/repo", commandRunner, 42);
+  expect(discovered?.number).toBe(42);
+  expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName");
+});
+
+test("prefers explicit PR patch diff when review PR is provided", async () => {
+  const commands: string[] = [];
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 42,
+        title: "Merged PR",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/42",
+        baseRefName: "main",
+      });
+    }
+    if (cmd[0] === "gh" && cmd[1] === "api") {
+      if (cmd.includes("--jq")) {
+        return "deadbeefcafebabe\n";
+      }
+      return `diff --git a/.review-agent/runs/foo/result.json b/.review-agent/runs/foo/result.json
++ignored
+diff --git a/src/main.ts b/src/main.ts
++added`;
+    }
+    return undefined;
+  };
+
+  const result = await collectReviewDiff("/repo", commandRunner, 42);
+  expect(result.strategy).toBe("explicit_pr_patch");
+  expect(result.reviewPr?.number).toBe(42);
+  expect(result.reviewPr?.headSha).toBe("deadbeefcafebabe");
+  expect(result.reviewPr?.reviewedAt).toBeTruthy();
+  expect(result.diff).toContain("diff --git a/src/main.ts b/src/main.ts");
+  expect(result.diff).not.toContain(".review-agent/runs/foo/result.json");
+  expect(commands).toContain(
+    "gh api --hostname github.com repos/aguil/agents/pulls/42 --jq .head.sha",
+  );
+  expect(commands).toContain(
+    "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
+  );
+});
+
+test("falls back to base diff when explicit PR patch is unavailable", async () => {
+  const commands: string[] = [];
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 42,
+        title: "Merged PR",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/42",
+        baseRefName: "main",
+      });
+    }
+    if (cmd[0] === "git" && cmd[1] === "diff" && cmd[3] === "main...HEAD") {
+      return "diff --git a/src/a.ts b/src/a.ts\n+new";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "api") {
+      return undefined;
+    }
+    return undefined;
+  };
+
+  const result = await collectReviewDiff("/repo", commandRunner, 42);
+  expect(result.strategy).toBe("pr_base_git");
+  expect(result.baseRef).toBe("main");
+  expect(commands).toContain(
+    "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
+  );
+});
+
+test("includes explicit PR metadata in diff strategy artifact", async () => {
+  const provider = new RepositoryDiffProvider(async (cmd) => {
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 42,
+        title: "Merged PR",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/42",
+        baseRefName: "main",
+      });
+    }
+    if (cmd[0] === "gh" && cmd[1] === "api" && cmd.includes("--jq")) {
+      return "0123456789abcdef";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "api") {
+      return "diff --git a/src/a.ts b/src/a.ts\n+new";
+    }
+    return undefined;
+  });
+
+  const artifacts = await provider.collect({
+    workspacePath: "/repo",
+    scratchpadPath: "/repo/.review-agent/runs/1",
+    pullRequestNumber: 42,
+  });
+  const strategy = artifacts.find((artifact) => artifact.id === "diff-strategy")?.content ?? "";
+  expect(strategy).toContain("Strategy: explicit_pr_patch");
+  expect(strategy).toContain("PR Number: 42");
+  expect(strategy).toContain("PR Head SHA: 0123456789abcdef");
+  expect(strategy).toContain("Reviewed At:");
 });
 
 test("filters harness artifacts out of review diff", () => {
@@ -367,6 +504,65 @@ test("rejects invalid review summary style", () => {
   expect(parseReviewSummaryStyle("unknown")).toBeUndefined();
 });
 
+test("loads stored review result findings and metadata", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-post-only-load-"));
+  try {
+    const path = join(workspace, "result.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        findings: [
+          {
+            id: "finding-1",
+            severity: "warning",
+            title: "Stored issue",
+            description: "A validated review finding.",
+            evidence: "The reproduction passed.",
+            sourceRole: "quality",
+            validation: { status: "verified", details: "Reproduced locally." },
+          },
+        ],
+        metadata: {
+          pr_number: "1",
+          pr_reviewed_head_sha: "deadbeef",
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadStoredReviewResult(path);
+    expect(loaded.findings).toHaveLength(1);
+    expect(loaded.metadata?.pr_number).toBe("1");
+    expect(loaded.metadata?.pr_reviewed_head_sha).toBe("deadbeef");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("discovers latest run result path", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-post-only-discover-"));
+  try {
+    const runsRoot = join(workspace, ".review-agent", "runs");
+    await mkdir(join(runsRoot, "code-review-20260501120000-aaaa"), { recursive: true });
+    await mkdir(join(runsRoot, "code-review-20260502120000-bbbb"), { recursive: true });
+    await writeFile(
+      join(runsRoot, "code-review-20260501120000-aaaa", "result.json"),
+      "{}\n",
+      "utf8",
+    );
+    await writeFile(
+      join(runsRoot, "code-review-20260502120000-bbbb", "result.json"),
+      "{}\n",
+      "utf8",
+    );
+
+    const discovered = await discoverLatestResultPath(workspace);
+    expect(discovered).toBe(join(runsRoot, "code-review-20260502120000-bbbb", "result.json"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("builds triage review summary body", () => {
   const finding: Finding = {
     id: "finding-1",
@@ -437,6 +633,39 @@ test("builds evidence review summary body", () => {
 
   expect(body).toContain("## Why / Evidence / Fix");
   expect(body).toContain("### Finding 1: Doc mismatch");
+});
+
+test("renders severity emojis in markdown report", () => {
+  const critical: Finding = {
+    id: "finding-critical",
+    severity: "critical",
+    title: "Critical security issue",
+    description: "A critical problem.",
+    evidence: "Evidence here.",
+    sourceRole: "security",
+    validation: { status: "verified", details: "Validated." },
+  };
+  const warning: Finding = {
+    id: "finding-warning",
+    severity: "warning",
+    title: "Warning performance issue",
+    description: "A warning problem.",
+    evidence: "Evidence here.",
+    sourceRole: "performance",
+    validation: { status: "verified", details: "Validated." },
+  };
+
+  const report = renderMarkdownReport({
+    runId: "run-1",
+    status: "failed",
+    findings: [critical, warning],
+    artifacts: [],
+  });
+
+  expect(report).toContain("## 1. 🔴 Critical security issue");
+  expect(report).toContain("## 2. ⚠️ Warning performance issue");
+  expect(report).not.toContain("CRITICAL:");
+  expect(report).not.toContain("WARNING:");
 });
 
 test("builds opencode command behind the adapter boundary", () => {
@@ -977,6 +1206,91 @@ test("strict mode fails run on timed out roles", async () => {
     expect(result.status).toBe("error");
     expect(result.metadata?.strict_mode).toBe("true");
     expect(result.metadata?.timed_out_roles).toBe("quality");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath keeps colocated repo paths", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-colocated-"));
+  try {
+    await mkdir(join(tempDir, ".git"), { recursive: true });
+    const result = await resolveGitAwarePath(tempDir);
+    expect(result.gitAwarePath).toBe(tempDir);
+    expect(result.isJjWorkspace).toBe(false);
+    expect(result.resolvedFromPointer).toBe(false);
+    expect(result.warning).toBeUndefined();
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath treats git worktree .git files as git-aware", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-worktree-"));
+  try {
+    await writeFile(join(tempDir, ".git"), "gitdir: /tmp/worktree/.git\n", "utf8");
+    const result = await resolveGitAwarePath(tempDir);
+    expect(result.gitAwarePath).toBe(tempDir);
+    expect(result.isJjWorkspace).toBe(false);
+    expect(result.resolvedFromPointer).toBe(false);
+    expect(result.warning).toBeUndefined();
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath resolves canonical repo from jj pointer", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-jj-"));
+  try {
+    const canonicalRepo = join(tempDir, "repos", "github.com", "acme", "demo");
+    const workspace = join(tempDir, "projects", "feat", "task", "demo");
+    await mkdir(join(canonicalRepo, ".jj"), { recursive: true });
+    await mkdir(join(canonicalRepo, ".git"), { recursive: true });
+    await mkdir(join(workspace, ".jj"), { recursive: true });
+    const pointer = "../../../../../repos/github.com/acme/demo/.jj/repo\n";
+    await writeFile(join(workspace, ".jj", "repo"), pointer, "utf8");
+
+    const result = await resolveGitAwarePath(workspace);
+    expect(result.gitAwarePath).toBe(canonicalRepo);
+    expect(result.isJjWorkspace).toBe(true);
+    expect(result.resolvedFromPointer).toBe(true);
+    expect(result.warning).toBeUndefined();
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath warns and falls back when jj pointer is empty", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-empty-"));
+  try {
+    await mkdir(join(tempDir, ".jj"), { recursive: true });
+    await writeFile(join(tempDir, ".jj", "repo"), "\n", "utf8");
+
+    const result = await resolveGitAwarePath(tempDir);
+    expect(result.gitAwarePath).toBe(tempDir);
+    expect(result.isJjWorkspace).toBe(true);
+    expect(result.resolvedFromPointer).toBe(false);
+    expect(result.warning).toContain("pointer");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveGitAwarePath warns and falls back when canonical .git is missing", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-missing-git-"));
+  try {
+    const canonicalRepo = join(tempDir, "repos", "github.com", "acme", "demo");
+    const workspace = join(tempDir, "projects", "feat", "task", "demo");
+    await mkdir(join(canonicalRepo, ".jj"), { recursive: true });
+    await mkdir(join(workspace, ".jj"), { recursive: true });
+    const pointer = "../../../../../repos/github.com/acme/demo/.jj/repo\n";
+    await writeFile(join(workspace, ".jj", "repo"), pointer, "utf8");
+
+    const result = await resolveGitAwarePath(workspace);
+    expect(result.gitAwarePath).toBe(workspace);
+    expect(result.isJjWorkspace).toBe(true);
+    expect(result.resolvedFromPointer).toBe(false);
+    expect(result.warning).toContain("was not found");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
