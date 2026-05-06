@@ -789,6 +789,19 @@ async function replacePendingPullRequestReview(input: {
     workspacePath,
   );
 
+  await ghApi<void>(
+    `repos/${repo}/issues/${prNumber}/comments`,
+    "POST",
+    {
+      body: [
+        `Posted pending review: ${created.html_url}`,
+        "",
+        body,
+      ].join("\n"),
+    },
+    workspacePath,
+  );
+
   return {
     reviewId: created.id,
     prNumber,
