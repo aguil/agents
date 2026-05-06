@@ -418,6 +418,21 @@ export async function collectReviewDiff(
       };
     }
 
+    const localHeadSha = requestedReviewPr.headSha;
+    if (localHeadSha !== undefined && localHeadSha.length > 0 && await commitExistsLocally(commandRunner, workspacePath, localHeadSha)) {
+      const fromLocal = await collectReviewDiffFromLocalHead(
+        workspacePath,
+        commandRunner,
+        pullRequest?.baseRefName,
+        localHeadSha,
+        remoteScope?.remoteName,
+        requestedReviewPr,
+      );
+      if (fromLocal !== undefined) {
+        return fromLocal;
+      }
+    }
+
     const fallback = await collectReviewDiffFallback(
       workspacePath,
       commandRunner,
@@ -467,6 +482,65 @@ export async function collectReviewDiff(
     baseRef: undefined,
     strategy: "working_copy_fallback",
   };
+}
+
+async function commitExistsLocally(
+  commandRunner: CommandRunner,
+  workspacePath: string,
+  commit: string,
+): Promise<boolean> {
+  const gitCheck = await commandRunner(["git", "cat-file", "-e", `${commit}^{commit}`], workspacePath, { gitAware: true });
+  if (gitCheck !== undefined) {
+    return true;
+  }
+  const jjCheck = await commandRunner(["jj", "log", "-r", commit, "--limit", "1"], workspacePath);
+  return jjCheck !== undefined;
+}
+
+async function collectReviewDiffFromLocalHead(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+  baseRefName: string | undefined,
+  headSha: string,
+  remoteName: string | undefined,
+  reviewPr: ReviewPrMetadata,
+): Promise<{
+  readonly diff: string;
+  readonly baseRef?: string;
+  readonly strategy: string;
+  readonly reviewPr?: ReviewPrMetadata;
+} | undefined> {
+  const baseCandidates = baseRefName !== undefined
+    ? [baseRefName]
+    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteName);
+
+  for (const baseRef of dedupeStrings(baseCandidates)) {
+    for (const jjBase of toJjBaseCandidates(baseRef, remoteName)) {
+      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", headSha], workspacePath);
+      if (jjDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(jjDiff),
+          baseRef: jjBase,
+          strategy: "pr_base_jj_head",
+          reviewPr,
+        };
+      }
+    }
+
+    if (isSafeGitRevision(baseRef)) {
+      const gitDiff = await commandRunner(["git", "diff", "--no-ext-diff", `${baseRef}...${headSha}`], workspacePath);
+      if (gitDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(gitDiff),
+          baseRef,
+          strategy: "pr_base_git_head",
+          reviewPr,
+        };
+      }
+    }
+  }
+
+  return undefined;
 }
 
 async function collectReviewDiffFallback(

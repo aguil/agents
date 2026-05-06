@@ -224,9 +224,13 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
         body: "Body",
         url: "https://github.com/aguil/agents/pull/42",
         baseRefName: "main",
+        headRefOid: "deadbeefcafebabe",
       });
     }
-    if (cmd[0] === "git" && cmd[1] === "diff" && cmd[3] === "main...HEAD") {
+    if (cmd[0] === "git" && cmd[1] === "cat-file") {
+      return "";
+    }
+    if (cmd[0] === "git" && cmd[1] === "diff" && cmd[3] === "main...deadbeefcafebabe") {
       return "diff --git a/src/a.ts b/src/a.ts\n+new";
     }
     if (cmd[0] === "gh" && cmd[1] === "api") {
@@ -236,7 +240,7 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
   };
 
   const result = await collectReviewDiff("/repo", commandRunner, 42);
-  expect(result.strategy).toBe("pr_base_git");
+  expect(result.strategy).toBe("pr_base_git_head");
   expect(result.baseRef).toBe("main");
   expect(commands).toContain(
     "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
