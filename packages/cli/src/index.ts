@@ -18,7 +18,7 @@ Options:
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
   --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
   --context-bundle <path> Reuse an existing context bundle JSON for replay
-  --consensus <n>        Run n passes and keep recurring findings (default: 3 with --pending-review)
+  --consensus <n>        Run n passes and keep recurring findings (default: 1 with --pending-review)
   --adapter <name>       Execution adapter: fake, opencode, claude, or cursor (default: fake)
   --model <id>           Model passed to opencode/claude/cursor
   --variant <id>         OpenCode variant (provider-specific effort profile)
@@ -93,7 +93,7 @@ Options:
       return 1;
     }
     const pendingReviewEnabled = options.pendingReview && !options.dryRun;
-    const consensusRuns = requestedConsensusRuns ?? (pendingReviewEnabled ? 3 : undefined);
+    const consensusRuns = requestedConsensusRuns ?? (pendingReviewEnabled ? 1 : undefined);
     const reviewPrNumber = parsePrNumber(options.reviewPr);
     if (options.reviewPr !== undefined && reviewPrNumber === undefined) {
       console.error(`Invalid --review-pr value: ${options.reviewPr}`);
@@ -1128,17 +1128,33 @@ async function runGh<T>(args: readonly string[], workspacePath?: string): Promis
     if (!isTransientNetwork || attempt === maxAttempts) {
       throw new Error(`gh ${args.join(" ")} failed: ${message}`);
     }
+
+    const backoffMs = 250 * (2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+    await Bun.sleep(backoffMs);
   }
 
   throw new Error(`gh ${args.join(" ")} failed: exhausted retries`);
 }
 
+const ghCwdCache = new Map<string, Promise<string>>();
+
 async function resolveGhCwd(workspacePath?: string): Promise<string> {
+  const workspaceCwd = resolveWorkspaceCwd(workspacePath);
+  const cached = ghCwdCache.get(workspaceCwd);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const pending = (async () => {
   const jjGitRoot = (await runCommand(["jj", "git", "root"], workspacePath))?.trim();
   if (jjGitRoot !== undefined && jjGitRoot.length > 0) {
     return dirname(jjGitRoot);
   }
   return resolveGitAwareCwd(workspacePath);
+  })();
+
+  ghCwdCache.set(workspaceCwd, pending);
+  return pending;
 }
 
 async function resolveRepoNameWithOwnerFromRemote(workspacePath?: string): Promise<string | undefined> {

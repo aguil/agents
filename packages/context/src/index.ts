@@ -264,8 +264,20 @@ export class RepositoryDiffProvider implements ContextProvider {
       : [
           `PR Number: ${reviewPr.number}`,
           `PR Head SHA: ${reviewPr.headSha ?? "(unavailable)"}`,
+          "Note: This PR head SHA is from remote metadata and may not match the local checkout.",
           `Reviewed At: ${reviewPr.reviewedAt}`,
         ];
+
+    const workspaceDiffContent = diff.trim().length > 0
+      ? diff
+      : strategy === "pr_diff_unavailable"
+      ? "PR diff could not be collected from remote endpoints, and no safe local fallback was available."
+      : "No workspace diff detected.";
+    const changedFilesContent = diff.trim().length > 0
+      ? changedFilesFromDiff(diff).join("\n") || "No changed files detected."
+      : strategy === "pr_diff_unavailable"
+      ? "Changed files unavailable because PR diff could not be collected."
+      : "No changed files detected.";
 
     return [
       {
@@ -280,12 +292,12 @@ export class RepositoryDiffProvider implements ContextProvider {
       {
         id: "workspace-diff",
         title: "Workspace Diff",
-        content: diff.trim().length > 0 ? diff : "No workspace diff detected.",
+        content: workspaceDiffContent,
       },
       {
         id: "changed-files",
         title: "Changed Files",
-        content: changedFilesFromDiff(diff).join("\n") || "No changed files detected.",
+        content: changedFilesContent,
       },
       {
         id: "triage",
@@ -470,11 +482,21 @@ async function collectReviewDiffFallback(
   readonly reviewPr?: ReviewPrMetadata;
 } | undefined> {
   const remoteScope = await resolvePreferredRemoteScope(workspacePath, commandRunner);
-  const baseCandidates = baseRefName !== undefined
+  const baseCandidates = dedupeStrings(baseRefName !== undefined
     ? [baseRefName]
-    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteScope?.remoteName);
+    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteScope?.remoteName));
 
-  for (const baseRef of dedupeStrings(baseCandidates)) {
+  const baseRef = baseCandidates[0];
+  if (baseRef === undefined) {
+    return {
+      diff: "",
+      baseRef: undefined,
+      strategy: "pr_diff_unavailable",
+      reviewPr,
+    };
+  }
+
+  if (isSafeGitRevision(baseRef)) {
     const gitDiff = await commandRunner(
       ["git", "diff", "--no-ext-diff", `${baseRef}...HEAD`],
       workspacePath,
@@ -487,27 +509,41 @@ async function collectReviewDiffFallback(
         reviewPr,
       };
     }
+  }
 
-    for (const jjBase of toJjBaseCandidates(baseRef, remoteScope?.remoteName)) {
-      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
-      if (jjDiff !== undefined) {
-        return {
-          diff: filterReviewDiff(jjDiff),
-          baseRef: jjBase,
-          strategy: "pr_base_jj",
-          reviewPr,
-        };
-      }
+  const jjBase = toJjBaseCandidates(baseRef, remoteScope?.remoteName)[0];
+  if (jjBase !== undefined) {
+    const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
+    if (jjDiff !== undefined) {
+      return {
+        diff: filterReviewDiff(jjDiff),
+        baseRef: jjBase,
+        strategy: "pr_base_jj",
+        reviewPr,
+      };
     }
   }
 
-  const workingDiff = await collectRepositoryDiff(workspacePath);
   return {
-    diff: filterReviewDiff(workingDiff),
-    baseRef: undefined,
-    strategy: "working_copy_fallback",
+    diff: "",
+    baseRef,
+    strategy: "pr_diff_unavailable",
     reviewPr,
   };
+}
+
+function isSafeGitRevision(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  if (trimmed.startsWith("-")) {
+    return false;
+  }
+  if (/\s/.test(trimmed)) {
+    return false;
+  }
+  return true;
 }
 
 async function fetchPullRequestHeadSha(
@@ -533,7 +569,7 @@ async function fetchPullRequestHeadSha(
     "--jq",
     ".head.sha",
   ];
-  return commandRunner(args, workspacePath, { gitAware: true });
+  return retryUndefined(() => commandRunner(args, workspacePath, { gitAware: true }));
 }
 
 async function fetchPullRequestPatch(
@@ -559,7 +595,23 @@ async function fetchPullRequestPatch(
     "Accept: application/vnd.github.v3.diff",
     `repos/${ownerRepo}/pulls/${input.number}`,
   ];
-  return commandRunner(args, workspacePath, { gitAware: true });
+  return retryUndefined(() => commandRunner(args, workspacePath, { gitAware: true }));
+}
+
+async function retryUndefined<T>(fn: () => Promise<T | undefined>): Promise<T | undefined> {
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const result = await fn();
+    if (result !== undefined) {
+      return result;
+    }
+    if (attempt === attempts) {
+      return undefined;
+    }
+    const backoffMs = 250 * (2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+    await Bun.sleep(backoffMs);
+  }
+  return undefined;
 }
 
 export function filterReviewDiff(diff: string): string {
