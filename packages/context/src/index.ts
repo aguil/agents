@@ -497,6 +497,21 @@ async function collectReviewDiffFallback(
   }
 
   if (isSafeGitRevision(baseRef)) {
+  const jjBase = toJjBaseCandidates(baseRef, remoteScope?.remoteName)[0];
+  if (jjBase !== undefined) {
+    const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
+    if (jjDiff !== undefined) {
+      return {
+        diff: filterReviewDiff(jjDiff),
+        baseRef: jjBase,
+        strategy: "pr_base_jj",
+        reviewPr,
+      };
+    }
+  }
+  }
+
+  if (isSafeGitRevision(baseRef)) {
     const gitDiff = await commandRunner(
       ["git", "diff", "--no-ext-diff", `${baseRef}...HEAD`],
       workspacePath,
@@ -506,19 +521,6 @@ async function collectReviewDiffFallback(
         diff: filterReviewDiff(gitDiff),
         baseRef,
         strategy: "pr_base_git",
-        reviewPr,
-      };
-    }
-  }
-
-  const jjBase = toJjBaseCandidates(baseRef, remoteScope?.remoteName)[0];
-  if (jjBase !== undefined) {
-    const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
-    if (jjDiff !== undefined) {
-      return {
-        diff: filterReviewDiff(jjDiff),
-        baseRef: jjBase,
-        strategy: "pr_base_jj",
         reviewPr,
       };
     }
@@ -569,7 +571,10 @@ async function fetchPullRequestHeadSha(
     "--jq",
     ".head.sha",
   ];
-  return retryUndefined(() => commandRunner(args, workspacePath, { gitAware: true }));
+  if (commandRunner !== runCommand) {
+    return commandRunner(args, workspacePath, { gitAware: true });
+  }
+  return runGhWithRetry(args, workspacePath, { gitAware: true });
 }
 
 async function fetchPullRequestPatch(
@@ -595,19 +600,45 @@ async function fetchPullRequestPatch(
     "Accept: application/vnd.github.v3.diff",
     `repos/${ownerRepo}/pulls/${input.number}`,
   ];
-  return retryUndefined(() => commandRunner(args, workspacePath, { gitAware: true }));
+  if (commandRunner !== runCommand) {
+    return commandRunner(args, workspacePath, { gitAware: true });
+  }
+  return runGhWithRetry(args, workspacePath, { gitAware: true });
 }
 
-async function retryUndefined<T>(fn: () => Promise<T | undefined>): Promise<T | undefined> {
+async function runGhWithRetry(
+  cmd: readonly string[],
+  workspacePath: string,
+  options: { readonly gitAware?: boolean } = {},
+): Promise<string | undefined> {
   const attempts = 3;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const result = await fn();
-    if (result !== undefined) {
-      return result;
+    const resolvedCwd = options.gitAware === true ? await resolveGitAwareCwd(workspacePath) : workspacePath;
+    const proc = Bun.spawn({ cmd: [...cmd], cwd: resolvedCwd, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readProcessText(proc.stdout),
+      readProcessText(proc.stderr),
+      proc.exited,
+    ]);
+    if (exitCode === 0) {
+      return stdout;
     }
-    if (attempt === attempts) {
+
+    const message = stderr.trim();
+    const isTransientNetwork =
+      /error connecting to api\.github\.com/i.test(message) ||
+      /\bTLS handshake timeout\b/i.test(message) ||
+      /\btimeout\b/i.test(message) ||
+      /\btemporarily unavailable\b/i.test(message) ||
+      /\bconnection reset\b/i.test(message) ||
+      /\bconnection refused\b/i.test(message) ||
+      /\bEOF\b/i.test(message) ||
+      /\bno such host\b/i.test(message) ||
+      /\bnetwork is unreachable\b/i.test(message);
+    if (!isTransientNetwork || attempt === attempts) {
       return undefined;
     }
+
     const backoffMs = 250 * (2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
     await Bun.sleep(backoffMs);
   }

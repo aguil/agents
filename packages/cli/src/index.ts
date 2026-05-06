@@ -748,13 +748,29 @@ async function replacePendingPullRequestReview(input: {
     workspacePath,
   );
   const pendingMine = reviews.filter((review) => review.state === "PENDING" && review.user.login === login);
-  for (const review of pendingMine) {
-    await ghApi<void>(
-      `repos/${repo}/pulls/${prNumber}/reviews/${review.id}`,
-      "DELETE",
-      undefined,
-      workspacePath,
-    );
+  if (pendingMine.length > 0) {
+    const confirmed = await confirmReplacePendingReview({
+      noConfirm: input.noConfirm,
+      prNumber,
+      pendingCount: pendingMine.length,
+    });
+    if (!confirmed) {
+      console.log("Skipped pending review publish.");
+      return {
+        cancelled: true,
+        currentHeadSha,
+        headDiverged,
+      };
+    }
+
+    for (const review of pendingMine) {
+      await ghApi<void>(
+        `repos/${repo}/pulls/${prNumber}/reviews/${review.id}`,
+        "DELETE",
+        undefined,
+        workspacePath,
+      );
+    }
   }
 
   const body = buildPendingReviewSummaryBody({
@@ -832,6 +848,38 @@ async function confirmProceedAfterStaleness(noConfirm: boolean): Promise<boolean
     return false;
   }
   process.stdout.write("Post pending review anyway? [y/N] ");
+  const reader = Bun.stdin.stream().getReader();
+  try {
+    const { value } = await reader.read();
+    const answer = value === undefined ? "" : new TextDecoder().decode(value).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  } catch {
+    return false;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function confirmReplacePendingReview(input: {
+  readonly noConfirm: boolean;
+  readonly prNumber: number;
+  readonly pendingCount: number;
+}): Promise<boolean> {
+  if (input.noConfirm) {
+    return true;
+  }
+  if (process.platform === "win32") {
+    console.warn("Interactive prompt is unsupported on Windows. Re-run with --no-confirm.");
+    return false;
+  }
+  if (process.stdin.isTTY !== true) {
+    console.warn("Non-interactive stdin detected. Re-run with --no-confirm to replace the pending review.");
+    return false;
+  }
+  const plural = input.pendingCount === 1 ? "" : "s";
+  process.stdout.write(
+    `Replace your existing pending review${plural} (${input.pendingCount}) on PR #${input.prNumber}? [y/N] `,
+  );
   const reader = Bun.stdin.stream().getReader();
   try {
     const { value } = await reader.read();
