@@ -2,7 +2,7 @@ import { createCodeReviewAdapter, runCodeReview } from "@aguil/agents-code-revie
 import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { severityEmoji } from "@aguil/agents-reporting";
+import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
 import { access, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
@@ -102,6 +102,9 @@ Options:
 
     if (options.verbose) {
       console.log(`Starting code review with adapter '${adapterName}'.`);
+      if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
+        console.log("Using default consensus=1 for --pending-review (override with --consensus <n>).");
+      }
     }
 
     const result = await runCodeReview({
@@ -698,6 +701,8 @@ function formatPendingReviewBody(finding: Finding): string {
     "",
     `Evidence: ${finding.evidence}`,
     `Validation: ${finding.validation.status} - ${finding.validation.details}`,
+    "",
+    `<!-- finding:${findingFingerprint(finding)} -->`,
   ].join("\n");
 }
 
@@ -734,7 +739,12 @@ async function replacePendingPullRequestReview(input: {
     }
   }
 
-  const rawComments = findingsToPendingReviewComments(input.findings);
+  const suppressedFingerprints = await fetchResolvedOrOutdatedFindingFingerprints(repo, prNumber, workspacePath);
+  const findings = suppressedFingerprints.size === 0
+    ? input.findings
+    : input.findings.filter((finding) => !suppressedFingerprints.has(findingFingerprint(finding)));
+
+  const rawComments = findingsToPendingReviewComments(findings);
   const diffContext = await loadPullRequestDiffContext(repo, prNumber, workspacePath);
   const comments = rawComments
     .map((candidate) => candidateToComment(candidate, diffContext))
@@ -775,7 +785,7 @@ async function replacePendingPullRequestReview(input: {
 
   const body = buildPendingReviewSummaryBody({
     style: input.reviewSummaryStyle,
-    findings: input.findings,
+    findings,
     postedCommentCount: comments.length,
     skippedUnanchorable,
   });
@@ -797,6 +807,78 @@ async function replacePendingPullRequestReview(input: {
     currentHeadSha,
     headDiverged,
   };
+}
+
+async function fetchResolvedOrOutdatedFindingFingerprints(
+  repo: string,
+  prNumber: number,
+  workspacePath?: string,
+): Promise<ReadonlySet<string>> {
+  const [owner, name] = repo.split("/");
+  if (!owner || !name) {
+    return new Set();
+  }
+
+  const query = [
+    "query($o:String!,$r:String!,$n:Int!){",
+    "repository(owner:$o,name:$r){",
+    "pullRequest(number:$n){",
+    "reviewThreads(first:100){nodes{isResolved isOutdated comments(first:50){nodes{body}}}}",
+    "}",
+    "}",
+    "}",
+  ].join("");
+
+  const response = await runGh<{
+    readonly data?: {
+      readonly repository?: {
+        readonly pullRequest?: {
+          readonly reviewThreads?: {
+            readonly nodes?: ReadonlyArray<{
+              readonly isResolved?: boolean;
+              readonly isOutdated?: boolean;
+              readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly body?: string }> };
+            }>;
+          };
+        };
+      };
+    };
+  }>([
+    "api",
+    "graphql",
+    "-f",
+    `query=${query}`,
+    "-f",
+    `o=${owner}`,
+    "-f",
+    `r=${name}`,
+    "-F",
+    `n=${prNumber}`,
+  ], workspacePath);
+
+  const threads = response.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+  const suppressed = new Set<string>();
+  const marker = /<!--\s*finding:([^>]+?)\s*-->/g;
+
+  for (const thread of threads) {
+    if (thread.isResolved !== true && thread.isOutdated !== true) {
+      continue;
+    }
+    for (const comment of thread.comments?.nodes ?? []) {
+      const body = comment.body;
+      if (typeof body !== "string") {
+        continue;
+      }
+      for (const match of body.matchAll(marker)) {
+        const fingerprint = match[1]?.trim();
+        if (fingerprint) {
+          suppressed.add(fingerprint);
+        }
+      }
+    }
+  }
+
+  return suppressed;
 }
 
 async function checkReviewPullRequestDivergence(

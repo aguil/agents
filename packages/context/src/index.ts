@@ -438,6 +438,7 @@ export async function collectReviewDiff(
       commandRunner,
       pullRequestNumber,
       pullRequest?.baseRefName,
+      remoteScope,
       requestedReviewPr,
     );
     if (fallback !== undefined) {
@@ -548,6 +549,7 @@ async function collectReviewDiffFallback(
   commandRunner: CommandRunner,
   pullRequestNumber: number,
   baseRefName: string | undefined,
+  remoteScope: RemoteScope | undefined,
   reviewPr: ReviewPrMetadata,
 ): Promise<{
   readonly diff: string;
@@ -555,13 +557,11 @@ async function collectReviewDiffFallback(
   readonly strategy: string;
   readonly reviewPr?: ReviewPrMetadata;
 } | undefined> {
-  const remoteScope = await resolvePreferredRemoteScope(workspacePath, commandRunner);
-  const baseCandidates = dedupeStrings(baseRefName !== undefined
+  const baseCandidates = baseRefName !== undefined
     ? [baseRefName]
-    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteScope?.remoteName));
-
-  const baseRef = baseCandidates[0];
-  if (baseRef === undefined) {
+    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteScope?.remoteName);
+  const deduped = dedupeStrings(baseCandidates);
+  if (deduped.length === 0) {
     return {
       diff: "",
       baseRef: undefined,
@@ -570,39 +570,38 @@ async function collectReviewDiffFallback(
     };
   }
 
-  if (isSafeGitRevision(baseRef)) {
-  const jjBase = toJjBaseCandidates(baseRef, remoteScope?.remoteName)[0];
-  if (jjBase !== undefined) {
-    const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
-    if (jjDiff !== undefined) {
-      return {
-        diff: filterReviewDiff(jjDiff),
-        baseRef: jjBase,
-        strategy: "pr_base_jj",
-        reviewPr,
-      };
+  for (const baseRef of dedupeStrings(deduped)) {
+    for (const jjBase of toJjBaseCandidates(baseRef, remoteScope?.remoteName)) {
+      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
+      if (jjDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(jjDiff),
+          baseRef: jjBase,
+          strategy: "pr_base_jj",
+          reviewPr,
+        };
+      }
     }
-  }
-  }
 
-  if (isSafeGitRevision(baseRef)) {
-    const gitDiff = await commandRunner(
-      ["git", "diff", "--no-ext-diff", `${baseRef}...HEAD`],
-      workspacePath,
-    );
-    if (gitDiff !== undefined) {
-      return {
-        diff: filterReviewDiff(gitDiff),
-        baseRef,
-        strategy: "pr_base_git",
-        reviewPr,
-      };
+    if (isSafeGitRevision(baseRef)) {
+      const gitDiff = await commandRunner(
+        ["git", "diff", "--no-ext-diff", `${baseRef}...HEAD`],
+        workspacePath,
+      );
+      if (gitDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(gitDiff),
+          baseRef,
+          strategy: "pr_base_git",
+          reviewPr,
+        };
+      }
     }
   }
 
   return {
     diff: "",
-    baseRef,
+    baseRef: deduped[0],
     strategy: "pr_diff_unavailable",
     reviewPr,
   };
