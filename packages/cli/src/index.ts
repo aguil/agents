@@ -121,6 +121,17 @@ Options:
     });
     if (options.verbose) {
       printVerboseFindingSummary(result.findings);
+      const summaryStyle = parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
+      const anchorableCount = findingsToPendingReviewComments(result.findings).length;
+      const skippedUnanchorable = result.findings.length - anchorableCount;
+      console.log("");
+      console.log(buildPendingReviewSummaryBody({
+        style: summaryStyle,
+        findings: result.findings,
+        postedCommentCount: anchorableCount,
+        skippedUnanchorable,
+      }));
+      console.log("");
       console.log(`Code review ${result.status}.`);
       console.log(`Report: ${result.reportPath}`);
     } else if (options.dryRun) {
