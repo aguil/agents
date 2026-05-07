@@ -3,7 +3,7 @@ import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
-import { access, readFile, rm, writeFile, readdir } from "node:fs/promises";
+import { access, readFile, rm, writeFile, readdir, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
@@ -247,6 +247,17 @@ interface PendingReviewCancelled {
   readonly cancelled: true;
   readonly currentHeadSha?: string;
   readonly headDiverged: boolean;
+}
+
+interface PendingReviewFindingCache {
+  readonly version: 1;
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly updatedAt: string;
+  readonly findings: ReadonlyArray<{
+    readonly fingerprint: string;
+    readonly threadId: string;
+  }>;
 }
 
 interface EffectiveAdapterOptions {
@@ -796,12 +807,27 @@ async function replacePendingPullRequestReview(input: {
 
     const candidateFingerprints = new Set(findings.map((finding) => findingFingerprint(finding)));
     if (candidateFingerprints.size > 0) {
-      const suppressedFingerprints = await fetchResolvedFindingFingerprints({
+      const allowedAuthors = new Set([login]);
+      const suppressedFromCache = await suppressFingerprintsFromLocalCache({
         repo,
         prNumber,
         workspacePath,
         wanted: candidateFingerprints,
       });
+
+      let suppressedFingerprints = suppressedFromCache;
+      const remaining = new Set([...candidateFingerprints].filter((fp) => !suppressedFingerprints.has(fp)));
+      if (remaining.size > 0) {
+        const fromScan = await fetchResolvedFindingFingerprints({
+          repo,
+          prNumber,
+          workspacePath,
+          wanted: remaining,
+          allowedAuthors,
+        });
+        suppressedFingerprints = new Set([...suppressedFingerprints, ...fromScan]);
+      }
+
       if (suppressedFingerprints.size > 0) {
         findings = findings.filter((finding) => !suppressedFingerprints.has(findingFingerprint(finding)));
       }
@@ -842,6 +868,21 @@ async function replacePendingPullRequestReview(input: {
     workspacePath,
   );
 
+  // Best-effort cache update: map fingerprints from posted comments to thread IDs.
+  // This lets future replacement checks query a small set of known threads rather
+  // than scanning all PR threads.
+  try {
+    await updateLocalFindingThreadCacheAfterPost({
+      repo,
+      prNumber,
+      reviewId: created.id,
+      workspacePath,
+      allowedAuthors: new Set([login]),
+    });
+  } catch {
+    // Best-effort only.
+  }
+
   return {
     reviewId: created.id,
     prNumber,
@@ -852,11 +893,225 @@ async function replacePendingPullRequestReview(input: {
   };
 }
 
+function sanitizeRepoForCache(repo: string): string {
+  return repo.replaceAll("/", "__");
+}
+
+function findingCachePath(workspacePath: string, repo: string, prNumber: number): string {
+  return join(workspacePath, ".review-agent", "pr-cache", sanitizeRepoForCache(repo), `pr-${prNumber}`, "finding-threads.json");
+}
+
+async function loadLocalFindingThreadCache(
+  workspacePath: string,
+  repo: string,
+  prNumber: number,
+): Promise<PendingReviewFindingCache | undefined> {
+  const path = findingCachePath(workspacePath, repo, prNumber);
+  try {
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as Partial<PendingReviewFindingCache>;
+    if (parsed.version !== 1 || parsed.repo !== repo || parsed.prNumber !== prNumber || !Array.isArray(parsed.findings)) {
+      return undefined;
+    }
+    return parsed as PendingReviewFindingCache;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeLocalFindingThreadCache(workspacePath: string, cache: PendingReviewFindingCache): Promise<void> {
+  const path = findingCachePath(workspacePath, cache.repo, cache.prNumber);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+}
+
+async function suppressFingerprintsFromLocalCache(input: {
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly workspacePath: string;
+  readonly wanted: ReadonlySet<string>;
+}): Promise<Set<string>> {
+  const cache = await loadLocalFindingThreadCache(input.workspacePath, input.repo, input.prNumber);
+  if (cache === undefined) {
+    return new Set();
+  }
+
+  const wantedThreadIds = new Map<string, string>();
+  for (const entry of cache.findings) {
+    if (input.wanted.has(entry.fingerprint)) {
+      wantedThreadIds.set(entry.fingerprint, entry.threadId);
+    }
+  }
+  if (wantedThreadIds.size === 0) {
+    return new Set();
+  }
+
+  const uniqueThreadIds = [...new Set(wantedThreadIds.values())];
+  const response = await runGh<{
+    readonly data?: {
+      readonly nodes?: ReadonlyArray<
+        | { readonly id: string; readonly isResolved?: boolean }
+        | { readonly id: string; readonly isResolved?: boolean } // same shape for thread nodes
+        | null
+      >;
+    };
+  }>([
+    "api",
+    "graphql",
+    "-f",
+    `query=query($ids:[ID!]!){nodes(ids:$ids){... on PullRequestReviewThread{id isResolved}}}`,
+    "-f",
+    `ids=${JSON.stringify(uniqueThreadIds)}`,
+  ], input.workspacePath);
+
+  const resolvedThreads = new Set<string>();
+  for (const node of response.data?.nodes ?? []) {
+    if (node && node.isResolved === true) {
+      resolvedThreads.add(node.id);
+    }
+  }
+
+  const suppressed = new Set<string>();
+  for (const [fingerprint, threadId] of wantedThreadIds.entries()) {
+    if (resolvedThreads.has(threadId)) {
+      suppressed.add(fingerprint);
+    }
+  }
+  return suppressed;
+}
+
+async function updateLocalFindingThreadCacheAfterPost(input: {
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly reviewId: number;
+  readonly workspacePath: string;
+  readonly allowedAuthors: ReadonlySet<string>;
+}): Promise<void> {
+  const reviewComments = await ghApi<ReadonlyArray<{ readonly node_id: string; readonly body: string }>>(
+    `repos/${input.repo}/pulls/${input.prNumber}/reviews/${input.reviewId}/comments`,
+    "GET",
+    undefined,
+    input.workspacePath,
+  );
+
+  const commentIdsToFingerprint = new Map<string, string>();
+  for (const comment of reviewComments) {
+    const matches = comment.body.matchAll(/<!--\s*finding:([^>]+?)\s*-->/g);
+    for (const match of matches) {
+      const fp = match[1]?.trim();
+      if (fp) {
+        commentIdsToFingerprint.set(comment.node_id, fp);
+      }
+    }
+  }
+  if (commentIdsToFingerprint.size === 0) {
+    return;
+  }
+
+  const query = [
+    "query($o:String!,$r:String!,$n:Int!,$after:String){",
+    "repository(owner:$o,name:$r){",
+    "pullRequest(number:$n){",
+    "reviewThreads(first:100,after:$after){",
+    "pageInfo{hasNextPage endCursor}",
+    "nodes{id comments(first:50){nodes{id author{login}}}}",
+    "}",
+    "}",
+    "}",
+    "}",
+  ].join("");
+
+  const [owner, name] = input.repo.split("/");
+  if (!owner || !name) {
+    return;
+  }
+
+  const found = new Map<string, string>(); // fingerprint -> threadId
+  let after: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const resp = await runGh<{
+      readonly data?: {
+        readonly repository?: {
+          readonly pullRequest?: {
+            readonly reviewThreads?: {
+              readonly pageInfo?: { readonly hasNextPage?: boolean; readonly endCursor?: string | null };
+              readonly nodes?: ReadonlyArray<{
+                readonly id: string;
+                readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly id: string; readonly author?: { readonly login?: string } }> };
+              }>;
+            };
+          };
+        };
+      };
+    }>([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-f",
+      `o=${owner}`,
+      "-f",
+      `r=${name}`,
+      "-F",
+      `n=${input.prNumber}`,
+      ...(after !== undefined ? ["-f", `after=${after}`] : []),
+    ], input.workspacePath);
+
+    for (const thread of resp.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []) {
+      for (const comment of thread.comments?.nodes ?? []) {
+        const authorLogin = comment.author?.login;
+        if (typeof authorLogin !== "string" || !input.allowedAuthors.has(authorLogin)) {
+          continue;
+        }
+        const fingerprint = commentIdsToFingerprint.get(comment.id);
+        if (fingerprint) {
+          found.set(fingerprint, thread.id);
+        }
+      }
+    }
+
+    if (found.size >= commentIdsToFingerprint.size) {
+      break;
+    }
+    const pageInfo = resp.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
+    if (pageInfo?.hasNextPage !== true) {
+      break;
+    }
+    const endCursor = pageInfo.endCursor ?? undefined;
+    if (!endCursor) {
+      break;
+    }
+    after = endCursor;
+  }
+
+  if (found.size === 0) {
+    return;
+  }
+
+  const existing = await loadLocalFindingThreadCache(input.workspacePath, input.repo, input.prNumber);
+  const merged = new Map<string, string>();
+  for (const entry of existing?.findings ?? []) {
+    merged.set(entry.fingerprint, entry.threadId);
+  }
+  for (const [fp, threadId] of found.entries()) {
+    merged.set(fp, threadId);
+  }
+
+  await writeLocalFindingThreadCache(input.workspacePath, {
+    version: 1,
+    repo: input.repo,
+    prNumber: input.prNumber,
+    updatedAt: new Date().toISOString(),
+    findings: [...merged.entries()].map(([fingerprint, threadId]) => ({ fingerprint, threadId })),
+  });
+}
+
 async function fetchResolvedFindingFingerprints(input: {
   readonly repo: string;
   readonly prNumber: number;
   readonly workspacePath?: string;
   readonly wanted: ReadonlySet<string>;
+  readonly allowedAuthors: ReadonlySet<string>;
 }): Promise<ReadonlySet<string>> {
   const [owner, name] = input.repo.split("/");
   if (!owner || !name) {
@@ -872,7 +1127,7 @@ async function fetchResolvedFindingFingerprints(input: {
     "pullRequest(number:$n){",
     "reviewThreads(first:100,after:$after){",
     "pageInfo{hasNextPage endCursor}",
-    "nodes{isResolved comments(first:10){nodes{body}}}",
+    "nodes{isResolved comments(first:10){nodes{body author{login}}}}",
     "}",
     "}",
     "}",
@@ -889,7 +1144,7 @@ async function fetchResolvedFindingFingerprints(input: {
               readonly pageInfo?: { readonly hasNextPage?: boolean; readonly endCursor?: string | null };
               readonly nodes?: ReadonlyArray<{
                 readonly isResolved?: boolean;
-                readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly body?: string }> };
+                readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly body?: string; readonly author?: { readonly login?: string } }> };
               }>;
             };
           };
@@ -917,6 +1172,10 @@ async function fetchResolvedFindingFingerprints(input: {
       for (const comment of thread.comments?.nodes ?? []) {
         const body = comment.body;
         if (typeof body !== "string") {
+          continue;
+        }
+        const authorLogin = comment.author?.login;
+        if (typeof authorLogin !== "string" || !input.allowedAuthors.has(authorLogin)) {
           continue;
         }
         for (const match of body.matchAll(marker)) {
