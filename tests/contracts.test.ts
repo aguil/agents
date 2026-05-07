@@ -773,6 +773,7 @@ test("impact summary annotates findings that are not inline-postable when PR dif
 
   expect(body).toContain("- ⚠️ On hunk (src/app.ts:10)");
   expect(body).not.toContain("On hunk (src/app.ts:10) —");
+  expect(body).toContain("- Skipped outside PR diff: 2");
   expect(body).toContain("line is not on a PR diff hunk");
   expect(body).toContain("file is not in this PR's changed files");
 });

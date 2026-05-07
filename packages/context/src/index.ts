@@ -522,18 +522,6 @@ async function collectReviewDiffFromLocalHead(
     : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteName);
 
   for (const baseRef of dedupeStrings(baseCandidates)) {
-    for (const jjBase of toJjBaseCandidates(baseRef, remoteName)) {
-      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", headSha], workspacePath);
-      if (jjDiff !== undefined) {
-        return {
-          diff: filterReviewDiff(jjDiff),
-          baseRef: jjBase,
-          strategy: "pr_base_jj_head",
-          reviewPr,
-        };
-      }
-    }
-
     if (isSafeGitRevision(baseRef)) {
       const gitDiff = await commandRunner(["git", "diff", "--no-ext-diff", `${baseRef}...${headSha}`], workspacePath);
       if (gitDiff !== undefined) {
@@ -541,6 +529,18 @@ async function collectReviewDiffFromLocalHead(
           diff: filterReviewDiff(gitDiff),
           baseRef,
           strategy: "pr_base_git_head",
+          reviewPr,
+        };
+      }
+    }
+
+    for (const jjBase of toJjBaseCandidates(baseRef, remoteName)) {
+      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", headSha], workspacePath);
+      if (jjDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(jjDiff),
+          baseRef: jjBase,
+          strategy: "pr_base_jj_head",
           reviewPr,
         };
       }
@@ -577,18 +577,6 @@ async function collectReviewDiffFallback(
   }
 
   for (const baseRef of dedupeStrings(deduped)) {
-    for (const jjBase of toJjBaseCandidates(baseRef, remoteScope?.remoteName)) {
-      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
-      if (jjDiff !== undefined) {
-        return {
-          diff: filterReviewDiff(jjDiff),
-          baseRef: jjBase,
-          strategy: "pr_base_jj",
-          reviewPr,
-        };
-      }
-    }
-
     if (isSafeGitRevision(baseRef)) {
       const gitDiff = await commandRunner(
         ["git", "diff", "--no-ext-diff", `${baseRef}...HEAD`],
@@ -599,6 +587,18 @@ async function collectReviewDiffFallback(
           diff: filterReviewDiff(gitDiff),
           baseRef,
           strategy: "pr_base_git",
+          reviewPr,
+        };
+      }
+    }
+
+    for (const jjBase of toJjBaseCandidates(baseRef, remoteScope?.remoteName)) {
+      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
+      if (jjDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(jjDiff),
+          baseRef: jjBase,
+          strategy: "pr_base_jj",
           reviewPr,
         };
       }

@@ -1132,12 +1132,15 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
     return;
   }
 
+  // Prefer the most recent threads first: fresh pending-review comments almost always
+  // land on recent threads, so `last` + `before` avoids scanning from the start of
+  // long PR histories in the common case.
   const query = [
-    "query($o:String!,$r:String!,$n:Int!,$after:String){",
+    "query($o:String!,$r:String!,$n:Int!,$before:String){",
     "repository(owner:$o,name:$r){",
     "pullRequest(number:$n){",
-    "reviewThreads(first:100,after:$after){",
-    "pageInfo{hasNextPage endCursor}",
+    "reviewThreads(last:100,before:$before){",
+    "pageInfo{hasPreviousPage startCursor}",
     "nodes{id comments(first:50){nodes{id author{login}}}}",
     "}",
     "}",
@@ -1151,14 +1154,17 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
   }
 
   const found = new Map<string, string>(); // fingerprint -> threadId
-  let after: string | undefined;
+  let beforeCursor: string | undefined;
   for (let page = 0; page < 10; page++) {
     const resp = await runGh<{
       readonly data?: {
         readonly repository?: {
           readonly pullRequest?: {
             readonly reviewThreads?: {
-              readonly pageInfo?: { readonly hasNextPage?: boolean; readonly endCursor?: string | null };
+              readonly pageInfo?: {
+                readonly hasPreviousPage?: boolean;
+                readonly startCursor?: string | null;
+              };
               readonly nodes?: ReadonlyArray<{
                 readonly id: string;
                 readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly id: string; readonly author?: { readonly login?: string } }> };
@@ -1178,7 +1184,7 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
       `r=${name}`,
       "-F",
       `n=${input.prNumber}`,
-      ...(after !== undefined ? ["-f", `after=${after}`] : []),
+      ...(beforeCursor !== undefined ? ["-f", `before=${beforeCursor}`] : []),
     ], input.workspacePath);
 
     for (const thread of resp.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []) {
@@ -1198,14 +1204,14 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
       break;
     }
     const pageInfo = resp.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
-    if (pageInfo?.hasNextPage !== true) {
+    if (pageInfo?.hasPreviousPage !== true) {
       break;
     }
-    const endCursor = pageInfo.endCursor ?? undefined;
-    if (!endCursor) {
+    const startCursor = pageInfo.startCursor ?? undefined;
+    if (startCursor === undefined || startCursor.length === 0) {
       break;
     }
-    after = endCursor;
+    beforeCursor = startCursor;
   }
 
   if (found.size === 0) {
@@ -1259,6 +1265,8 @@ async function fetchResolvedFindingFingerprints(input: {
   ].join("");
 
   let after: string | undefined;
+  /** True when the last fetched page still had a next page but we stopped due to the page cap. */
+  let cappedWithMorePages = false;
   for (let page = 0; page < 10; page++) {
     const response = await runGh<{
       readonly data?: {
@@ -1323,9 +1331,13 @@ async function fetchResolvedFindingFingerprints(input: {
       break;
     }
     after = endCursor;
+    if (page === 9) {
+      cappedWithMorePages = true;
+      break;
+    }
   }
 
-  if (suppressed.size < input.wanted.size && after !== undefined) {
+  if (suppressed.size < input.wanted.size && cappedWithMorePages) {
     console.warn(
       "Warning: resolved-thread suppression scan hit its pagination limit; some resolved findings may be reposted.",
     );
@@ -1692,8 +1704,10 @@ function renderTriageSummary(
     "## At a Glance",
     `- Findings: ${findings.length} (🔴 ${critical.length} critical, ⚠️ ${warnings.length} warning)`,
     `- Inline comments posted: ${postedCommentCount}`,
-    `- Skipped outside PR diff: ${skippedUnanchorable}`,
   ];
+  if (skippedUnanchorable > 0) {
+    lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
+  }
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
@@ -1725,8 +1739,10 @@ function renderImpactSummary(
     "## Impact Summary",
     `- Total findings: ${findings.length}`,
     `- Inline comments posted: ${postedCommentCount}`,
-    `- Skipped outside PR diff: ${skippedUnanchorable}`,
   ];
+  if (skippedUnanchorable > 0) {
+    lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
+  }
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
@@ -1773,8 +1789,10 @@ function renderEvidenceSummary(
     "## Why / Evidence / Fix",
     `- Total findings: ${findings.length}`,
     `- Inline comments posted: ${postedCommentCount}`,
-    `- Skipped outside PR diff: ${skippedUnanchorable}`,
   ];
+  if (skippedUnanchorable > 0) {
+    lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
+  }
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
