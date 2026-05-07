@@ -152,6 +152,7 @@ Options:
         postedCommentCount: postedInlineCount,
         skippedUnanchorable,
         prDiffContext,
+        runMetadata: result.metadata,
       }));
       console.log("");
       console.log(`Code review ${result.status}.`);
@@ -194,6 +195,7 @@ Options:
         noConfirm: options.noConfirm,
         replacePendingReview: options.replacePendingReview,
         workspacePath: options.workspace,
+        runMetadata: result.metadata,
       });
       if (posted.cancelled === true) {
         await updateRunResultMetadata(result.artifacts, {
@@ -663,6 +665,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     noConfirm: options.noConfirm,
     replacePendingReview: options.replacePendingReview,
     workspacePath,
+    runMetadata: metadata,
   });
   if (posted.cancelled === true) {
     return 0;
@@ -846,6 +849,8 @@ async function replacePendingPullRequestReview(input: {
   readonly noConfirm: boolean;
   readonly replacePendingReview: boolean;
   readonly workspacePath?: string;
+  /** From harness result metadata (result.json) for review coverage in the summary body. */
+  readonly runMetadata?: Readonly<Record<string, string>>;
 }): Promise<PendingReviewPosted | PendingReviewCancelled> {
   const workspacePath = resolveWorkspaceCwd(input.workspacePath);
   const repo = await getRepoNameWithOwner(workspacePath);
@@ -975,6 +980,7 @@ async function replacePendingPullRequestReview(input: {
     postedCommentCount: comments.length,
     skippedUnanchorable,
     prDiffContext: diffContext,
+    runMetadata: input.runMetadata,
   });
   const created = await ghApi<{ readonly id: number; readonly html_url: string }>(
     `repos/${repo}/pulls/${prNumber}/reviews`,
@@ -1488,6 +1494,8 @@ export function buildPendingReviewSummaryBody(input: {
   readonly postedCommentCount: number;
   readonly skippedUnanchorable: number;
   readonly prDiffContext?: PullRequestDiffContext;
+  /** Harness run metadata (e.g. from result.json) for review coverage / triage. */
+  readonly runMetadata?: Readonly<Record<string, string>>;
 }): string {
   switch (input.style) {
     case "triage":
@@ -1496,6 +1504,7 @@ export function buildPendingReviewSummaryBody(input: {
         input.postedCommentCount,
         input.skippedUnanchorable,
         input.prDiffContext,
+        input.runMetadata,
       );
     case "impact":
       return renderImpactSummary(
@@ -1503,6 +1512,7 @@ export function buildPendingReviewSummaryBody(input: {
         input.postedCommentCount,
         input.skippedUnanchorable,
         input.prDiffContext,
+        input.runMetadata,
       );
     case "evidence":
       return renderEvidenceSummary(
@@ -1510,8 +1520,163 @@ export function buildPendingReviewSummaryBody(input: {
         input.postedCommentCount,
         input.skippedUnanchorable,
         input.prDiffContext,
+        input.runMetadata,
       );
   }
+}
+
+const FULL_CODE_REVIEW_ROLE_IDS: readonly string[] = [
+  "security",
+  "performance",
+  "quality",
+  "compliance",
+];
+
+function parseMetadataRolesList(raw: string | undefined): readonly string[] {
+  if (raw === undefined || raw.trim().length === 0) {
+    return [];
+  }
+  return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+function parseTriageTierLabel(raw: string | undefined): "trivial" | "lite" | "full" | undefined {
+  if (raw === "trivial" || raw === "lite" || raw === "full") {
+    return raw;
+  }
+  return undefined;
+}
+
+function expectedRolesForTriageTier(tier: "trivial" | "lite" | "full"): readonly string[] {
+  if (tier === "trivial") {
+    return ["quality"];
+  }
+  if (tier === "lite") {
+    return ["security", "quality", "compliance"];
+  }
+  return [...FULL_CODE_REVIEW_ROLE_IDS];
+}
+
+function roleReviewSectionLabel(roleId: string): string {
+  if (roleId === "security") {
+    return "Security";
+  }
+  if (roleId === "performance") {
+    return "Runtime / Performance";
+  }
+  if (roleId === "quality") {
+    return "Correctness / Quality";
+  }
+  if (roleId === "compliance") {
+    return "Documentation / Compliance";
+  }
+  return roleId;
+}
+
+function triageTierRationale(tier: "trivial" | "lite" | "full"): string {
+  if (tier === "trivial") {
+    return "Triage tier **trivial**: only correctness/quality review is scheduled (small or low-risk change per context bundle).";
+  }
+  if (tier === "lite") {
+    return "Triage tier **lite**: security, quality, and compliance run; runtime/performance is not scheduled for this scope.";
+  }
+  return "Triage tier **full**: all review dimensions are scheduled.";
+}
+
+/**
+ * Markdown lines (each including leading `- ` or headings) for review coverage; empty if no usable metadata.
+ */
+export function formatReviewCoverageSectionLines(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): readonly string[] {
+  if (runMetadata === undefined) {
+    return [];
+  }
+
+  const triageRaw = runMetadata.triage?.trim();
+  const tier = parseTriageTierLabel(triageRaw);
+  const expected = tier === undefined ? undefined : new Set(expectedRolesForTriageTier(tier));
+  const skippedByTriage = FULL_CODE_REVIEW_ROLE_IDS.filter(
+    (id) => expected !== undefined && !expected.has(id),
+  );
+
+  const completed = parseMetadataRolesList(runMetadata.completed_roles);
+  const timedOutRaw = parseMetadataRolesList(runMetadata.timed_out_roles);
+  const failedRaw = parseMetadataRolesList(runMetadata.failed_roles);
+
+  const skipSet = new Set(skippedByTriage);
+  const inScheduledTier = (roleId: string): boolean =>
+    tier === undefined || expected?.has(roleId) === true;
+
+  const timedOut = timedOutRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
+  const failed = failedRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
+
+  const hasOutcomeDetail =
+    completed.length > 0 || timedOut.length > 0 || failed.length > 0;
+  const hasSignal =
+    (triageRaw !== undefined && triageRaw.length > 0)
+    || skippedByTriage.length > 0
+    || timedOutRaw.length > 0
+    || failedRaw.length > 0
+    || completed.length > 0;
+
+  if (!hasSignal) {
+    return [];
+  }
+
+  let missingOutcome: readonly string[] = [];
+  if (tier !== undefined && expected !== undefined && hasOutcomeDetail) {
+    missingOutcome = [...expected].filter(
+      (id) => !completed.includes(id) && !timedOut.includes(id) && !failed.includes(id),
+    );
+  }
+
+  const hasProblem =
+    skippedByTriage.length > 0
+    || timedOut.length > 0
+    || failed.length > 0
+    || missingOutcome.length > 0;
+
+  const lines: string[] = ["", "### Review coverage"];
+
+  if (tier !== undefined) {
+    lines.push(`- _${triageTierRationale(tier)}_`);
+  } else if (triageRaw !== undefined && triageRaw.length > 0) {
+    lines.push(
+      `- _Triage label: \`${triageRaw}\` — scheduled reviewers inferred from run outcomes._`,
+    );
+  }
+
+  for (const roleId of skippedByTriage) {
+    lines.push(
+      `- **${roleReviewSectionLabel(roleId)}:** not performed — omitted for this triage tier (not scheduled).`,
+    );
+  }
+
+  for (const roleId of timedOut) {
+    lines.push(
+      `- **${roleReviewSectionLabel(roleId)}:** not performed — reviewer **timed out** before completion.`,
+    );
+  }
+
+  for (const roleId of failed) {
+    lines.push(
+      `- **${roleReviewSectionLabel(roleId)}:** not performed — reviewer **failed** (adapter error or non-timeout failure).`,
+    );
+  }
+
+  for (const roleId of missingOutcome) {
+    lines.push(
+      `- **${roleReviewSectionLabel(roleId)}:** not performed — no completion outcome recorded (unexpected).`,
+    );
+  }
+
+  if (!hasProblem && tier !== undefined && hasOutcomeDetail) {
+    lines.push("- All scheduled reviewers **completed**; no triage omissions or incomplete roles.");
+  } else if (!hasProblem && tier === undefined && hasOutcomeDetail) {
+    lines.push("- All reported reviewer roles **completed**; no failures or timeouts in run metadata.");
+  }
+
+  return lines;
 }
 
 function renderTriageSummary(
@@ -1519,6 +1684,7 @@ function renderTriageSummary(
   postedCommentCount: number,
   skippedUnanchorable: number,
   prDiffContext: PullRequestDiffContext | undefined,
+  runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
   const critical = findings.filter((finding) => finding.severity === "critical");
   const warnings = findings.filter((finding) => finding.severity === "warning");
@@ -1528,6 +1694,7 @@ function renderTriageSummary(
     `- Inline comments posted: ${postedCommentCount}`,
     `- Skipped outside PR diff: ${skippedUnanchorable}`,
   ];
+  lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
     lines.push("", "✅ No findings - code looks good!");
@@ -1552,6 +1719,7 @@ function renderImpactSummary(
   postedCommentCount: number,
   skippedUnanchorable: number,
   prDiffContext: PullRequestDiffContext | undefined,
+  runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
   const lines = [
     "## Impact Summary",
@@ -1559,6 +1727,7 @@ function renderImpactSummary(
     `- Inline comments posted: ${postedCommentCount}`,
     `- Skipped outside PR diff: ${skippedUnanchorable}`,
   ];
+  lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
     lines.push("", "✅ No findings - code looks good!");
@@ -1598,6 +1767,7 @@ function renderEvidenceSummary(
   postedCommentCount: number,
   skippedUnanchorable: number,
   prDiffContext: PullRequestDiffContext | undefined,
+  runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
   const lines = [
     "## Why / Evidence / Fix",
@@ -1605,6 +1775,7 @@ function renderEvidenceSummary(
     `- Inline comments posted: ${postedCommentCount}`,
     `- Skipped outside PR diff: ${skippedUnanchorable}`,
   ];
+  lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
     lines.push("", "✅ No findings - code looks good!");

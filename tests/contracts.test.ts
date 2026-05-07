@@ -657,6 +657,41 @@ test("builds triage review summary body", () => {
   expect(body).toContain("- ✅ No follow-up findings.");
 });
 
+test("impact summary review coverage notes lite triage omissions", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+    runMetadata: {
+      triage: "lite",
+      completed_roles: "security,quality,compliance",
+    },
+  });
+
+  expect(body).toContain("### Review coverage");
+  expect(body).toContain("Triage tier **lite**");
+  expect(body).toContain("Runtime / Performance");
+  expect(body).toContain("not scheduled");
+});
+
+test("impact summary review coverage lists timed-out scheduled role", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+    runMetadata: {
+      triage: "full",
+      completed_roles: "quality,compliance,performance",
+      timed_out_roles: "security",
+    },
+  });
+
+  expect(body).toContain("**Security:** not performed");
+  expect(body).toContain("timed out");
+});
+
 test("detects file:line anchors outside the PR diff map", () => {
   const finding: Finding = {
     id: "f1",
