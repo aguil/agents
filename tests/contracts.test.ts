@@ -48,6 +48,8 @@ import { serializeEvent } from "@aguil/agents-telemetry";
 import {
   buildPendingReviewSummaryBody,
   discoverLatestResultPath,
+  findingHasNonPostablePrLineAnchor,
+  findingUsesFileNotInPrChangedFiles,
   findingsToPendingReviewComments,
   loadStoredReviewResult,
   parseReviewSummaryStyle,
@@ -446,6 +448,31 @@ test("validates finding shape before accepting agent output", () => {
   expect(invalid.errors).toContain("description must be a non-empty string");
 });
 
+test("coerces empty and null file or line before validating findings", () => {
+  const base = {
+    id: "finding-1",
+    severity: "warning" as const,
+    title: "T",
+    description: "D",
+    evidence: "E",
+    sourceRole: "compliance",
+    validation: { status: "verified" as const, details: "ok" },
+  };
+
+  const emptyFile = validateFinding({ ...base, file: "" });
+  expect(emptyFile.valid).toBe(true);
+
+  const nullFile = validateFinding({ ...base, file: null as unknown as string });
+  expect(nullFile.valid).toBe(true);
+
+  const nullLine = validateFinding({ ...base, file: "a.ts", line: null as unknown as number });
+  expect(nullLine.valid).toBe(true);
+  expect(nullLine.errors).toHaveLength(0);
+
+  const stringLine = validateFinding({ ...base, file: "a.ts", line: "42" as unknown as number });
+  expect(stringLine.valid).toBe(true);
+});
+
 test("normalizes finding JSONL emitted by an agent", () => {
   const finding: Finding = {
     id: "finding-1",
@@ -474,6 +501,38 @@ test("normalizes finding JSONL emitted by an agent", () => {
   expect(events).toHaveLength(1);
   expect(events[0]?.type).toBe("finding");
   expect(events[0]?.data).toEqual(finding);
+});
+
+test("strips empty file string from JSON finding envelope", () => {
+  const events = normalizeAgentOutputLine(
+    {
+      runId: "run-1",
+      roleId: "compliance",
+      prompt: "Review.",
+      workspacePath: "/tmp/workspace",
+      contextBundlePath: "/tmp/context.json",
+      scratchpadPath: "/tmp/scratchpad",
+      timeoutMs: 1_000,
+      allowedCommands: [],
+    },
+    JSON.stringify({
+      finding: {
+        id: "finding-1",
+        severity: "warning",
+        title: "Issue",
+        description: "D",
+        evidence: "E",
+        sourceRole: "compliance",
+        file: "",
+        validation: { status: "verified", details: "ok" },
+      },
+    }),
+  );
+
+  expect(events).toHaveLength(1);
+  expect(events[0]?.type).toBe("finding");
+  const data = events[0]?.data as Finding;
+  expect(data.file).toBeUndefined();
 });
 
 test("creates pending PR review comments only for anchorable findings", () => {
@@ -596,6 +655,91 @@ test("builds triage review summary body", () => {
   expect(body).toContain("🔴 0 critical, ⚠️ 1 warning");
   expect(body).toContain("- ⚠️ Anchored issue (src/app.ts:12)");
   expect(body).toContain("- ✅ No follow-up findings.");
+});
+
+test("detects file:line anchors outside the PR diff map", () => {
+  const finding: Finding = {
+    id: "f1",
+    severity: "warning",
+    title: "x",
+    description: "d",
+    evidence: "e",
+    sourceRole: "quality",
+    file: "a.ts",
+    line: 5,
+    validation: { status: "verified", details: "ok" },
+  };
+  const empty = new Map<string, ReadonlyMap<number, number>>();
+  expect(findingHasNonPostablePrLineAnchor(finding, empty)).toBe(true);
+
+  const wrongLine = new Map<string, ReadonlyMap<number, number>>([["a.ts", new Map([[10, 1]])]]);
+  expect(findingHasNonPostablePrLineAnchor(finding, wrongLine)).toBe(true);
+
+  const match = new Map<string, ReadonlyMap<number, number>>([["a.ts", new Map([[5, 1]])]]);
+  expect(findingHasNonPostablePrLineAnchor(finding, match)).toBe(false);
+
+  const noLine: Finding = { ...finding, line: undefined };
+  expect(findingHasNonPostablePrLineAnchor(noLine, wrongLine)).toBe(false);
+});
+
+test("detects file path not in PR changed-files list", () => {
+  const finding: Finding = {
+    id: "f1",
+    severity: "warning",
+    title: "x",
+    description: "d",
+    evidence: "e",
+    sourceRole: "quality",
+    file: "other.ts",
+    line: 1,
+    validation: { status: "verified", details: "ok" },
+  };
+  const ctx = new Map<string, ReadonlyMap<number, number>>([["src/app.ts", new Map([[1, 1]])]]);
+  expect(findingUsesFileNotInPrChangedFiles(finding, ctx)).toBe(true);
+  expect(findingUsesFileNotInPrChangedFiles({ ...finding, file: "src/app.ts" }, ctx)).toBe(false);
+});
+
+test("impact summary annotates findings that are not inline-postable when PR diff context is provided", () => {
+  const onHunk: Finding = {
+    id: "finding-hunk",
+    severity: "warning",
+    title: "On hunk",
+    description: "Validated.",
+    evidence: "Evidence.",
+    sourceRole: "quality",
+    file: "src/app.ts",
+    line: 10,
+    validation: { status: "verified", details: "Verified." },
+  };
+  const offHunk: Finding = {
+    ...onHunk,
+    id: "finding-off",
+    title: "Off hunk",
+    line: 99,
+  };
+  const wrongFile: Finding = {
+    ...onHunk,
+    id: "finding-other",
+    title: "Other file",
+    file: "src/other.ts",
+    line: 10,
+  };
+  const prDiffContext = new Map<string, ReadonlyMap<number, number>>([
+    ["src/app.ts", new Map([[10, 1]])],
+  ]);
+
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [onHunk, offHunk, wrongFile],
+    postedCommentCount: 1,
+    skippedUnanchorable: 2,
+    prDiffContext,
+  });
+
+  expect(body).toContain("- ⚠️ On hunk (src/app.ts:10)");
+  expect(body).not.toContain("On hunk (src/app.ts:10) —");
+  expect(body).toContain("line is not on a PR diff hunk");
+  expect(body).toContain("file is not in this PR's changed files");
 });
 
 test("builds impact review summary body", () => {

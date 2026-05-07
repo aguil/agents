@@ -122,14 +122,36 @@ Options:
     if (options.verbose) {
       printVerboseFindingSummary(result.findings);
       const summaryStyle = parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
-      const anchorableCount = findingsToPendingReviewComments(result.findings).length;
-      const skippedUnanchorable = result.findings.length - anchorableCount;
+      const rawCommentCandidates = findingsToPendingReviewComments(result.findings);
+      let prDiffContext: PullRequestDiffContext | undefined;
+      let postedInlineCount = rawCommentCandidates.length;
+      let skippedUnanchorable = 0;
+      if (reviewPrNumber !== undefined) {
+        try {
+          const workspacePath = resolve(options.workspace ?? process.cwd());
+          const repo = await getRepoNameWithOwner(workspacePath);
+          const loadedDiff = await loadPullRequestDiffContext(repo, reviewPrNumber, workspacePath);
+          prDiffContext = loadedDiff;
+          warnPrAnchorIssues(result.findings, loadedDiff);
+          postedInlineCount = rawCommentCandidates.filter(
+            (candidate) => candidateToComment(candidate, loadedDiff) !== undefined,
+          ).length;
+          skippedUnanchorable = rawCommentCandidates.length - postedInlineCount;
+        } catch {
+          prDiffContext = undefined;
+          postedInlineCount = rawCommentCandidates.length;
+          skippedUnanchorable = 0;
+        }
+      } else {
+        skippedUnanchorable = result.findings.length - rawCommentCandidates.length;
+      }
       console.log("");
       console.log(buildPendingReviewSummaryBody({
         style: summaryStyle,
         findings: result.findings,
-        postedCommentCount: anchorableCount,
+        postedCommentCount: postedInlineCount,
         skippedUnanchorable,
+        prDiffContext,
       }));
       console.log("");
       console.log(`Code review ${result.status}.`);
@@ -720,6 +742,89 @@ export function findingsToPendingReviewComments(findings: readonly Finding[]): r
     }));
 }
 
+/** Maps PR-changed file paths to right-side line -> pull request review `position`. */
+export type PullRequestDiffContext = ReadonlyMap<string, ReadonlyMap<number, number>>;
+
+export function resolveReviewDiffPosition(
+  path: string,
+  line: number,
+  context: PullRequestDiffContext,
+): number | undefined {
+  return context.get(path)?.get(line);
+}
+
+/**
+ * When PR diff context is known, explains why a finding will not get an inline review thread.
+ * Returns undefined when the finding anchors to a postable PR diff line.
+ */
+export function findingInlinePostingCaption(
+  finding: Finding,
+  context: PullRequestDiffContext,
+): string | undefined {
+  if (finding.file === undefined || finding.file === "") {
+    return finding.line === undefined
+      ? "summary only (no file:line anchor)"
+      : "summary only (no file path for line anchor)";
+  }
+  if (!context.has(finding.file)) {
+    return "summary only (file is not in this PR's changed files)";
+  }
+  if (finding.line === undefined) {
+    return "summary only (no line on PR diff; add a hunk line for an inline thread)";
+  }
+  const positions = context.get(finding.file);
+  if (positions?.get(finding.line) === undefined) {
+    return "summary only (line is not on a PR diff hunk)";
+  }
+  return undefined;
+}
+
+/** True when `file` is set but is not among this PR's changed paths (from the files API). */
+export function findingUsesFileNotInPrChangedFiles(
+  finding: Finding,
+  context: PullRequestDiffContext,
+): boolean {
+  return finding.file !== undefined && finding.file !== "" && !context.has(finding.file);
+}
+
+/** True when the finding has file+line but that anchor cannot map to a PR review diff position. */
+export function findingHasNonPostablePrLineAnchor(
+  finding: Finding,
+  context: PullRequestDiffContext,
+): boolean {
+  if (finding.file === undefined || finding.line === undefined) {
+    return false;
+  }
+  return resolveReviewDiffPosition(finding.file, finding.line, context) === undefined;
+}
+
+function warnPrAnchorIssues(findings: readonly Finding[], context: PullRequestDiffContext): void {
+  const wrongFile = findings.filter((finding) => findingUsesFileNotInPrChangedFiles(finding, context));
+  if (wrongFile.length > 0) {
+    const sample = wrongFile.slice(0, 3).map((f) => `"${f.title}" (file: ${f.file})`).join("; ");
+    const more = wrongFile.length > 3 ? ` (+${wrongFile.length - 3} more)` : "";
+    console.warn(
+      `${wrongFile.length} finding(s) use \`file\` not in this PR's changed-files list. ${sample}${more}`,
+    );
+  }
+  const wrongHunk = findings.filter((finding) => {
+    if (
+      finding.file === undefined || finding.line === undefined || finding.file === ""
+      || !context.has(finding.file)
+    ) {
+      return false;
+    }
+    return resolveReviewDiffPosition(finding.file, finding.line, context) === undefined;
+  });
+  if (wrongHunk.length > 0) {
+    const sample = wrongHunk.slice(0, 3).map((f) => `"${f.title}" (${f.file}:${f.line})`).join("; ");
+    const more = wrongHunk.length > 3 ? ` (+${wrongHunk.length - 3} more)` : "";
+    console.warn(
+      `${wrongHunk.length} finding(s) cite file:line not on a PR diff hunk (no inline review thread). ${sample}${more}`,
+    );
+  }
+}
+
 function formatPendingReviewBody(finding: Finding): string {
   return [
     `### ${severityEmoji(finding.severity)} ${finding.title}`,
@@ -847,6 +952,7 @@ async function replacePendingPullRequestReview(input: {
 
   const rawComments = findingsToPendingReviewComments(findings);
   const diffContext = await loadPullRequestDiffContext(repo, prNumber, workspacePath);
+  warnPrAnchorIssues(findings, diffContext);
   const comments = rawComments
     .map((candidate) => candidateToComment(candidate, diffContext))
     .filter((comment): comment is GitHubPendingReviewCommentInput => comment !== undefined);
@@ -868,6 +974,7 @@ async function replacePendingPullRequestReview(input: {
     findings,
     postedCommentCount: comments.length,
     skippedUnanchorable,
+    prDiffContext: diffContext,
   });
   const created = await ghApi<{ readonly id: number; readonly html_url: string }>(
     `repos/${repo}/pulls/${prNumber}/reviews`,
@@ -1380,14 +1487,30 @@ export function buildPendingReviewSummaryBody(input: {
   readonly findings: readonly Finding[];
   readonly postedCommentCount: number;
   readonly skippedUnanchorable: number;
+  readonly prDiffContext?: PullRequestDiffContext;
 }): string {
   switch (input.style) {
     case "triage":
-      return renderTriageSummary(input.findings, input.postedCommentCount, input.skippedUnanchorable);
+      return renderTriageSummary(
+        input.findings,
+        input.postedCommentCount,
+        input.skippedUnanchorable,
+        input.prDiffContext,
+      );
     case "impact":
-      return renderImpactSummary(input.findings, input.postedCommentCount, input.skippedUnanchorable);
+      return renderImpactSummary(
+        input.findings,
+        input.postedCommentCount,
+        input.skippedUnanchorable,
+        input.prDiffContext,
+      );
     case "evidence":
-      return renderEvidenceSummary(input.findings, input.postedCommentCount, input.skippedUnanchorable);
+      return renderEvidenceSummary(
+        input.findings,
+        input.postedCommentCount,
+        input.skippedUnanchorable,
+        input.prDiffContext,
+      );
   }
 }
 
@@ -1395,6 +1518,7 @@ function renderTriageSummary(
   findings: readonly Finding[],
   postedCommentCount: number,
   skippedUnanchorable: number,
+  prDiffContext: PullRequestDiffContext | undefined,
 ): string {
   const critical = findings.filter((finding) => finding.severity === "critical");
   const warnings = findings.filter((finding) => finding.severity === "warning");
@@ -1415,10 +1539,10 @@ function renderTriageSummary(
   lines.push(
     "",
     "## Fix Now",
-    ...formatFindingBullets(fixNow, "No immediate findings."),
+    ...formatFindingBullets(fixNow, "No immediate findings.", prDiffContext),
     "",
     "## Follow-up",
-    ...formatFindingBullets(followUp, "No follow-up findings."),
+    ...formatFindingBullets(followUp, "No follow-up findings.", prDiffContext),
   );
   return lines.join("\n");
 }
@@ -1427,6 +1551,7 @@ function renderImpactSummary(
   findings: readonly Finding[],
   postedCommentCount: number,
   skippedUnanchorable: number,
+  prDiffContext: PullRequestDiffContext | undefined,
 ): string {
   const lines = [
     "## Impact Summary",
@@ -1454,16 +1579,16 @@ function renderImpactSummary(
   lines.push(
     "",
     "### Security",
-    ...formatFindingBullets(groups.security, "No security findings."),
+    ...formatFindingBullets(groups.security, "No security findings.", prDiffContext),
     "",
     "### Runtime / Performance",
-    ...formatFindingBullets(groups.performance, "No performance findings."),
+    ...formatFindingBullets(groups.performance, "No performance findings.", prDiffContext),
     "",
     "### Correctness / Quality",
-    ...formatFindingBullets(groups.quality, "No quality findings."),
+    ...formatFindingBullets(groups.quality, "No quality findings.", prDiffContext),
     "",
     "### Documentation / Compliance",
-    ...formatFindingBullets(groups.compliance, "No compliance findings."),
+    ...formatFindingBullets(groups.compliance, "No compliance findings.", prDiffContext),
   );
   return lines.join("\n");
 }
@@ -1472,6 +1597,7 @@ function renderEvidenceSummary(
   findings: readonly Finding[],
   postedCommentCount: number,
   skippedUnanchorable: number,
+  prDiffContext: PullRequestDiffContext | undefined,
 ): string {
   const lines = [
     "## Why / Evidence / Fix",
@@ -1486,9 +1612,13 @@ function renderEvidenceSummary(
   }
 
   for (const [index, finding] of findings.slice(0, 6).entries()) {
+    const caption = prDiffContext === undefined
+      ? undefined
+      : findingInlinePostingCaption(finding, prDiffContext);
     lines.push(
       "",
       `### Finding ${index + 1}: ${severityEmoji(finding.severity)} ${finding.title}`,
+      ...(caption === undefined ? [] : [`- _${caption}_`]),
       `- Why: ${finding.description}`,
       `- Evidence: ${finding.evidence}`,
       `- Suggested fix: ${suggestFixFromRole(finding.sourceRole)}`,
@@ -1498,7 +1628,11 @@ function renderEvidenceSummary(
   return lines.join("\n");
 }
 
-function formatFindingBullets(findings: readonly Finding[], emptyLine: string): readonly string[] {
+function formatFindingBullets(
+  findings: readonly Finding[],
+  emptyLine: string,
+  prDiffContext: PullRequestDiffContext | undefined,
+): readonly string[] {
   if (findings.length === 0) {
     return [`- ✅ ${emptyLine}`];
   }
@@ -1506,7 +1640,9 @@ function formatFindingBullets(findings: readonly Finding[], emptyLine: string): 
     const location = finding.file !== undefined && finding.line !== undefined
       ? ` (${finding.file}:${finding.line})`
       : "";
-    return `- ${severityEmoji(finding.severity)} ${finding.title}${location}`;
+    const caption = prDiffContext === undefined ? undefined : findingInlinePostingCaption(finding, prDiffContext);
+    const suffix = caption === undefined ? "" : ` — _${caption}_`;
+    return `- ${severityEmoji(finding.severity)} ${finding.title}${location}${suffix}`;
   });
 }
 
@@ -1799,8 +1935,6 @@ if (import.meta.main) {
   process.exitCode = await main();
 }
 
-type PullRequestDiffContext = ReadonlyMap<string, ReadonlyMap<number, number>>;
-
 async function loadPullRequestDiffContext(
   repo: string,
   prNumber: number,
@@ -1823,8 +1957,7 @@ function candidateToComment(
   candidate: PendingReviewComment,
   context: PullRequestDiffContext,
 ): GitHubPendingReviewCommentInput | undefined {
-  const positions = context.get(candidate.path);
-  const position = positions?.get(candidate.line);
+  const position = resolveReviewDiffPosition(candidate.path, candidate.line, context);
   if (position === undefined) {
     return undefined;
   }
