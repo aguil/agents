@@ -765,18 +765,32 @@ async function replacePendingPullRequestReview(input: {
     }
   }
 
-  const candidateFingerprints = new Set(input.findings.map((finding) => findingFingerprint(finding)));
-  const suppressedFingerprints = candidateFingerprints.size === 0
-    ? new Set<string>()
-    : await fetchResolvedFindingFingerprints({
-      repo,
-      prNumber,
-      workspacePath,
-      wanted: candidateFingerprints,
-    });
-  const findings = suppressedFingerprints.size === 0
-    ? input.findings
-    : input.findings.filter((finding) => !suppressedFingerprints.has(findingFingerprint(finding)));
+  const reviews = await ghApi<readonly GitHubPullRequestReview[]>(
+    `repos/${repo}/pulls/${prNumber}/reviews`,
+    "GET",
+    undefined,
+    workspacePath,
+  );
+  const pendingMine = reviews.filter((review) => review.state === "PENDING" && review.user.login === login);
+
+  // Only pay the resolved-thread scan cost when we're actually replacing an
+  // existing pending review. First-time pending review publishing should stay
+  // lightweight.
+  let findings = input.findings;
+  if (pendingMine.length > 0) {
+    const candidateFingerprints = new Set(findings.map((finding) => findingFingerprint(finding)));
+    if (candidateFingerprints.size > 0) {
+      const suppressedFingerprints = await fetchResolvedFindingFingerprints({
+        repo,
+        prNumber,
+        workspacePath,
+        wanted: candidateFingerprints,
+      });
+      if (suppressedFingerprints.size > 0) {
+        findings = findings.filter((finding) => !suppressedFingerprints.has(findingFingerprint(finding)));
+      }
+    }
+  }
 
   const rawComments = findingsToPendingReviewComments(findings);
   const diffContext = await loadPullRequestDiffContext(repo, prNumber, workspacePath);
@@ -785,13 +799,6 @@ async function replacePendingPullRequestReview(input: {
     .filter((comment): comment is GitHubPendingReviewCommentInput => comment !== undefined);
   const skippedUnanchorable = rawComments.length - comments.length;
 
-  const reviews = await ghApi<readonly GitHubPullRequestReview[]>(
-    `repos/${repo}/pulls/${prNumber}/reviews`,
-    "GET",
-    undefined,
-    workspacePath,
-  );
-  const pendingMine = reviews.filter((review) => review.state === "PENDING" && review.user.login === login);
   if (pendingMine.length > 0) {
     if (!input.replacePendingReview) {
       const confirmed = await confirmReplacePendingReview({
