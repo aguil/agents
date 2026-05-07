@@ -647,7 +647,12 @@ async function fetchPullRequestHeadSha(
   if (commandRunner !== runCommand) {
     return commandRunner(args, workspacePath, { gitAware: true });
   }
-  return runGhWithRetry(args, workspacePath, { gitAware: true });
+  try {
+    return await runGhWithRetry(args, workspacePath, { gitAware: true });
+  } catch (error) {
+    console.warn(`Warning: failed to fetch PR head sha via gh (${ownerRepo}#${input.number}): ${String(error)}`);
+    return undefined;
+  }
 }
 
 async function fetchPullRequestPatch(
@@ -676,7 +681,12 @@ async function fetchPullRequestPatch(
   if (commandRunner !== runCommand) {
     return commandRunner(args, workspacePath, { gitAware: true });
   }
-  return runGhWithRetry(args, workspacePath, { gitAware: true });
+  try {
+    return await runGhWithRetry(args, workspacePath, { gitAware: true });
+  } catch (error) {
+    console.warn(`Warning: failed to fetch PR patch via gh (${ownerRepo}#${input.number}): ${String(error)}`);
+    return undefined;
+  }
 }
 
 async function runGhWithRetry(
@@ -708,14 +718,17 @@ async function runGhWithRetry(
       /\bEOF\b/i.test(message) ||
       /\bno such host\b/i.test(message) ||
       /\bnetwork is unreachable\b/i.test(message);
-    if (!isTransientNetwork || attempt === attempts) {
-      return undefined;
+    if (!isTransientNetwork) {
+      throw new Error(`gh ${cmd.join(" ")} failed: ${message.length > 0 ? message : `exit code ${exitCode}`}`);
+    }
+    if (attempt === attempts) {
+      throw new Error(`gh ${cmd.join(" ")} failed: exhausted retries (last error: ${message.length > 0 ? message : `exit code ${exitCode}`})`);
     }
 
     const backoffMs = 250 * (2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
     await Bun.sleep(backoffMs);
   }
-  return undefined;
+  throw new Error(`gh ${cmd.join(" ")} failed: exhausted retries`);
 }
 
 export function filterReviewDiff(diff: string): string {

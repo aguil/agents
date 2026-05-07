@@ -37,6 +37,7 @@ Options:
   --post-only            Post findings from an existing run result
   --result <path>        Result JSON path (auto-discovers latest by default)
   --no-confirm           Skip interactive confirmation prompts
+  --replace-pending-review Replace an existing pending PR review (requires opt-in)
   --review-pr <number>   PR number used for review context and diff collection
   --pr <number>          PR number for pending review (auto-discover if omitted)
   --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
@@ -158,6 +159,7 @@ Options:
         reviewSummaryStyle: reviewSummaryStyle ?? "impact",
         reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
         noConfirm: options.noConfirm,
+        replacePendingReview: options.replacePendingReview,
         workspacePath: options.workspace,
       });
       if (posted.cancelled === true) {
@@ -208,6 +210,7 @@ interface CliOptions {
   readonly reviewSummary?: string;
   readonly postOnly: boolean;
   readonly noConfirm: boolean;
+  readonly replacePendingReview: boolean;
   readonly noDeterministic: boolean;
   readonly strict: boolean;
   readonly pendingReview: boolean;
@@ -310,6 +313,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
     reviewSummary: options["review-summary"],
     postOnly: flags.has("post-only"),
     noConfirm: flags.has("no-confirm"),
+    replacePendingReview: flags.has("replace-pending-review"),
     noDeterministic: flags.has("no-deterministic"),
     strict: flags.has("strict"),
     pendingReview: flags.has("pending-review"),
@@ -613,6 +617,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     reviewSummaryStyle: reviewSummaryStyle ?? "impact",
     reviewedHeadSha,
     noConfirm: options.noConfirm,
+    replacePendingReview: options.replacePendingReview,
     workspacePath,
   });
   if (posted.cancelled === true) {
@@ -712,6 +717,7 @@ async function replacePendingPullRequestReview(input: {
   readonly reviewSummaryStyle: ReviewSummaryStyle;
   readonly reviewedHeadSha?: string;
   readonly noConfirm: boolean;
+  readonly replacePendingReview: boolean;
   readonly workspacePath?: string;
 }): Promise<PendingReviewPosted | PendingReviewCancelled> {
   const workspacePath = resolveWorkspaceCwd(input.workspacePath);
@@ -739,7 +745,35 @@ async function replacePendingPullRequestReview(input: {
     }
   }
 
-  const suppressedFingerprints = await fetchResolvedOrOutdatedFindingFingerprints(repo, prNumber, workspacePath);
+  const localAhead = await checkLocalAheadOfPullRequest({
+    currentHeadSha,
+    prNumber,
+    workspacePath,
+  });
+  if (localAhead.status === "ahead") {
+    console.warn(
+      `Warning: local checkout is ahead of PR #${prNumber} (${localAhead.prHeadSha.slice(0, 12)} -> ${localAhead.localHeadSha.slice(0, 12)}).`,
+    );
+    const confirmed = await confirmProceedAfterLocalAhead(input.noConfirm);
+    if (!confirmed) {
+      console.log("Skipped pending review publish.");
+      return {
+        cancelled: true,
+        currentHeadSha,
+        headDiverged,
+      };
+    }
+  }
+
+  const candidateFingerprints = new Set(input.findings.map((finding) => findingFingerprint(finding)));
+  const suppressedFingerprints = candidateFingerprints.size === 0
+    ? new Set<string>()
+    : await fetchResolvedFindingFingerprints({
+      repo,
+      prNumber,
+      workspacePath,
+      wanted: candidateFingerprints,
+    });
   const findings = suppressedFingerprints.size === 0
     ? input.findings
     : input.findings.filter((finding) => !suppressedFingerprints.has(findingFingerprint(finding)));
@@ -759,18 +793,20 @@ async function replacePendingPullRequestReview(input: {
   );
   const pendingMine = reviews.filter((review) => review.state === "PENDING" && review.user.login === login);
   if (pendingMine.length > 0) {
-    const confirmed = await confirmReplacePendingReview({
-      noConfirm: input.noConfirm,
-      prNumber,
-      pendingCount: pendingMine.length,
-    });
-    if (!confirmed) {
-      console.log("Skipped pending review publish.");
-      return {
-        cancelled: true,
-        currentHeadSha,
-        headDiverged,
-      };
+    if (!input.replacePendingReview) {
+      const confirmed = await confirmReplacePendingReview({
+        noConfirm: input.noConfirm,
+        prNumber,
+        pendingCount: pendingMine.length,
+      });
+      if (!confirmed) {
+        console.log("Skipped pending review publish.");
+        return {
+          cancelled: true,
+          currentHeadSha,
+          headDiverged,
+        };
+      }
     }
 
     for (const review of pendingMine) {
@@ -809,76 +845,132 @@ async function replacePendingPullRequestReview(input: {
   };
 }
 
-async function fetchResolvedOrOutdatedFindingFingerprints(
-  repo: string,
-  prNumber: number,
-  workspacePath?: string,
-): Promise<ReadonlySet<string>> {
-  const [owner, name] = repo.split("/");
+async function fetchResolvedFindingFingerprints(input: {
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly workspacePath?: string;
+  readonly wanted: ReadonlySet<string>;
+}): Promise<ReadonlySet<string>> {
+  const [owner, name] = input.repo.split("/");
   if (!owner || !name) {
     return new Set();
   }
 
+  const suppressed = new Set<string>();
+  const marker = /<!--\s*finding:([^>]+?)\s*-->/g;
+
   const query = [
-    "query($o:String!,$r:String!,$n:Int!){",
+    "query($o:String!,$r:String!,$n:Int!,$after:String){",
     "repository(owner:$o,name:$r){",
     "pullRequest(number:$n){",
-    "reviewThreads(first:100){nodes{isResolved isOutdated comments(first:50){nodes{body}}}}",
+    "reviewThreads(first:100,after:$after){",
+    "pageInfo{hasNextPage endCursor}",
+    "nodes{isResolved comments(first:10){nodes{body}}}",
+    "}",
     "}",
     "}",
     "}",
   ].join("");
 
-  const response = await runGh<{
-    readonly data?: {
-      readonly repository?: {
-        readonly pullRequest?: {
-          readonly reviewThreads?: {
-            readonly nodes?: ReadonlyArray<{
-              readonly isResolved?: boolean;
-              readonly isOutdated?: boolean;
-              readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly body?: string }> };
-            }>;
+  let after: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const response = await runGh<{
+      readonly data?: {
+        readonly repository?: {
+          readonly pullRequest?: {
+            readonly reviewThreads?: {
+              readonly pageInfo?: { readonly hasNextPage?: boolean; readonly endCursor?: string | null };
+              readonly nodes?: ReadonlyArray<{
+                readonly isResolved?: boolean;
+                readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly body?: string }> };
+              }>;
+            };
           };
         };
       };
-    };
-  }>([
-    "api",
-    "graphql",
-    "-f",
-    `query=${query}`,
-    "-f",
-    `o=${owner}`,
-    "-f",
-    `r=${name}`,
-    "-F",
-    `n=${prNumber}`,
-  ], workspacePath);
+    }>([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-f",
+      `o=${owner}`,
+      "-f",
+      `r=${name}`,
+      "-F",
+      `n=${input.prNumber}`,
+      ...(after !== undefined ? ["-f", `after=${after}`] : []),
+    ], input.workspacePath);
 
-  const threads = response.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
-  const suppressed = new Set<string>();
-  const marker = /<!--\s*finding:([^>]+?)\s*-->/g;
-
-  for (const thread of threads) {
-    if (thread.isResolved !== true && thread.isOutdated !== true) {
-      continue;
-    }
-    for (const comment of thread.comments?.nodes ?? []) {
-      const body = comment.body;
-      if (typeof body !== "string") {
+    const threads = response.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    for (const thread of threads) {
+      if (thread.isResolved !== true) {
         continue;
       }
-      for (const match of body.matchAll(marker)) {
-        const fingerprint = match[1]?.trim();
-        if (fingerprint) {
-          suppressed.add(fingerprint);
+      for (const comment of thread.comments?.nodes ?? []) {
+        const body = comment.body;
+        if (typeof body !== "string") {
+          continue;
+        }
+        for (const match of body.matchAll(marker)) {
+          const fingerprint = match[1]?.trim();
+          if (fingerprint && input.wanted.has(fingerprint)) {
+            suppressed.add(fingerprint);
+          }
         }
       }
     }
+
+    if (suppressed.size >= input.wanted.size) {
+      break;
+    }
+    const pageInfo = response.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
+    if (pageInfo?.hasNextPage !== true) {
+      break;
+    }
+    const endCursor = pageInfo.endCursor ?? undefined;
+    if (endCursor === undefined || endCursor.length === 0) {
+      break;
+    }
+    after = endCursor;
   }
 
   return suppressed;
+}
+
+async function checkLocalAheadOfPullRequest(input: {
+  readonly currentHeadSha: string | undefined;
+  readonly prNumber: number;
+  readonly workspacePath: string;
+}): Promise<
+  | { readonly status: "unavailable" }
+  | { readonly status: "ok" }
+  | { readonly status: "ahead"; readonly prHeadSha: string; readonly localHeadSha: string }
+> {
+  const prHeadSha = input.currentHeadSha?.trim();
+  if (prHeadSha === undefined || prHeadSha.length === 0) {
+    return { status: "unavailable" };
+  }
+
+  const localHeadSha = (await runCommand(["git", "rev-parse", "HEAD"], input.workspacePath, { gitAware: true }))?.trim();
+  if (localHeadSha === undefined || localHeadSha.length === 0) {
+    return { status: "unavailable" };
+  }
+  if (localHeadSha === prHeadSha) {
+    return { status: "ok" };
+  }
+
+  // Local is "ahead" if the PR head is reachable from local HEAD.
+  const ancestorCheck = await runCommand(
+    ["git", "merge-base", "--is-ancestor", prHeadSha, localHeadSha],
+    input.workspacePath,
+    { gitAware: true },
+  );
+  if (ancestorCheck !== undefined) {
+    return { status: "ahead", prHeadSha, localHeadSha };
+  }
+
+  return { status: "ok" };
 }
 
 async function checkReviewPullRequestDivergence(
@@ -942,12 +1034,8 @@ async function confirmProceedAfterStaleness(noConfirm: boolean): Promise<boolean
   }
 }
 
-async function confirmReplacePendingReview(input: {
-  readonly noConfirm: boolean;
-  readonly prNumber: number;
-  readonly pendingCount: number;
-}): Promise<boolean> {
-  if (input.noConfirm) {
+async function confirmProceedAfterLocalAhead(noConfirm: boolean): Promise<boolean> {
+  if (noConfirm) {
     return true;
   }
   if (process.platform === "win32") {
@@ -955,7 +1043,37 @@ async function confirmReplacePendingReview(input: {
     return false;
   }
   if (process.stdin.isTTY !== true) {
-    console.warn("Non-interactive stdin detected. Re-run with --no-confirm to replace the pending review.");
+    console.warn("Non-interactive stdin detected. Re-run with --no-confirm to post anyway.");
+    return false;
+  }
+  process.stdout.write("Post pending review anyway? [y/N] ");
+  const reader = Bun.stdin.stream().getReader();
+  try {
+    const { value } = await reader.read();
+    const answer = value === undefined ? "" : new TextDecoder().decode(value).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  } catch {
+    return false;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function confirmReplacePendingReview(input: {
+  readonly noConfirm: boolean;
+  readonly prNumber: number;
+  readonly pendingCount: number;
+}): Promise<boolean> {
+  if (input.noConfirm) {
+    console.warn("Non-interactive pending review replacement requires --replace-pending-review.");
+    return false;
+  }
+  if (process.platform === "win32") {
+    console.warn("Interactive prompt is unsupported on Windows. Re-run with --no-confirm.");
+    return false;
+  }
+  if (process.stdin.isTTY !== true) {
+    console.warn("Non-interactive stdin detected. Re-run with --replace-pending-review.");
     return false;
   }
   const plural = input.pendingCount === 1 ? "" : "s";
@@ -1276,11 +1394,10 @@ async function resolveGhCwd(workspacePath?: string): Promise<string> {
   }
 
   const pending = (async () => {
-  const jjGitRoot = (await runCommand(["jj", "git", "root"], workspacePath))?.trim();
-  if (jjGitRoot !== undefined && jjGitRoot.length > 0) {
-    return dirname(jjGitRoot);
-  }
-  return resolveGitAwareCwd(workspacePath);
+    // `resolveGitAwareCwd()` already handles jj workspaces and colocated repos.
+    // Keeping all `gh` commands scoped to the git-aware root avoids subtle
+    // cwd bugs across different jj/git layouts.
+    return resolveGitAwareCwd(workspacePath);
   })();
 
   ghCwdCache.set(workspaceCwd, pending);
