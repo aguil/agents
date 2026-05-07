@@ -211,6 +211,7 @@ diff --git a/src/main.ts b/src/main.ts
   expect(commands).toContain(
     "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
   );
+  expect(commands.some((command) => command.startsWith("gh gh "))).toBe(false);
 });
 
 test("falls back to base diff when explicit PR patch is unavailable", async () => {

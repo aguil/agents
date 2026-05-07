@@ -778,6 +778,22 @@ async function replacePendingPullRequestReview(input: {
   // lightweight.
   let findings = input.findings;
   if (pendingMine.length > 0) {
+    if (!input.replacePendingReview) {
+      const confirmed = await confirmReplacePendingReview({
+        noConfirm: input.noConfirm,
+        prNumber,
+        pendingCount: pendingMine.length,
+      });
+      if (!confirmed) {
+        console.log("Skipped pending review publish.");
+        return {
+          cancelled: true,
+          currentHeadSha,
+          headDiverged,
+        };
+      }
+    }
+
     const candidateFingerprints = new Set(findings.map((finding) => findingFingerprint(finding)));
     if (candidateFingerprints.size > 0) {
       const suppressedFingerprints = await fetchResolvedFindingFingerprints({
@@ -800,22 +816,6 @@ async function replacePendingPullRequestReview(input: {
   const skippedUnanchorable = rawComments.length - comments.length;
 
   if (pendingMine.length > 0) {
-    if (!input.replacePendingReview) {
-      const confirmed = await confirmReplacePendingReview({
-        noConfirm: input.noConfirm,
-        prNumber,
-        pendingCount: pendingMine.length,
-      });
-      if (!confirmed) {
-        console.log("Skipped pending review publish.");
-        return {
-          cancelled: true,
-          currentHeadSha,
-          headDiverged,
-        };
-      }
-    }
-
     for (const review of pendingMine) {
       await ghApi<void>(
         `repos/${repo}/pulls/${prNumber}/reviews/${review.id}`,
@@ -940,6 +940,12 @@ async function fetchResolvedFindingFingerprints(input: {
       break;
     }
     after = endCursor;
+  }
+
+  if (suppressed.size < input.wanted.size && after !== undefined) {
+    console.warn(
+      "Warning: resolved-thread suppression scan hit its pagination limit; some resolved findings may be reposted.",
+    );
   }
 
   return suppressed;

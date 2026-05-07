@@ -259,6 +259,12 @@ export class RepositoryDiffProvider implements ContextProvider {
         }
       : await collectReviewDiff(request.workspacePath, this.commandRunner, request.pullRequestNumber);
 
+    if (strategy === "pr_diff_unavailable") {
+      console.warn(
+        "Warning: PR diff could not be collected from remote endpoints, and no safe local fallback was available.",
+      );
+    }
+
     const reviewLines = reviewPr === undefined
       ? []
       : [
