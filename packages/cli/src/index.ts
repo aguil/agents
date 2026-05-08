@@ -1479,11 +1479,15 @@ async function confirmReplacePendingReview(input: {
     return false;
   }
   if (process.platform === "win32") {
-    console.warn("Interactive prompt is unsupported on Windows. Re-run with --no-confirm.");
+    console.warn(
+      "Interactive prompt is unsupported on Windows. Re-run with --replace-pending-review and --no-confirm.",
+    );
     return false;
   }
   if (process.stdin.isTTY !== true) {
-    console.warn("Non-interactive stdin detected. Re-run with --replace-pending-review.");
+    console.warn(
+      "Non-interactive stdin detected. Re-run with --replace-pending-review (and --no-confirm if other prompts apply).",
+    );
     return false;
   }
   const plural = input.pendingCount === 1 ? "" : "s";
