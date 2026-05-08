@@ -40,6 +40,7 @@ export interface PullRequestMetadata {
   readonly body: string;
   readonly url: string;
   readonly baseRefName?: string;
+  readonly headRefOid?: string;
 }
 
 export interface RemoteScope {
@@ -258,13 +259,31 @@ export class RepositoryDiffProvider implements ContextProvider {
         }
       : await collectReviewDiff(request.workspacePath, this.commandRunner, request.pullRequestNumber);
 
+    if (strategy === "pr_diff_unavailable") {
+      console.warn(
+        "Warning: PR diff could not be collected from remote endpoints, and no safe local fallback was available.",
+      );
+    }
+
     const reviewLines = reviewPr === undefined
       ? []
       : [
           `PR Number: ${reviewPr.number}`,
           `PR Head SHA: ${reviewPr.headSha ?? "(unavailable)"}`,
+          "Note: This PR head SHA is from remote metadata and may not match the local checkout.",
           `Reviewed At: ${reviewPr.reviewedAt}`,
         ];
+
+    const workspaceDiffContent = diff.trim().length > 0
+      ? diff
+      : strategy === "pr_diff_unavailable"
+      ? "PR diff could not be collected from remote endpoints, and no safe local fallback was available."
+      : "No workspace diff detected.";
+    const changedFilesContent = diff.trim().length > 0
+      ? changedFilesFromDiff(diff).join("\n") || "No changed files detected."
+      : strategy === "pr_diff_unavailable"
+      ? "Changed files unavailable because PR diff could not be collected."
+      : "No changed files detected.";
 
     return [
       {
@@ -279,12 +298,12 @@ export class RepositoryDiffProvider implements ContextProvider {
       {
         id: "workspace-diff",
         title: "Workspace Diff",
-        content: diff.trim().length > 0 ? diff : "No workspace diff detected.",
+        content: workspaceDiffContent,
       },
       {
         id: "changed-files",
         title: "Changed Files",
-        content: changedFilesFromDiff(diff).join("\n") || "No changed files detected.",
+        content: changedFilesContent,
       },
       {
         id: "triage",
@@ -387,22 +406,47 @@ export async function collectReviewDiff(
         repoScope: repoScope ?? remoteScope,
       },
     );
-    const headSha = await fetchPullRequestHeadSha(commandRunner, workspacePath, {
+    const headSha = pullRequest?.headRefOid ?? await fetchPullRequestHeadSha(commandRunner, workspacePath, {
       number: pullRequestNumber,
       repoScope: repoScope ?? remoteScope,
     });
+    const requestedReviewPr: ReviewPrMetadata = {
+      number: pullRequestNumber,
+      headSha: headSha?.trim(),
+      reviewedAt: new Date().toISOString(),
+    };
     if (patch !== undefined) {
       return {
         diff: filterReviewDiff(patch),
         baseRef: undefined,
         strategy: "explicit_pr_patch",
-        reviewPr: {
-          number: pullRequestNumber,
-          headSha: headSha?.trim(),
-          reviewedAt: new Date().toISOString(),
-        },
+        reviewPr: requestedReviewPr,
       };
     }
+
+    const localHeadSha = requestedReviewPr.headSha;
+    if (localHeadSha !== undefined && localHeadSha.length > 0 && await commitExistsLocally(commandRunner, workspacePath, localHeadSha)) {
+      const fromLocal = await collectReviewDiffFromLocalHead(
+        workspacePath,
+        commandRunner,
+        pullRequest?.baseRefName,
+        localHeadSha,
+        remoteScope?.remoteName,
+        requestedReviewPr,
+      );
+      if (fromLocal !== undefined) {
+        return fromLocal;
+      }
+    }
+    // For explicit PR reviews, avoid synthesizing a diff from local HEAD/@ when the
+    // PR head commit isn't available locally. That can accidentally include
+    // unpublished local changes in the review bundle.
+    return {
+      diff: "",
+      baseRef: undefined,
+      strategy: "pr_diff_unavailable",
+      reviewPr: requestedReviewPr,
+    };
   }
 
   const pullRequest = await discoverPullRequest(workspacePath, commandRunner, pullRequestNumber);
@@ -444,6 +488,142 @@ export async function collectReviewDiff(
   };
 }
 
+async function commitExistsLocally(
+  commandRunner: CommandRunner,
+  workspacePath: string,
+  commit: string,
+): Promise<boolean> {
+  const gitCheck = await commandRunner(["git", "cat-file", "-e", `${commit}^{commit}`], workspacePath, { gitAware: true });
+  if (gitCheck !== undefined) {
+    return true;
+  }
+  const jjCheck = await commandRunner(["jj", "log", "-r", commit, "--limit", "1"], workspacePath);
+  return jjCheck !== undefined;
+}
+
+async function collectReviewDiffFromLocalHead(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+  baseRefName: string | undefined,
+  headSha: string,
+  remoteName: string | undefined,
+  reviewPr: ReviewPrMetadata,
+): Promise<{
+  readonly diff: string;
+  readonly baseRef?: string;
+  readonly strategy: string;
+  readonly reviewPr?: ReviewPrMetadata;
+} | undefined> {
+  const baseCandidates = baseRefName !== undefined
+    ? [baseRefName]
+    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteName);
+
+  for (const baseRef of dedupeStrings(baseCandidates)) {
+    if (isSafeGitRevision(baseRef)) {
+      const gitDiff = await commandRunner(["git", "diff", "--no-ext-diff", `${baseRef}...${headSha}`], workspacePath);
+      if (gitDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(gitDiff),
+          baseRef,
+          strategy: "pr_base_git_head",
+          reviewPr,
+        };
+      }
+    }
+
+    for (const jjBase of toJjBaseCandidates(baseRef, remoteName)) {
+      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", headSha], workspacePath);
+      if (jjDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(jjDiff),
+          baseRef: jjBase,
+          strategy: "pr_base_jj_head",
+          reviewPr,
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+async function collectReviewDiffFallback(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+  pullRequestNumber: number,
+  baseRefName: string | undefined,
+  remoteScope: RemoteScope | undefined,
+  reviewPr: ReviewPrMetadata,
+): Promise<{
+  readonly diff: string;
+  readonly baseRef?: string;
+  readonly strategy: string;
+  readonly reviewPr?: ReviewPrMetadata;
+} | undefined> {
+  const baseCandidates = baseRefName !== undefined
+    ? [baseRefName]
+    : await resolvePreferredBaseBranchCandidates(workspacePath, commandRunner, remoteScope?.remoteName);
+  const deduped = dedupeStrings(baseCandidates);
+  if (deduped.length === 0) {
+    return {
+      diff: "",
+      baseRef: undefined,
+      strategy: "pr_diff_unavailable",
+      reviewPr,
+    };
+  }
+
+  for (const baseRef of dedupeStrings(deduped)) {
+    if (isSafeGitRevision(baseRef)) {
+      const gitDiff = await commandRunner(
+        ["git", "diff", "--no-ext-diff", `${baseRef}...HEAD`],
+        workspacePath,
+      );
+      if (gitDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(gitDiff),
+          baseRef,
+          strategy: "pr_base_git",
+          reviewPr,
+        };
+      }
+    }
+
+    for (const jjBase of toJjBaseCandidates(baseRef, remoteScope?.remoteName)) {
+      const jjDiff = await commandRunner(["jj", "diff", "--git", "--from", jjBase, "--to", "@"], workspacePath);
+      if (jjDiff !== undefined) {
+        return {
+          diff: filterReviewDiff(jjDiff),
+          baseRef: jjBase,
+          strategy: "pr_base_jj",
+          reviewPr,
+        };
+      }
+    }
+  }
+
+  return {
+    diff: "",
+    baseRef: deduped[0],
+    strategy: "pr_diff_unavailable",
+    reviewPr,
+  };
+}
+
+function isSafeGitRevision(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  if (trimmed.startsWith("-")) {
+    return false;
+  }
+  if (/\s/.test(trimmed)) {
+    return false;
+  }
+  return true;
+}
+
 async function fetchPullRequestHeadSha(
   commandRunner: CommandRunner,
   workspacePath: string,
@@ -467,7 +647,15 @@ async function fetchPullRequestHeadSha(
     "--jq",
     ".head.sha",
   ];
-  return commandRunner(args, workspacePath, { gitAware: true });
+  if (commandRunner !== runCommand) {
+    return commandRunner(args, workspacePath, { gitAware: true });
+  }
+  try {
+    return await runGhWithRetry(args, workspacePath, { gitAware: true });
+  } catch (error) {
+    console.warn(`Warning: failed to fetch PR head sha via gh (${ownerRepo}#${input.number}): ${String(error)}`);
+    return undefined;
+  }
 }
 
 async function fetchPullRequestPatch(
@@ -493,7 +681,57 @@ async function fetchPullRequestPatch(
     "Accept: application/vnd.github.v3.diff",
     `repos/${ownerRepo}/pulls/${input.number}`,
   ];
-  return commandRunner(args, workspacePath, { gitAware: true });
+  if (commandRunner !== runCommand) {
+    return commandRunner(args, workspacePath, { gitAware: true });
+  }
+  try {
+    return await runGhWithRetry(args, workspacePath, { gitAware: true });
+  } catch (error) {
+    console.warn(`Warning: failed to fetch PR patch via gh (${ownerRepo}#${input.number}): ${String(error)}`);
+    return undefined;
+  }
+}
+
+async function runGhWithRetry(
+  cmd: readonly string[],
+  workspacePath: string,
+  options: { readonly gitAware?: boolean } = {},
+): Promise<string | undefined> {
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const resolvedCwd = options.gitAware === true ? await resolveGitAwareCwd(workspacePath) : workspacePath;
+    const proc = Bun.spawn({ cmd: [...cmd], cwd: resolvedCwd, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readProcessText(proc.stdout),
+      readProcessText(proc.stderr),
+      proc.exited,
+    ]);
+    if (exitCode === 0) {
+      return stdout;
+    }
+
+    const message = stderr.trim();
+    const isTransientNetwork =
+      /error connecting to api\.github\.com/i.test(message) ||
+      /\bTLS handshake timeout\b/i.test(message) ||
+      /\btimeout\b/i.test(message) ||
+      /\btemporarily unavailable\b/i.test(message) ||
+      /\bconnection reset\b/i.test(message) ||
+      /\bconnection refused\b/i.test(message) ||
+      /\bEOF\b/i.test(message) ||
+      /\bno such host\b/i.test(message) ||
+      /\bnetwork is unreachable\b/i.test(message);
+    if (!isTransientNetwork) {
+      throw new Error(`gh ${cmd.join(" ")} failed: ${message.length > 0 ? message : `exit code ${exitCode}`}`);
+    }
+    if (attempt === attempts) {
+      throw new Error(`gh ${cmd.join(" ")} failed: exhausted retries (last error: ${message.length > 0 ? message : `exit code ${exitCode}`})`);
+    }
+
+    const backoffMs = 250 * (2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+    await Bun.sleep(backoffMs);
+  }
+  throw new Error(`gh ${cmd.join(" ")} failed: exhausted retries`);
 }
 
 export function filterReviewDiff(diff: string): string {
@@ -594,7 +832,7 @@ export async function discoverPullRequest(
       "view",
       ...(pullRequestNumber !== undefined ? [String(pullRequestNumber)] : []),
       "--json",
-      "number,title,body,url,baseRefName",
+      "number,title,body,url,baseRefName,headRefOid",
     ],
     workspacePath,
     { gitAware: true },
@@ -620,6 +858,7 @@ export async function discoverPullRequest(
         body: parsed.body,
         url: parsed.url,
         baseRefName: typeof parsed.baseRefName === "string" ? parsed.baseRefName : undefined,
+        headRefOid: typeof parsed.headRefOid === "string" ? parsed.headRefOid : undefined,
       };
   } catch {
     return undefined;
@@ -980,8 +1219,9 @@ async function runCommand(
   try {
     const resolvedCwd = options.gitAware === true ? await resolveGitAwareCwd(cwd) : cwd;
     const proc = Bun.spawn({ cmd: [...cmd], cwd: resolvedCwd, stdout: "pipe", stderr: "pipe" });
-    const [stdout, exitCode] = await Promise.all([
+    const [stdout, stderr, exitCode] = await Promise.all([
       readProcessText(proc.stdout),
+      readProcessText(proc.stderr),
       proc.exited,
     ]);
     return exitCode === 0 ? stdout : undefined;

@@ -41,12 +41,15 @@ import {
   dedupeFindings,
   findingFingerprint,
   renderMarkdownReport,
+  severityEmoji,
   statusForFindings,
 } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
 import {
   buildPendingReviewSummaryBody,
   discoverLatestResultPath,
+  findingHasNonPostablePrLineAnchor,
+  findingUsesFileNotInPrChangedFiles,
   findingsToPendingReviewComments,
   loadStoredReviewResult,
   parseReviewSummaryStyle,
@@ -169,7 +172,7 @@ test("discovers pull request by explicit number", async () => {
 
   const discovered = await discoverPullRequest("/repo", commandRunner, 42);
   expect(discovered?.number).toBe(42);
-  expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName");
+  expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName,headRefOid");
 });
 
 test("prefers explicit PR patch diff when review PR is provided", async () => {
@@ -210,6 +213,7 @@ diff --git a/src/main.ts b/src/main.ts
   expect(commands).toContain(
     "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
   );
+  expect(commands.some((command) => command.startsWith("gh gh "))).toBe(false);
 });
 
 test("falls back to base diff when explicit PR patch is unavailable", async () => {
@@ -223,9 +227,13 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
         body: "Body",
         url: "https://github.com/aguil/agents/pull/42",
         baseRefName: "main",
+        headRefOid: "deadbeefcafebabe",
       });
     }
-    if (cmd[0] === "git" && cmd[1] === "diff" && cmd[3] === "main...HEAD") {
+    if (cmd[0] === "git" && cmd[1] === "cat-file") {
+      return "";
+    }
+    if (cmd[0] === "git" && cmd[1] === "diff" && cmd[3] === "main...deadbeefcafebabe") {
       return "diff --git a/src/a.ts b/src/a.ts\n+new";
     }
     if (cmd[0] === "gh" && cmd[1] === "api") {
@@ -235,7 +243,7 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
   };
 
   const result = await collectReviewDiff("/repo", commandRunner, 42);
-  expect(result.strategy).toBe("pr_base_git");
+  expect(result.strategy).toBe("pr_base_git_head");
   expect(result.baseRef).toBe("main");
   expect(commands).toContain(
     "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
@@ -440,6 +448,31 @@ test("validates finding shape before accepting agent output", () => {
   expect(invalid.errors).toContain("description must be a non-empty string");
 });
 
+test("coerces empty and null file or line before validating findings", () => {
+  const base = {
+    id: "finding-1",
+    severity: "warning" as const,
+    title: "T",
+    description: "D",
+    evidence: "E",
+    sourceRole: "compliance",
+    validation: { status: "verified" as const, details: "ok" },
+  };
+
+  const emptyFile = validateFinding({ ...base, file: "" });
+  expect(emptyFile.valid).toBe(true);
+
+  const nullFile = validateFinding({ ...base, file: null as unknown as string });
+  expect(nullFile.valid).toBe(true);
+
+  const nullLine = validateFinding({ ...base, file: "a.ts", line: null as unknown as number });
+  expect(nullLine.valid).toBe(true);
+  expect(nullLine.errors).toHaveLength(0);
+
+  const stringLine = validateFinding({ ...base, file: "a.ts", line: "42" as unknown as number });
+  expect(stringLine.valid).toBe(true);
+});
+
 test("normalizes finding JSONL emitted by an agent", () => {
   const finding: Finding = {
     id: "finding-1",
@@ -468,6 +501,38 @@ test("normalizes finding JSONL emitted by an agent", () => {
   expect(events).toHaveLength(1);
   expect(events[0]?.type).toBe("finding");
   expect(events[0]?.data).toEqual(finding);
+});
+
+test("strips empty file string from JSON finding envelope", () => {
+  const events = normalizeAgentOutputLine(
+    {
+      runId: "run-1",
+      roleId: "compliance",
+      prompt: "Review.",
+      workspacePath: "/tmp/workspace",
+      contextBundlePath: "/tmp/context.json",
+      scratchpadPath: "/tmp/scratchpad",
+      timeoutMs: 1_000,
+      allowedCommands: [],
+    },
+    JSON.stringify({
+      finding: {
+        id: "finding-1",
+        severity: "warning",
+        title: "Issue",
+        description: "D",
+        evidence: "E",
+        sourceRole: "compliance",
+        file: "",
+        validation: { status: "verified", details: "ok" },
+      },
+    }),
+  );
+
+  expect(events).toHaveLength(1);
+  expect(events[0]?.type).toBe("finding");
+  const data = events[0]?.data as Finding;
+  expect(data.file).toBeUndefined();
 });
 
 test("creates pending PR review comments only for anchorable findings", () => {
@@ -587,6 +652,130 @@ test("builds triage review summary body", () => {
 
   expect(body).toContain("## At a Glance");
   expect(body).toContain("## Fix Now");
+  expect(body).toContain("🔴 0 critical, ⚠️ 1 warning");
+  expect(body).toContain("- ⚠️ Anchored issue (src/app.ts:12)");
+  expect(body).toContain("- ✅ No follow-up findings.");
+});
+
+test("impact summary review coverage notes lite triage omissions", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+    runMetadata: {
+      triage: "lite",
+      completed_roles: "security,quality,compliance",
+    },
+  });
+
+  expect(body).toContain("### Review coverage");
+  expect(body).toContain("Triage tier **lite**");
+  expect(body).toContain("Runtime / Performance");
+  expect(body).toContain("not scheduled");
+});
+
+test("impact summary review coverage lists timed-out scheduled role", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+    runMetadata: {
+      triage: "full",
+      completed_roles: "quality,compliance,performance",
+      timed_out_roles: "security",
+    },
+  });
+
+  expect(body).toContain("**Security:** not performed");
+  expect(body).toContain("timed out");
+});
+
+test("detects file:line anchors outside the PR diff map", () => {
+  const finding: Finding = {
+    id: "f1",
+    severity: "warning",
+    title: "x",
+    description: "d",
+    evidence: "e",
+    sourceRole: "quality",
+    file: "a.ts",
+    line: 5,
+    validation: { status: "verified", details: "ok" },
+  };
+  const empty = new Map<string, ReadonlyMap<number, number>>();
+  expect(findingHasNonPostablePrLineAnchor(finding, empty)).toBe(true);
+
+  const wrongLine = new Map<string, ReadonlyMap<number, number>>([["a.ts", new Map([[10, 1]])]]);
+  expect(findingHasNonPostablePrLineAnchor(finding, wrongLine)).toBe(true);
+
+  const match = new Map<string, ReadonlyMap<number, number>>([["a.ts", new Map([[5, 1]])]]);
+  expect(findingHasNonPostablePrLineAnchor(finding, match)).toBe(false);
+
+  const noLine: Finding = { ...finding, line: undefined };
+  expect(findingHasNonPostablePrLineAnchor(noLine, wrongLine)).toBe(false);
+});
+
+test("detects file path not in PR changed-files list", () => {
+  const finding: Finding = {
+    id: "f1",
+    severity: "warning",
+    title: "x",
+    description: "d",
+    evidence: "e",
+    sourceRole: "quality",
+    file: "other.ts",
+    line: 1,
+    validation: { status: "verified", details: "ok" },
+  };
+  const ctx = new Map<string, ReadonlyMap<number, number>>([["src/app.ts", new Map([[1, 1]])]]);
+  expect(findingUsesFileNotInPrChangedFiles(finding, ctx)).toBe(true);
+  expect(findingUsesFileNotInPrChangedFiles({ ...finding, file: "src/app.ts" }, ctx)).toBe(false);
+});
+
+test("impact summary annotates findings that are not inline-postable when PR diff context is provided", () => {
+  const onHunk: Finding = {
+    id: "finding-hunk",
+    severity: "warning",
+    title: "On hunk",
+    description: "Validated.",
+    evidence: "Evidence.",
+    sourceRole: "quality",
+    file: "src/app.ts",
+    line: 10,
+    validation: { status: "verified", details: "Verified." },
+  };
+  const offHunk: Finding = {
+    ...onHunk,
+    id: "finding-off",
+    title: "Off hunk",
+    line: 99,
+  };
+  const wrongFile: Finding = {
+    ...onHunk,
+    id: "finding-other",
+    title: "Other file",
+    file: "src/other.ts",
+    line: 10,
+  };
+  const prDiffContext = new Map<string, ReadonlyMap<number, number>>([
+    ["src/app.ts", new Map([[10, 1]])],
+  ]);
+
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [onHunk, offHunk, wrongFile],
+    postedCommentCount: 1,
+    skippedUnanchorable: 2,
+    prDiffContext,
+  });
+
+  expect(body).toContain("- ⚠️ On hunk (src/app.ts:10)");
+  expect(body).not.toContain("On hunk (src/app.ts:10) —");
+  expect(body).toContain("- Skipped outside PR diff: 2");
+  expect(body).toContain("line is not on a PR diff hunk");
+  expect(body).toContain("file is not in this PR's changed files");
 });
 
 test("builds impact review summary body", () => {
@@ -611,6 +800,10 @@ test("builds impact review summary body", () => {
 
   expect(body).toContain("## Impact Summary");
   expect(body).toContain("### Runtime / Performance");
+  expect(body).toContain("- ⚠️ Perf issue (src/app.ts:12)");
+  expect(body).toContain("- ✅ No security findings.");
+  expect(body).toContain("- ✅ No quality findings.");
+  expect(body).toContain("- ✅ No compliance findings.");
 });
 
 test("builds evidence review summary body", () => {
@@ -634,7 +827,115 @@ test("builds evidence review summary body", () => {
   });
 
   expect(body).toContain("## Why / Evidence / Fix");
-  expect(body).toContain("### Finding 1: Doc mismatch");
+  expect(body).toContain("### Finding 1: ⚠️ Doc mismatch");
+});
+
+test("formats pending review comments with severity emojis", () => {
+  const findings: Finding[] = [
+    {
+      id: "finding-critical",
+      severity: "critical",
+      title: "Critical issue",
+      description: "A critical validated finding.",
+      evidence: "Critical evidence.",
+      sourceRole: "security",
+      file: "src/security.ts",
+      line: 7,
+      validation: { status: "verified", details: "Reproduced locally." },
+    },
+    {
+      id: "finding-warning",
+      severity: "warning",
+      title: "Warning issue",
+      description: "A warning validated finding.",
+      evidence: "Warning evidence.",
+      sourceRole: "quality",
+      file: "src/quality.ts",
+      line: 9,
+      validation: { status: "verified", details: "Reproduced locally." },
+    },
+  ];
+
+  const comments = findingsToPendingReviewComments(findings);
+
+  expect(comments[0]?.body).toContain("### 🔴 Critical issue");
+  expect(comments[0]?.body).not.toContain("CRITICAL:");
+  expect(comments[1]?.body).toContain("### ⚠️ Warning issue");
+  expect(comments[1]?.body).not.toContain("WARNING:");
+});
+
+test("builds evidence review summary no-findings body with green check", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "evidence",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("✅ No findings - code looks good!");
+});
+
+test("builds impact review summary no-findings body with green check", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("## Impact Summary");
+  expect(body).toContain("✅ No findings - code looks good!");
+  expect(body).not.toContain("### Security");
+});
+
+test("builds triage review summary no-findings body with green check", () => {
+  const body = buildPendingReviewSummaryBody({
+    style: "triage",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("## At a Glance");
+  expect(body).toContain("🔴 0 critical, ⚠️ 0 warning");
+  expect(body).toContain("✅ No findings - code looks good!");
+  expect(body).not.toContain("## Fix Now");
+});
+
+test("formats subsection empty states with green check emoji", () => {
+  const securityFinding: Finding = {
+    id: "finding-1",
+    severity: "critical",
+    title: "Security issue",
+    description: "A security finding.",
+    evidence: "Evidence here.",
+    sourceRole: "security",
+    file: "src/app.ts",
+    line: 10,
+    validation: { status: "verified", details: "Verified." },
+  };
+
+  const impactBody = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [securityFinding],
+    postedCommentCount: 1,
+    skippedUnanchorable: 0,
+  });
+
+  expect(impactBody).toContain("- 🔴 Security issue (src/app.ts:10)");
+  expect(impactBody).toContain("- ✅ No performance findings.");
+  expect(impactBody).toContain("- ✅ No quality findings.");
+  expect(impactBody).toContain("- ✅ No compliance findings.");
+
+  const triageBody = buildPendingReviewSummaryBody({
+    style: "triage",
+    findings: [securityFinding],
+    postedCommentCount: 1,
+    skippedUnanchorable: 0,
+  });
+
+  expect(triageBody).toContain("- 🔴 Security issue (src/app.ts:10)");
+  expect(triageBody).toContain("- ✅ No follow-up findings.");
 });
 
 test("renders severity emojis in markdown report", () => {
@@ -668,6 +969,12 @@ test("renders severity emojis in markdown report", () => {
   expect(report).toContain("## 2. ⚠️ Warning performance issue");
   expect(report).not.toContain("CRITICAL:");
   expect(report).not.toContain("WARNING:");
+});
+
+test("uses unknown severity fallback emoji", () => {
+  expect(severityEmoji("critical")).toBe("🔴");
+  expect(severityEmoji("warning")).toBe("⚠️");
+  expect(severityEmoji("info" as Finding["severity"])).toBe("❓");
 });
 
 test("builds opencode command behind the adapter boundary", () => {

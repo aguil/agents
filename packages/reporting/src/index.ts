@@ -114,8 +114,14 @@ function severityRank(severity: Finding["severity"]): number {
   return severity === "critical" ? 0 : 1;
 }
 
-function severityEmoji(severity: Finding["severity"]): string {
-  return severity === "critical" ? "🔴" : "⚠️";
+export function severityEmoji(severity: Finding["severity"]): string {
+  if (severity === "critical") {
+    return "🔴";
+  }
+  if (severity === "warning") {
+    return "⚠️";
+  }
+  return "❓";
 }
 
 function buildExecutionNotes(

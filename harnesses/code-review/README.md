@@ -153,7 +153,10 @@ Strict mode:
 
 Pending review mode:
 
-- `--pending-review` deletes existing pending reviews authored by the current user on the target PR, then creates a fresh unsubmitted review.
+- `--pending-review` creates an unsubmitted GitHub review on the target PR.
+- If you already have an existing pending review on that PR:
+  - In interactive runs, the CLI prompts before replacing it.
+  - In non-interactive runs, pass `--replace-pending-review` to opt in to replacement.
 - Use `--pr <number>` to target a specific PR, otherwise the current branch PR is auto-discovered.
 - Use `--review-pr <number>` to collect review context/diff from a specific PR (including merged PRs); PR lookups use the repo from `--workspace` and auto-resolve jj workspace pointers to canonical colocated repos for git/gh commands.
 - `--no-confirm` skips interactive stale-review confirmation prompts (recommended for CI).

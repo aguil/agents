@@ -44,13 +44,39 @@ export function isFinding(value: unknown): value is Finding {
   return validateFinding(value).valid;
 }
 
+function coerceFindingShape(raw: Record<string, unknown>): Partial<Finding> {
+  const o: Record<string, unknown> = { ...raw };
+
+  if (o.file === null || o.file === undefined) {
+    delete o.file;
+  } else if (typeof o.file === "string") {
+    const t = o.file.trim();
+    if (t.length === 0) {
+      delete o.file;
+    } else {
+      o.file = t;
+    }
+  }
+
+  if (o.line === null || o.line === undefined) {
+    delete o.line;
+  } else if (typeof o.line === "string") {
+    const trimmed = o.line.trim();
+    if (/^\d+$/.test(trimmed)) {
+      o.line = Number.parseInt(trimmed, 10);
+    }
+  }
+
+  return o as Partial<Finding>;
+}
+
 export function validateFinding(value: unknown): FindingValidationResult {
   const errors: string[] = [];
   if (typeof value !== "object" || value === null) {
     return { valid: false, errors: ["finding must be an object"] };
   }
 
-  const candidate = value as Partial<Finding>;
+  const candidate = coerceFindingShape(value as Record<string, unknown>);
   requireString(candidate.id, "id", errors);
   if (candidate.severity !== "critical" && candidate.severity !== "warning") {
     errors.push("severity must be critical or warning");
@@ -61,7 +87,11 @@ export function validateFinding(value: unknown): FindingValidationResult {
   requireString(candidate.sourceRole, "sourceRole", errors);
 
   if (candidate.file !== undefined) {
-    requireString(candidate.file, "file", errors);
+    if (typeof candidate.file !== "string") {
+      errors.push("file must be a string when present");
+    } else {
+      requireString(candidate.file, "file", errors);
+    }
   }
   if (
     candidate.line !== undefined &&
@@ -505,9 +535,13 @@ function readFindingEnvelope(value: unknown): ParsedFindingEnvelope | undefined 
   if (typeof value !== "object" || value === null || !("finding" in value)) {
     return undefined;
   }
-  const finding = (value as { readonly finding?: unknown }).finding;
-  const validation = validateFinding(finding);
-  return { value: finding as Finding, validation };
+  const rawFinding = (value as { readonly finding?: unknown }).finding;
+  if (typeof rawFinding !== "object" || rawFinding === null) {
+    return undefined;
+  }
+  const coerced = coerceFindingShape(rawFinding as Record<string, unknown>);
+  const validation = validateFinding(rawFinding);
+  return { value: coerced as Finding, validation };
 }
 
 function extractFindingEnvelopes(value: unknown): readonly ParsedFindingEnvelope[] {

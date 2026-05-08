@@ -2,8 +2,10 @@ import { createCodeReviewAdapter, runCodeReview } from "@aguil/agents-code-revie
 import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { access, readFile, rm, writeFile, readdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
+import { access, readFile, rm, writeFile, readdir, mkdir } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
   if (argv.includes("--help") || argv.length === 0) {
@@ -17,7 +19,7 @@ Options:
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
   --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
   --context-bundle <path> Reuse an existing context bundle JSON for replay
-  --consensus <n>        Run n passes and keep recurring findings (default: 3 with --pending-review)
+  --consensus <n>        Run n passes and keep recurring findings (default: 1 with --pending-review)
   --adapter <name>       Execution adapter: fake, opencode, claude, or cursor (default: fake)
   --model <id>           Model passed to opencode/claude/cursor
   --variant <id>         OpenCode variant (provider-specific effort profile)
@@ -36,6 +38,7 @@ Options:
   --post-only            Post findings from an existing run result
   --result <path>        Result JSON path (auto-discovers latest by default)
   --no-confirm           Skip interactive confirmation prompts
+  --replace-pending-review Replace an existing pending PR review (requires opt-in)
   --review-pr <number>   PR number used for review context and diff collection
   --pr <number>          PR number for pending review (auto-discover if omitted)
   --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
@@ -92,7 +95,7 @@ Options:
       return 1;
     }
     const pendingReviewEnabled = options.pendingReview && !options.dryRun;
-    const consensusRuns = requestedConsensusRuns ?? (pendingReviewEnabled ? 3 : undefined);
+    const consensusRuns = requestedConsensusRuns ?? (pendingReviewEnabled ? 1 : undefined);
     const reviewPrNumber = parsePrNumber(options.reviewPr);
     if (options.reviewPr !== undefined && reviewPrNumber === undefined) {
       console.error(`Invalid --review-pr value: ${options.reviewPr}`);
@@ -101,6 +104,9 @@ Options:
 
     if (options.verbose) {
       console.log(`Starting code review with adapter '${adapterName}'.`);
+      if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
+        console.log("Using default consensus=1 for --pending-review (override with --consensus <n>).");
+      }
     }
 
     const result = await runCodeReview({
@@ -114,8 +120,44 @@ Options:
       adapter,
       onEvent: createRunEventLogger(options),
     });
+    let verbosePrDiffContext: PullRequestDiffContext | undefined;
     if (options.verbose) {
       printVerboseFindingSummary(result.findings);
+      const summaryStyle = parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
+      const rawCommentCandidates = findingsToPendingReviewComments(result.findings);
+      let prDiffContext: PullRequestDiffContext | undefined;
+      let postedInlineCount = rawCommentCandidates.length;
+      let skippedUnanchorable = 0;
+      if (reviewPrNumber !== undefined) {
+        try {
+          const workspacePath = resolve(options.workspace ?? process.cwd());
+          const repo = await getRepoNameWithOwner(workspacePath);
+          const loadedDiff = await loadPullRequestDiffContext(repo, reviewPrNumber, workspacePath);
+          prDiffContext = loadedDiff;
+          verbosePrDiffContext = loadedDiff;
+          warnPrAnchorIssues(result.findings, loadedDiff);
+          postedInlineCount = rawCommentCandidates.filter(
+            (candidate) => candidateToComment(candidate, loadedDiff) !== undefined,
+          ).length;
+          skippedUnanchorable = rawCommentCandidates.length - postedInlineCount;
+        } catch {
+          prDiffContext = undefined;
+          postedInlineCount = rawCommentCandidates.length;
+          skippedUnanchorable = 0;
+        }
+      } else {
+        skippedUnanchorable = result.findings.length - rawCommentCandidates.length;
+      }
+      console.log("");
+      console.log(buildPendingReviewSummaryBody({
+        style: summaryStyle,
+        findings: result.findings,
+        postedCommentCount: postedInlineCount,
+        skippedUnanchorable,
+        prDiffContext,
+        runMetadata: result.metadata,
+      }));
+      console.log("");
       console.log(`Code review ${result.status}.`);
       console.log(`Report: ${result.reportPath}`);
     } else if (options.dryRun) {
@@ -154,7 +196,12 @@ Options:
         reviewSummaryStyle: reviewSummaryStyle ?? "impact",
         reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
         noConfirm: options.noConfirm,
+        replacePendingReview: options.replacePendingReview,
         workspacePath: options.workspace,
+        preloadedPrDiffContext: (options.verbose && reviewPrNumber !== undefined && prNumber !== undefined && prNumber === reviewPrNumber)
+          ? verbosePrDiffContext
+          : undefined,
+        runMetadata: result.metadata,
       });
       if (posted.cancelled === true) {
         await updateRunResultMetadata(result.artifacts, {
@@ -178,10 +225,6 @@ Options:
 
   console.error(`Unknown command: ${argv[0]}`);
   return 1;
-}
-
-if (import.meta.main) {
-  process.exitCode = await main();
 }
 
 interface CliOptions {
@@ -208,6 +251,7 @@ interface CliOptions {
   readonly reviewSummary?: string;
   readonly postOnly: boolean;
   readonly noConfirm: boolean;
+  readonly replacePendingReview: boolean;
   readonly noDeterministic: boolean;
   readonly strict: boolean;
   readonly pendingReview: boolean;
@@ -244,6 +288,17 @@ interface PendingReviewCancelled {
   readonly cancelled: true;
   readonly currentHeadSha?: string;
   readonly headDiverged: boolean;
+}
+
+interface PendingReviewFindingCache {
+  readonly version: 1;
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly updatedAt: string;
+  readonly findings: ReadonlyArray<{
+    readonly fingerprint: string;
+    readonly threadId: string;
+  }>;
 }
 
 interface EffectiveAdapterOptions {
@@ -310,6 +365,7 @@ function parseOptions(argv: readonly string[]): CliOptions {
     reviewSummary: options["review-summary"],
     postOnly: flags.has("post-only"),
     noConfirm: flags.has("no-confirm"),
+    replacePendingReview: flags.has("replace-pending-review"),
     noDeterministic: flags.has("no-deterministic"),
     strict: flags.has("strict"),
     pendingReview: flags.has("pending-review"),
@@ -344,7 +400,7 @@ function printVerboseFindingSummary(findings: readonly Finding[]): void {
       : finding.line === undefined
       ? finding.file
       : `${finding.file}:${finding.line}`;
-    console.log(`- [${finding.severity}] ${location} - ${summarizeFindingMessage(finding.title)}`);
+    console.log(`- ${severityEmoji(finding.severity)} ${location} - ${summarizeFindingMessage(finding.title)}`);
   }
   if (findings.length > shown.length) {
     console.log(`- ... ${findings.length - shown.length} more`);
@@ -613,7 +669,9 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     reviewSummaryStyle: reviewSummaryStyle ?? "impact",
     reviewedHeadSha,
     noConfirm: options.noConfirm,
+    replacePendingReview: options.replacePendingReview,
     workspacePath,
+    runMetadata: metadata,
   });
   if (posted.cancelled === true) {
     return 0;
@@ -693,14 +751,99 @@ export function findingsToPendingReviewComments(findings: readonly Finding[]): r
     }));
 }
 
+/** Maps PR-changed file paths to right-side line -> pull request review `position`. */
+export type PullRequestDiffContext = ReadonlyMap<string, ReadonlyMap<number, number>>;
+
+export function resolveReviewDiffPosition(
+  path: string,
+  line: number,
+  context: PullRequestDiffContext,
+): number | undefined {
+  return context.get(path)?.get(line);
+}
+
+/**
+ * When PR diff context is known, explains why a finding will not get an inline review thread.
+ * Returns undefined when the finding anchors to a postable PR diff line.
+ */
+export function findingInlinePostingCaption(
+  finding: Finding,
+  context: PullRequestDiffContext,
+): string | undefined {
+  if (finding.file === undefined || finding.file === "") {
+    return finding.line === undefined
+      ? "summary only (no file:line anchor)"
+      : "summary only (no file path for line anchor)";
+  }
+  if (!context.has(finding.file)) {
+    return "summary only (file is not in this PR's changed files)";
+  }
+  if (finding.line === undefined) {
+    return "summary only (no line on PR diff; add a hunk line for an inline thread)";
+  }
+  const positions = context.get(finding.file);
+  if (positions?.get(finding.line) === undefined) {
+    return "summary only (line is not on a PR diff hunk)";
+  }
+  return undefined;
+}
+
+/** True when `file` is set but is not among this PR's changed paths (from the files API). */
+export function findingUsesFileNotInPrChangedFiles(
+  finding: Finding,
+  context: PullRequestDiffContext,
+): boolean {
+  return finding.file !== undefined && finding.file !== "" && !context.has(finding.file);
+}
+
+/** True when the finding has file+line but that anchor cannot map to a PR review diff position. */
+export function findingHasNonPostablePrLineAnchor(
+  finding: Finding,
+  context: PullRequestDiffContext,
+): boolean {
+  if (finding.file === undefined || finding.line === undefined) {
+    return false;
+  }
+  return resolveReviewDiffPosition(finding.file, finding.line, context) === undefined;
+}
+
+function warnPrAnchorIssues(findings: readonly Finding[], context: PullRequestDiffContext): void {
+  const wrongFile = findings.filter((finding) => findingUsesFileNotInPrChangedFiles(finding, context));
+  if (wrongFile.length > 0) {
+    const sample = wrongFile.slice(0, 3).map((f) => `"${f.title}" (file: ${f.file})`).join("; ");
+    const more = wrongFile.length > 3 ? ` (+${wrongFile.length - 3} more)` : "";
+    console.warn(
+      `${wrongFile.length} finding(s) use \`file\` not in this PR's changed-files list. ${sample}${more}`,
+    );
+  }
+  const wrongHunk = findings.filter((finding) => {
+    if (
+      finding.file === undefined || finding.line === undefined || finding.file === ""
+      || !context.has(finding.file)
+    ) {
+      return false;
+    }
+    return resolveReviewDiffPosition(finding.file, finding.line, context) === undefined;
+  });
+  if (wrongHunk.length > 0) {
+    const sample = wrongHunk.slice(0, 3).map((f) => `"${f.title}" (${f.file}:${f.line})`).join("; ");
+    const more = wrongHunk.length > 3 ? ` (+${wrongHunk.length - 3} more)` : "";
+    console.warn(
+      `${wrongHunk.length} finding(s) cite file:line not on a PR diff hunk (no inline review thread). ${sample}${more}`,
+    );
+  }
+}
+
 function formatPendingReviewBody(finding: Finding): string {
   return [
-    `### ${finding.severity.toUpperCase()}: ${finding.title}`,
+    `### ${severityEmoji(finding.severity)} ${finding.title}`,
     "",
     finding.description,
     "",
     `Evidence: ${finding.evidence}`,
     `Validation: ${finding.validation.status} - ${finding.validation.details}`,
+    "",
+    `<!-- finding:${findingFingerprint(finding)} -->`,
   ].join("\n");
 }
 
@@ -710,7 +853,11 @@ async function replacePendingPullRequestReview(input: {
   readonly reviewSummaryStyle: ReviewSummaryStyle;
   readonly reviewedHeadSha?: string;
   readonly noConfirm: boolean;
+  readonly replacePendingReview: boolean;
   readonly workspacePath?: string;
+  readonly preloadedPrDiffContext?: PullRequestDiffContext;
+  /** From harness result metadata (result.json) for review coverage in the summary body. */
+  readonly runMetadata?: Readonly<Record<string, string>>;
 }): Promise<PendingReviewPosted | PendingReviewCancelled> {
   const workspacePath = resolveWorkspaceCwd(input.workspacePath);
   const repo = await getRepoNameWithOwner(workspacePath);
@@ -737,12 +884,25 @@ async function replacePendingPullRequestReview(input: {
     }
   }
 
-  const rawComments = findingsToPendingReviewComments(input.findings);
-  const diffContext = await loadPullRequestDiffContext(repo, prNumber, workspacePath);
-  const comments = rawComments
-    .map((candidate) => candidateToComment(candidate, diffContext))
-    .filter((comment): comment is GitHubPendingReviewCommentInput => comment !== undefined);
-  const skippedUnanchorable = rawComments.length - comments.length;
+  const localAhead = await checkLocalAheadOfPullRequest({
+    currentHeadSha,
+    prNumber,
+    workspacePath,
+  });
+  if (localAhead.status === "ahead") {
+    console.warn(
+      `Warning: local checkout is ahead of PR #${prNumber} (${localAhead.prHeadSha.slice(0, 12)} -> ${localAhead.localHeadSha.slice(0, 12)}).`,
+    );
+    const confirmed = await confirmProceedAfterLocalAhead(input.noConfirm);
+    if (!confirmed) {
+      console.log("Skipped pending review publish.");
+      return {
+        cancelled: true,
+        currentHeadSha,
+        headDiverged,
+      };
+    }
+  }
 
   const reviews = await ghApi<readonly GitHubPullRequestReview[]>(
     `repos/${repo}/pulls/${prNumber}/reviews`,
@@ -751,20 +911,83 @@ async function replacePendingPullRequestReview(input: {
     workspacePath,
   );
   const pendingMine = reviews.filter((review) => review.state === "PENDING" && review.user.login === login);
-  for (const review of pendingMine) {
-    await ghApi<void>(
-      `repos/${repo}/pulls/${prNumber}/reviews/${review.id}`,
-      "DELETE",
-      undefined,
-      workspacePath,
-    );
+
+  // Only pay the resolved-thread scan cost when we're actually replacing an
+  // existing pending review. First-time pending review publishing should stay
+  // lightweight.
+  let findings = input.findings;
+  if (pendingMine.length > 0) {
+    if (!input.replacePendingReview) {
+      const confirmed = await confirmReplacePendingReview({
+        noConfirm: input.noConfirm,
+        prNumber,
+        pendingCount: pendingMine.length,
+      });
+      if (!confirmed) {
+        console.log("Skipped pending review publish.");
+        return {
+          cancelled: true,
+          currentHeadSha,
+          headDiverged,
+        };
+      }
+    }
+
+    const candidateFingerprints = new Set(findings.map((finding) => findingFingerprint(finding)));
+    if (candidateFingerprints.size > 0) {
+      const allowedAuthors = new Set([login]);
+      const suppressedFromCache = await suppressFingerprintsFromLocalCache({
+        repo,
+        prNumber,
+        workspacePath,
+        wanted: candidateFingerprints,
+      });
+
+      let suppressedFingerprints = suppressedFromCache;
+      const remaining = new Set([...candidateFingerprints].filter((fp) => !suppressedFingerprints.has(fp)));
+      if (remaining.size > 0) {
+        const fromScan = await fetchResolvedFindingFingerprints({
+          repo,
+          prNumber,
+          workspacePath,
+          wanted: remaining,
+          allowedAuthors,
+        });
+        suppressedFingerprints = new Set([...suppressedFingerprints, ...fromScan]);
+      }
+
+      if (suppressedFingerprints.size > 0) {
+        findings = findings.filter((finding) => !suppressedFingerprints.has(findingFingerprint(finding)));
+      }
+    }
+  }
+
+  const rawComments = findingsToPendingReviewComments(findings);
+  const diffContext = input.preloadedPrDiffContext ?? await loadPullRequestDiffContext(repo, prNumber, workspacePath);
+  warnPrAnchorIssues(findings, diffContext);
+  const comments = rawComments
+    .map((candidate) => candidateToComment(candidate, diffContext))
+    .filter((comment): comment is GitHubPendingReviewCommentInput => comment !== undefined);
+  const skippedUnanchorable = rawComments.length - comments.length;
+
+  if (pendingMine.length > 0) {
+    for (const review of pendingMine) {
+      await ghApi<void>(
+        `repos/${repo}/pulls/${prNumber}/reviews/${review.id}`,
+        "DELETE",
+        undefined,
+        workspacePath,
+      );
+    }
   }
 
   const body = buildPendingReviewSummaryBody({
     style: input.reviewSummaryStyle,
-    findings: input.findings,
+    findings,
     postedCommentCount: comments.length,
     skippedUnanchorable,
+    prDiffContext: diffContext,
+    runMetadata: input.runMetadata,
   });
   const created = await ghApi<{ readonly id: number; readonly html_url: string }>(
     `repos/${repo}/pulls/${prNumber}/reviews`,
@@ -776,6 +999,23 @@ async function replacePendingPullRequestReview(input: {
     workspacePath,
   );
 
+  // Best-effort cache update: map fingerprints from posted comments to thread IDs.
+  // This lets future replacement checks query a small set of known threads rather
+  // than scanning all PR threads.
+  if (pendingMine.length > 0) {
+    try {
+      await updateLocalFindingThreadCacheAfterPost({
+        repo,
+        prNumber,
+        reviewId: created.id,
+        workspacePath,
+        allowedAuthors: new Set([login]),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  }
+
   return {
     reviewId: created.id,
     prNumber,
@@ -784,6 +1024,371 @@ async function replacePendingPullRequestReview(input: {
     currentHeadSha,
     headDiverged,
   };
+}
+
+function sanitizeRepoForCache(repo: string): string {
+  return repo.replaceAll("/", "__");
+}
+
+function findingCachePath(workspacePath: string, repo: string, prNumber: number): string {
+  return join(workspacePath, ".review-agent", "pr-cache", sanitizeRepoForCache(repo), `pr-${prNumber}`, "finding-threads.json");
+}
+
+async function loadLocalFindingThreadCache(
+  workspacePath: string,
+  repo: string,
+  prNumber: number,
+): Promise<PendingReviewFindingCache | undefined> {
+  const path = findingCachePath(workspacePath, repo, prNumber);
+  try {
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as Partial<PendingReviewFindingCache>;
+    if (parsed.version !== 1 || parsed.repo !== repo || parsed.prNumber !== prNumber || !Array.isArray(parsed.findings)) {
+      return undefined;
+    }
+    return parsed as PendingReviewFindingCache;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeLocalFindingThreadCache(workspacePath: string, cache: PendingReviewFindingCache): Promise<void> {
+  const path = findingCachePath(workspacePath, cache.repo, cache.prNumber);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+}
+
+async function suppressFingerprintsFromLocalCache(input: {
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly workspacePath: string;
+  readonly wanted: ReadonlySet<string>;
+}): Promise<Set<string>> {
+  const cache = await loadLocalFindingThreadCache(input.workspacePath, input.repo, input.prNumber);
+  if (cache === undefined) {
+    return new Set();
+  }
+
+  const wantedThreadIds = new Map<string, string>();
+  for (const entry of cache.findings) {
+    if (input.wanted.has(entry.fingerprint)) {
+      wantedThreadIds.set(entry.fingerprint, entry.threadId);
+    }
+  }
+  if (wantedThreadIds.size === 0) {
+    return new Set();
+  }
+
+  const uniqueThreadIds = [...new Set(wantedThreadIds.values())];
+  // `gh api graphql -f ids=[...]` treats the entire bracketed string as one ID; send variables
+  // as JSON via --input instead (matches GitHub's expected { query, variables } shape).
+  const response = await runGhGraphql<{
+    readonly data?: {
+      readonly nodes?: ReadonlyArray<
+        | { readonly id: string; readonly isResolved?: boolean }
+        | { readonly id: string; readonly isResolved?: boolean } // same shape for thread nodes
+        | null
+      >;
+    };
+  }>(
+    {
+      query: "query($ids:[ID!]!){nodes(ids:$ids){... on PullRequestReviewThread{id isResolved}}}",
+      variables: { ids: uniqueThreadIds },
+    },
+    input.workspacePath,
+  );
+
+  const resolvedThreads = new Set<string>();
+  for (const node of response.data?.nodes ?? []) {
+    if (node && node.isResolved === true) {
+      resolvedThreads.add(node.id);
+    }
+  }
+
+  const suppressed = new Set<string>();
+  for (const [fingerprint, threadId] of wantedThreadIds.entries()) {
+    if (resolvedThreads.has(threadId)) {
+      suppressed.add(fingerprint);
+    }
+  }
+  return suppressed;
+}
+
+async function updateLocalFindingThreadCacheAfterPost(input: {
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly reviewId: number;
+  readonly workspacePath: string;
+  readonly allowedAuthors: ReadonlySet<string>;
+}): Promise<void> {
+  const reviewComments = await ghApi<ReadonlyArray<{ readonly node_id: string; readonly body: string }>>(
+    `repos/${input.repo}/pulls/${input.prNumber}/reviews/${input.reviewId}/comments`,
+    "GET",
+    undefined,
+    input.workspacePath,
+  );
+
+  const commentIdsToFingerprint = new Map<string, string>();
+  for (const comment of reviewComments) {
+    const matches = comment.body.matchAll(/<!--\s*finding:([^>]+?)\s*-->/g);
+    for (const match of matches) {
+      const fp = match[1]?.trim();
+      if (fp) {
+        commentIdsToFingerprint.set(comment.node_id, fp);
+      }
+    }
+  }
+  if (commentIdsToFingerprint.size === 0) {
+    return;
+  }
+
+  // Prefer the most recent threads first: fresh pending-review comments almost always
+  // land on recent threads, so `last` + `before` avoids scanning from the start of
+  // long PR histories in the common case.
+  const query = [
+    "query($o:String!,$r:String!,$n:Int!,$before:String){",
+    "repository(owner:$o,name:$r){",
+    "pullRequest(number:$n){",
+    "reviewThreads(last:100,before:$before){",
+    "pageInfo{hasPreviousPage startCursor}",
+    "nodes{id comments(first:50){nodes{id author{login}}}}",
+    "}",
+    "}",
+    "}",
+    "}",
+  ].join("");
+
+  const [owner, name] = input.repo.split("/");
+  if (!owner || !name) {
+    return;
+  }
+
+  const found = new Map<string, string>(); // fingerprint -> threadId
+  let beforeCursor: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const resp = await runGh<{
+      readonly data?: {
+        readonly repository?: {
+          readonly pullRequest?: {
+            readonly reviewThreads?: {
+              readonly pageInfo?: {
+                readonly hasPreviousPage?: boolean;
+                readonly startCursor?: string | null;
+              };
+              readonly nodes?: ReadonlyArray<{
+                readonly id: string;
+                readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly id: string; readonly author?: { readonly login?: string } }> };
+              }>;
+            };
+          };
+        };
+      };
+    }>([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-f",
+      `o=${owner}`,
+      "-f",
+      `r=${name}`,
+      "-F",
+      `n=${input.prNumber}`,
+      ...(beforeCursor !== undefined ? ["-f", `before=${beforeCursor}`] : []),
+    ], input.workspacePath);
+
+    for (const thread of resp.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []) {
+      for (const comment of thread.comments?.nodes ?? []) {
+        const authorLogin = comment.author?.login;
+        if (typeof authorLogin !== "string" || !input.allowedAuthors.has(authorLogin)) {
+          continue;
+        }
+        const fingerprint = commentIdsToFingerprint.get(comment.id);
+        if (fingerprint) {
+          found.set(fingerprint, thread.id);
+        }
+      }
+    }
+
+    if (found.size >= commentIdsToFingerprint.size) {
+      break;
+    }
+    const pageInfo = resp.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
+    if (pageInfo?.hasPreviousPage !== true) {
+      break;
+    }
+    const startCursor = pageInfo.startCursor ?? undefined;
+    if (startCursor === undefined || startCursor.length === 0) {
+      break;
+    }
+    beforeCursor = startCursor;
+  }
+
+  if (found.size === 0) {
+    return;
+  }
+
+  const existing = await loadLocalFindingThreadCache(input.workspacePath, input.repo, input.prNumber);
+  const merged = new Map<string, string>();
+  for (const entry of existing?.findings ?? []) {
+    merged.set(entry.fingerprint, entry.threadId);
+  }
+  for (const [fp, threadId] of found.entries()) {
+    merged.set(fp, threadId);
+  }
+
+  await writeLocalFindingThreadCache(input.workspacePath, {
+    version: 1,
+    repo: input.repo,
+    prNumber: input.prNumber,
+    updatedAt: new Date().toISOString(),
+    findings: [...merged.entries()].map(([fingerprint, threadId]) => ({ fingerprint, threadId })),
+  });
+}
+
+async function fetchResolvedFindingFingerprints(input: {
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly workspacePath?: string;
+  readonly wanted: ReadonlySet<string>;
+  readonly allowedAuthors: ReadonlySet<string>;
+}): Promise<ReadonlySet<string>> {
+  const [owner, name] = input.repo.split("/");
+  if (!owner || !name) {
+    return new Set();
+  }
+
+  const suppressed = new Set<string>();
+  const marker = /<!--\s*finding:([^>]+?)\s*-->/g;
+
+  const query = [
+    "query($o:String!,$r:String!,$n:Int!,$after:String){",
+    "repository(owner:$o,name:$r){",
+    "pullRequest(number:$n){",
+    "reviewThreads(first:100,after:$after){",
+    "pageInfo{hasNextPage endCursor}",
+    "nodes{isResolved comments(first:10){nodes{body author{login}}}}",
+    "}",
+    "}",
+    "}",
+    "}",
+  ].join("");
+
+  let after: string | undefined;
+  /** True when the last fetched page still had a next page but we stopped due to the page cap. */
+  let cappedWithMorePages = false;
+  for (let page = 0; page < 10; page++) {
+    const response = await runGh<{
+      readonly data?: {
+        readonly repository?: {
+          readonly pullRequest?: {
+            readonly reviewThreads?: {
+              readonly pageInfo?: { readonly hasNextPage?: boolean; readonly endCursor?: string | null };
+              readonly nodes?: ReadonlyArray<{
+                readonly isResolved?: boolean;
+                readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly body?: string; readonly author?: { readonly login?: string } }> };
+              }>;
+            };
+          };
+        };
+      };
+    }>([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-f",
+      `o=${owner}`,
+      "-f",
+      `r=${name}`,
+      "-F",
+      `n=${input.prNumber}`,
+      ...(after !== undefined ? ["-f", `after=${after}`] : []),
+    ], input.workspacePath);
+
+    const threads = response.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    for (const thread of threads) {
+      if (thread.isResolved !== true) {
+        continue;
+      }
+      for (const comment of thread.comments?.nodes ?? []) {
+        const body = comment.body;
+        if (typeof body !== "string") {
+          continue;
+        }
+        const authorLogin = comment.author?.login;
+        if (typeof authorLogin !== "string" || !input.allowedAuthors.has(authorLogin)) {
+          continue;
+        }
+        for (const match of body.matchAll(marker)) {
+          const fingerprint = match[1]?.trim();
+          if (fingerprint && input.wanted.has(fingerprint)) {
+            suppressed.add(fingerprint);
+          }
+        }
+      }
+    }
+
+    if (suppressed.size >= input.wanted.size) {
+      break;
+    }
+    const pageInfo = response.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
+    if (pageInfo?.hasNextPage !== true) {
+      break;
+    }
+    const endCursor = pageInfo.endCursor ?? undefined;
+    if (endCursor === undefined || endCursor.length === 0) {
+      break;
+    }
+    after = endCursor;
+    if (page === 9) {
+      cappedWithMorePages = true;
+      break;
+    }
+  }
+
+  if (suppressed.size < input.wanted.size && cappedWithMorePages) {
+    console.warn(
+      "Warning: resolved-thread suppression scan hit its pagination limit; some resolved findings may be reposted.",
+    );
+  }
+
+  return suppressed;
+}
+
+async function checkLocalAheadOfPullRequest(input: {
+  readonly currentHeadSha: string | undefined;
+  readonly prNumber: number;
+  readonly workspacePath: string;
+}): Promise<
+  | { readonly status: "unavailable" }
+  | { readonly status: "ok" }
+  | { readonly status: "ahead"; readonly prHeadSha: string; readonly localHeadSha: string }
+> {
+  const prHeadSha = input.currentHeadSha?.trim();
+  if (prHeadSha === undefined || prHeadSha.length === 0) {
+    return { status: "unavailable" };
+  }
+
+  const localHeadSha = (await runCommand(["git", "rev-parse", "HEAD"], input.workspacePath, { gitAware: true }))?.trim();
+  if (localHeadSha === undefined || localHeadSha.length === 0) {
+    return { status: "unavailable" };
+  }
+  if (localHeadSha === prHeadSha) {
+    return { status: "ok" };
+  }
+
+  // Local is "ahead" if the PR head is reachable from local HEAD.
+  const ancestorCheck = await runCommand(
+    ["git", "merge-base", "--is-ancestor", prHeadSha, localHeadSha],
+    input.workspacePath,
+    { gitAware: true },
+  );
+  if (ancestorCheck !== undefined) {
+    return { status: "ahead", prHeadSha, localHeadSha };
+  }
+
+  return { status: "ok" };
 }
 
 async function checkReviewPullRequestDivergence(
@@ -847,51 +1452,318 @@ async function confirmProceedAfterStaleness(noConfirm: boolean): Promise<boolean
   }
 }
 
+async function confirmProceedAfterLocalAhead(noConfirm: boolean): Promise<boolean> {
+  if (noConfirm) {
+    return true;
+  }
+  if (process.platform === "win32") {
+    console.warn("Interactive prompt is unsupported on Windows. Re-run with --no-confirm.");
+    return false;
+  }
+  if (process.stdin.isTTY !== true) {
+    console.warn("Non-interactive stdin detected. Re-run with --no-confirm to post anyway.");
+    return false;
+  }
+  process.stdout.write("Post pending review anyway? [y/N] ");
+  const reader = Bun.stdin.stream().getReader();
+  try {
+    const { value } = await reader.read();
+    const answer = value === undefined ? "" : new TextDecoder().decode(value).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  } catch {
+    return false;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function confirmReplacePendingReview(input: {
+  readonly noConfirm: boolean;
+  readonly prNumber: number;
+  readonly pendingCount: number;
+}): Promise<boolean> {
+  if (input.noConfirm) {
+    console.warn("Non-interactive pending review replacement requires --replace-pending-review.");
+    return false;
+  }
+  if (process.platform === "win32") {
+    console.warn(
+      "Interactive prompt is unsupported on Windows. Re-run with --replace-pending-review and --no-confirm.",
+    );
+    return false;
+  }
+  if (process.stdin.isTTY !== true) {
+    console.warn(
+      "Non-interactive stdin detected. Re-run with --replace-pending-review (and --no-confirm if other prompts apply).",
+    );
+    return false;
+  }
+  const plural = input.pendingCount === 1 ? "" : "s";
+  process.stdout.write(
+    `Replace your existing pending review${plural} (${input.pendingCount}) on PR #${input.prNumber}? [y/N] `,
+  );
+  const reader = Bun.stdin.stream().getReader();
+  try {
+    const { value } = await reader.read();
+    const answer = value === undefined ? "" : new TextDecoder().decode(value).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  } catch {
+    return false;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export function buildPendingReviewSummaryBody(input: {
   readonly style: ReviewSummaryStyle;
   readonly findings: readonly Finding[];
   readonly postedCommentCount: number;
   readonly skippedUnanchorable: number;
+  readonly prDiffContext?: PullRequestDiffContext;
+  /** Harness run metadata (e.g. from result.json) for review coverage / triage. */
+  readonly runMetadata?: Readonly<Record<string, string>>;
 }): string {
   switch (input.style) {
     case "triage":
-      return renderTriageSummary(input.findings, input.postedCommentCount, input.skippedUnanchorable);
+      return renderTriageSummary(
+        input.findings,
+        input.postedCommentCount,
+        input.skippedUnanchorable,
+        input.prDiffContext,
+        input.runMetadata,
+      );
     case "impact":
-      return renderImpactSummary(input.findings, input.postedCommentCount, input.skippedUnanchorable);
+      return renderImpactSummary(
+        input.findings,
+        input.postedCommentCount,
+        input.skippedUnanchorable,
+        input.prDiffContext,
+        input.runMetadata,
+      );
     case "evidence":
-      return renderEvidenceSummary(input.findings, input.postedCommentCount, input.skippedUnanchorable);
+      return renderEvidenceSummary(
+        input.findings,
+        input.postedCommentCount,
+        input.skippedUnanchorable,
+        input.prDiffContext,
+        input.runMetadata,
+      );
   }
+}
+
+const FULL_CODE_REVIEW_ROLE_IDS: readonly string[] = [
+  "security",
+  "performance",
+  "quality",
+  "compliance",
+];
+
+function parseMetadataRolesList(raw: string | undefined): readonly string[] {
+  if (raw === undefined || raw.trim().length === 0) {
+    return [];
+  }
+  return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+function parseTriageTierLabel(raw: string | undefined): "trivial" | "lite" | "full" | undefined {
+  if (raw === "trivial" || raw === "lite" || raw === "full") {
+    return raw;
+  }
+  return undefined;
+}
+
+function expectedRolesForTriageTier(tier: "trivial" | "lite" | "full"): readonly string[] {
+  if (tier === "trivial") {
+    return ["quality"];
+  }
+  if (tier === "lite") {
+    return ["security", "quality", "compliance"];
+  }
+  return [...FULL_CODE_REVIEW_ROLE_IDS];
+}
+
+function roleReviewSectionLabel(roleId: string): string {
+  if (roleId === "security") {
+    return "Security";
+  }
+  if (roleId === "performance") {
+    return "Runtime / Performance";
+  }
+  if (roleId === "quality") {
+    return "Correctness / Quality";
+  }
+  if (roleId === "compliance") {
+    return "Documentation / Compliance";
+  }
+  return roleId;
+}
+
+function triageTierRationale(tier: "trivial" | "lite" | "full"): string {
+  if (tier === "trivial") {
+    return "Triage tier **trivial**: only correctness/quality review is scheduled (small or low-risk change per context bundle).";
+  }
+  if (tier === "lite") {
+    return "Triage tier **lite**: security, quality, and compliance run; runtime/performance is not scheduled for this scope.";
+  }
+  return "Triage tier **full**: all review dimensions are scheduled.";
+}
+
+/**
+ * Markdown lines (each including leading `- ` or headings) for review coverage; empty if no usable metadata.
+ */
+export function formatReviewCoverageSectionLines(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): readonly string[] {
+  if (runMetadata === undefined) {
+    return [];
+  }
+
+  const triageRaw = runMetadata.triage?.trim();
+  const tier = parseTriageTierLabel(triageRaw);
+  const expected = tier === undefined ? undefined : new Set(expectedRolesForTriageTier(tier));
+  const skippedByTriage = FULL_CODE_REVIEW_ROLE_IDS.filter(
+    (id) => expected !== undefined && !expected.has(id),
+  );
+
+  const completed = parseMetadataRolesList(runMetadata.completed_roles);
+  const timedOutRaw = parseMetadataRolesList(runMetadata.timed_out_roles);
+  const failedRaw = parseMetadataRolesList(runMetadata.failed_roles);
+
+  const skipSet = new Set(skippedByTriage);
+  const inScheduledTier = (roleId: string): boolean =>
+    tier === undefined || expected?.has(roleId) === true;
+
+  const timedOut = timedOutRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
+  const failed = failedRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
+
+  const hasOutcomeDetail =
+    completed.length > 0 || timedOut.length > 0 || failed.length > 0;
+  const hasSignal =
+    (triageRaw !== undefined && triageRaw.length > 0)
+    || skippedByTriage.length > 0
+    || timedOutRaw.length > 0
+    || failedRaw.length > 0
+    || completed.length > 0;
+
+  if (!hasSignal) {
+    return [];
+  }
+
+  let missingOutcome: readonly string[] = [];
+  if (tier !== undefined && expected !== undefined && hasOutcomeDetail) {
+    missingOutcome = [...expected].filter(
+      (id) => !completed.includes(id) && !timedOut.includes(id) && !failed.includes(id),
+    );
+  }
+
+  const hasProblem =
+    skippedByTriage.length > 0
+    || timedOut.length > 0
+    || failed.length > 0
+    || missingOutcome.length > 0;
+
+  const lines: string[] = ["", "### Review coverage"];
+
+  if (tier !== undefined) {
+    lines.push(`- _${triageTierRationale(tier)}_`);
+  } else if (triageRaw !== undefined && triageRaw.length > 0) {
+    lines.push(
+      `- _Triage label: \`${triageRaw}\` — scheduled reviewers inferred from run outcomes._`,
+    );
+  }
+
+  for (const roleId of skippedByTriage) {
+    lines.push(
+      `- **${roleReviewSectionLabel(roleId)}:** not performed — omitted for this triage tier (not scheduled).`,
+    );
+  }
+
+  for (const roleId of timedOut) {
+    lines.push(
+      `- **${roleReviewSectionLabel(roleId)}:** not performed — reviewer **timed out** before completion.`,
+    );
+  }
+
+  for (const roleId of failed) {
+    lines.push(
+      `- **${roleReviewSectionLabel(roleId)}:** not performed — reviewer **failed** (adapter error or non-timeout failure).`,
+    );
+  }
+
+  for (const roleId of missingOutcome) {
+    lines.push(
+      `- **${roleReviewSectionLabel(roleId)}:** not performed — no completion outcome recorded (unexpected).`,
+    );
+  }
+
+  if (!hasProblem && tier !== undefined && hasOutcomeDetail) {
+    lines.push("- All scheduled reviewers **completed**; no triage omissions or incomplete roles.");
+  } else if (!hasProblem && tier === undefined && hasOutcomeDetail) {
+    lines.push("- All reported reviewer roles **completed**; no failures or timeouts in run metadata.");
+  }
+
+  return lines;
 }
 
 function renderTriageSummary(
   findings: readonly Finding[],
   postedCommentCount: number,
   skippedUnanchorable: number,
+  prDiffContext: PullRequestDiffContext | undefined,
+  runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
   const critical = findings.filter((finding) => finding.severity === "critical");
   const warnings = findings.filter((finding) => finding.severity === "warning");
+  const lines = [
+    "## At a Glance",
+    `- Findings: ${findings.length} (🔴 ${critical.length} critical, ⚠️ ${warnings.length} warning)`,
+    `- Inline comments posted: ${postedCommentCount}`,
+  ];
+  if (skippedUnanchorable > 0) {
+    lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
+  }
+  lines.push(...formatReviewCoverageSectionLines(runMetadata));
+
+  if (findings.length === 0) {
+    lines.push("", "✅ No findings - code looks good!");
+    return lines.join("\n");
+  }
+
   const fixNow = [...critical, ...warnings].slice(0, 2);
   const followUp = [...critical, ...warnings].slice(2, 6);
-
-  return [
-    "## At a Glance",
-    `- Findings: ${findings.length} (${critical.length} critical, ${warnings.length} warning)`,
-    `- Inline comments posted: ${postedCommentCount}`,
-    `- Skipped outside PR diff: ${skippedUnanchorable}`,
+  lines.push(
     "",
     "## Fix Now",
-    ...formatFindingBullets(fixNow, "No immediate findings."),
+    ...formatFindingBullets(fixNow, "No immediate findings.", prDiffContext),
     "",
     "## Follow-up",
-    ...formatFindingBullets(followUp, "No follow-up findings."),
-  ].join("\n");
+    ...formatFindingBullets(followUp, "No follow-up findings.", prDiffContext),
+  );
+  return lines.join("\n");
 }
 
 function renderImpactSummary(
   findings: readonly Finding[],
   postedCommentCount: number,
   skippedUnanchorable: number,
+  prDiffContext: PullRequestDiffContext | undefined,
+  runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
+  const lines = [
+    "## Impact Summary",
+    `- Total findings: ${findings.length}`,
+    `- Inline comments posted: ${postedCommentCount}`,
+  ];
+  if (skippedUnanchorable > 0) {
+    lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
+  }
+  lines.push(...formatReviewCoverageSectionLines(runMetadata));
+
+  if (findings.length === 0) {
+    lines.push("", "✅ No findings - code looks good!");
+    return lines.join("\n");
+  }
+
   const groups: Record<Finding["sourceRole"], Finding[]> = {
     security: [],
     performance: [],
@@ -903,47 +1775,53 @@ function renderImpactSummary(
     groups[finding.sourceRole].push(finding);
   }
 
-  return [
-    "## Impact Summary",
-    `- Total findings: ${findings.length}`,
-    `- Inline comments posted: ${postedCommentCount}`,
-    `- Skipped outside PR diff: ${skippedUnanchorable}`,
+  lines.push(
     "",
     "### Security",
-    ...formatFindingBullets(groups.security, "No security findings."),
+    ...formatFindingBullets(groups.security, "No security findings.", prDiffContext),
     "",
     "### Runtime / Performance",
-    ...formatFindingBullets(groups.performance, "No performance findings."),
+    ...formatFindingBullets(groups.performance, "No performance findings.", prDiffContext),
     "",
     "### Correctness / Quality",
-    ...formatFindingBullets(groups.quality, "No quality findings."),
+    ...formatFindingBullets(groups.quality, "No quality findings.", prDiffContext),
     "",
     "### Documentation / Compliance",
-    ...formatFindingBullets(groups.compliance, "No compliance findings."),
-  ].join("\n");
+    ...formatFindingBullets(groups.compliance, "No compliance findings.", prDiffContext),
+  );
+  return lines.join("\n");
 }
 
 function renderEvidenceSummary(
   findings: readonly Finding[],
   postedCommentCount: number,
   skippedUnanchorable: number,
+  prDiffContext: PullRequestDiffContext | undefined,
+  runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
   const lines = [
     "## Why / Evidence / Fix",
     `- Total findings: ${findings.length}`,
     `- Inline comments posted: ${postedCommentCount}`,
-    `- Skipped outside PR diff: ${skippedUnanchorable}`,
   ];
+  if (skippedUnanchorable > 0) {
+    lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
+  }
+  lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
-    lines.push("", "No findings were generated.");
+    lines.push("", "✅ No findings - code looks good!");
     return lines.join("\n");
   }
 
   for (const [index, finding] of findings.slice(0, 6).entries()) {
+    const caption = prDiffContext === undefined
+      ? undefined
+      : findingInlinePostingCaption(finding, prDiffContext);
     lines.push(
       "",
-      `### Finding ${index + 1}: ${finding.title}`,
+      `### Finding ${index + 1}: ${severityEmoji(finding.severity)} ${finding.title}`,
+      ...(caption === undefined ? [] : [`- _${caption}_`]),
       `- Why: ${finding.description}`,
       `- Evidence: ${finding.evidence}`,
       `- Suggested fix: ${suggestFixFromRole(finding.sourceRole)}`,
@@ -953,15 +1831,21 @@ function renderEvidenceSummary(
   return lines.join("\n");
 }
 
-function formatFindingBullets(findings: readonly Finding[], emptyLine: string): readonly string[] {
+function formatFindingBullets(
+  findings: readonly Finding[],
+  emptyLine: string,
+  prDiffContext: PullRequestDiffContext | undefined,
+): readonly string[] {
   if (findings.length === 0) {
-    return [`- ${emptyLine}`];
+    return [`- ✅ ${emptyLine}`];
   }
   return findings.map((finding) => {
     const location = finding.file !== undefined && finding.line !== undefined
       ? ` (${finding.file}:${finding.line})`
       : "";
-    return `- ${finding.title}${location}`;
+    const caption = prDiffContext === undefined ? undefined : findingInlinePostingCaption(finding, prDiffContext);
+    const suffix = caption === undefined ? "" : ` — _${caption}_`;
+    return `- ${severityEmoji(finding.severity)} ${finding.title}${location}${suffix}`;
   });
 }
 
@@ -1076,28 +1960,87 @@ async function ghApi<T>(
   }
 }
 
-async function runGh<T>(args: readonly string[], workspacePath?: string): Promise<T> {
-  const gitAware = await resolveGitAwareCwd(workspacePath);
-  const proc = Bun.spawn({
-    cmd: ["gh", ...args],
-    cwd: gitAware,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+async function runGhGraphql<T>(
+  input: { readonly query: string; readonly variables?: Readonly<Record<string, unknown>> },
+  workspacePath?: string,
+): Promise<T> {
+  const inputPath = join(tmpdir(), `aguil-agents-gh-graphql-${crypto.randomUUID()}.json`);
+  const body =
+    input.variables !== undefined
+      ? { query: input.query, variables: input.variables }
+      : { query: input.query };
+  await writeFile(inputPath, `${JSON.stringify(body)}\n`, "utf8");
+  try {
+    return await runGh<T>(["api", "graphql", "--input", inputPath], workspacePath);
+  } finally {
+    await rm(inputPath, { force: true });
+  }
+}
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    readProcessText(proc.stdout),
-    readProcessText(proc.stderr),
-    proc.exited,
-  ]);
-  if (exitCode !== 0) {
-    throw new Error(`gh ${args.join(" ")} failed: ${stderr.trim() || `exit code ${exitCode}`}`);
+async function runGh<T>(args: readonly string[], workspacePath?: string): Promise<T> {
+  const gitAware = await resolveGhCwd(workspacePath);
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const proc = Bun.spawn({
+      cmd: ["gh", ...args],
+      cwd: gitAware,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readProcessText(proc.stdout),
+      readProcessText(proc.stderr),
+      proc.exited,
+    ]);
+    if (exitCode === 0) {
+      if (stdout.trim().length === 0) {
+        return undefined as T;
+      }
+      return JSON.parse(stdout) as T;
+    }
+
+    const message = stderr.trim() || `exit code ${exitCode}`;
+    const isTransientNetwork =
+      /error connecting to api\.github\.com/i.test(message) ||
+      /\bTLS handshake timeout\b/i.test(message) ||
+      /\btimeout\b/i.test(message) ||
+      /\btemporarily unavailable\b/i.test(message) ||
+      /\bconnection reset\b/i.test(message) ||
+      /\bconnection refused\b/i.test(message) ||
+      /\bEOF\b/i.test(message) ||
+      /\bno such host\b/i.test(message) ||
+      /\bnetwork is unreachable\b/i.test(message);
+    if (!isTransientNetwork || attempt === maxAttempts) {
+      throw new Error(`gh ${args.join(" ")} failed: ${message}`);
+    }
+
+    const backoffMs = 250 * (2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+    await Bun.sleep(backoffMs);
   }
-  if (stdout.trim().length === 0) {
-    return undefined as T;
+
+  throw new Error(`gh ${args.join(" ")} failed: exhausted retries`);
+}
+
+const ghCwdCache = new Map<string, Promise<string>>();
+
+async function resolveGhCwd(workspacePath?: string): Promise<string> {
+  const workspaceCwd = resolveWorkspaceCwd(workspacePath);
+  const cached = ghCwdCache.get(workspaceCwd);
+  if (cached !== undefined) {
+    return cached;
   }
-  return JSON.parse(stdout) as T;
+
+  const pending = (async () => {
+    // `resolveGitAwareCwd()` already handles jj workspaces and colocated repos.
+    // Keeping all `gh` commands scoped to the git-aware root avoids subtle
+    // cwd bugs across different jj/git layouts.
+    return resolveGitAwareCwd(workspacePath);
+  })();
+
+  ghCwdCache.set(workspaceCwd, pending);
+  return pending;
 }
 
 async function resolveRepoNameWithOwnerFromRemote(workspacePath?: string): Promise<string | undefined> {
@@ -1208,7 +2151,9 @@ interface GitHubPullRequestFile {
   readonly patch?: string;
 }
 
-type PullRequestDiffContext = ReadonlyMap<string, ReadonlyMap<number, number>>;
+if (import.meta.main) {
+  process.exitCode = await main();
+}
 
 async function loadPullRequestDiffContext(
   repo: string,
@@ -1232,8 +2177,7 @@ function candidateToComment(
   candidate: PendingReviewComment,
   context: PullRequestDiffContext,
 ): GitHubPendingReviewCommentInput | undefined {
-  const positions = context.get(candidate.path);
-  const position = positions?.get(candidate.line);
+  const position = resolveReviewDiffPosition(candidate.path, candidate.line, context);
   if (position === undefined) {
     return undefined;
   }
