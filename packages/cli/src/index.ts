@@ -5,6 +5,7 @@ import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
 import { access, readFile, rm, writeFile, readdir, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
   if (argv.includes("--help") || argv.length === 0) {
@@ -1071,7 +1072,9 @@ async function suppressFingerprintsFromLocalCache(input: {
   }
 
   const uniqueThreadIds = [...new Set(wantedThreadIds.values())];
-  const response = await runGh<{
+  // `gh api graphql -f ids=[...]` treats the entire bracketed string as one ID; send variables
+  // as JSON via --input instead (matches GitHub's expected { query, variables } shape).
+  const response = await runGhGraphql<{
     readonly data?: {
       readonly nodes?: ReadonlyArray<
         | { readonly id: string; readonly isResolved?: boolean }
@@ -1079,14 +1082,13 @@ async function suppressFingerprintsFromLocalCache(input: {
         | null
       >;
     };
-  }>([
-    "api",
-    "graphql",
-    "-f",
-    `query=query($ids:[ID!]!){nodes(ids:$ids){... on PullRequestReviewThread{id isResolved}}}`,
-    "-f",
-    `ids=${JSON.stringify(uniqueThreadIds)}`,
-  ], input.workspacePath);
+  }>(
+    {
+      query: "query($ids:[ID!]!){nodes(ids:$ids){... on PullRequestReviewThread{id isResolved}}}",
+      variables: { ids: uniqueThreadIds },
+    },
+    input.workspacePath,
+  );
 
   const resolvedThreads = new Set<string>();
   for (const node of response.data?.nodes ?? []) {
@@ -1943,6 +1945,23 @@ async function ghApi<T>(
     if (inputPath !== undefined) {
       await rm(inputPath, { force: true });
     }
+  }
+}
+
+async function runGhGraphql<T>(
+  input: { readonly query: string; readonly variables?: Readonly<Record<string, unknown>> },
+  workspacePath?: string,
+): Promise<T> {
+  const inputPath = join(tmpdir(), `aguil-agents-gh-graphql-${crypto.randomUUID()}.json`);
+  const body =
+    input.variables !== undefined
+      ? { query: input.query, variables: input.variables }
+      : { query: input.query };
+  await writeFile(inputPath, `${JSON.stringify(body)}\n`, "utf8");
+  try {
+    return await runGh<T>(["api", "graphql", "--input", inputPath], workspacePath);
+  } finally {
+    await rm(inputPath, { force: true });
   }
 }
 
