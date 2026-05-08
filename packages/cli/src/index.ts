@@ -120,6 +120,7 @@ Options:
       adapter,
       onEvent: createRunEventLogger(options),
     });
+    let verbosePrDiffContext: PullRequestDiffContext | undefined;
     if (options.verbose) {
       printVerboseFindingSummary(result.findings);
       const summaryStyle = parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
@@ -133,6 +134,7 @@ Options:
           const repo = await getRepoNameWithOwner(workspacePath);
           const loadedDiff = await loadPullRequestDiffContext(repo, reviewPrNumber, workspacePath);
           prDiffContext = loadedDiff;
+          verbosePrDiffContext = loadedDiff;
           warnPrAnchorIssues(result.findings, loadedDiff);
           postedInlineCount = rawCommentCandidates.filter(
             (candidate) => candidateToComment(candidate, loadedDiff) !== undefined,
@@ -196,6 +198,9 @@ Options:
         noConfirm: options.noConfirm,
         replacePendingReview: options.replacePendingReview,
         workspacePath: options.workspace,
+        preloadedPrDiffContext: (options.verbose && reviewPrNumber !== undefined && prNumber !== undefined && prNumber === reviewPrNumber)
+          ? verbosePrDiffContext
+          : undefined,
         runMetadata: result.metadata,
       });
       if (posted.cancelled === true) {
@@ -850,6 +855,7 @@ async function replacePendingPullRequestReview(input: {
   readonly noConfirm: boolean;
   readonly replacePendingReview: boolean;
   readonly workspacePath?: string;
+  readonly preloadedPrDiffContext?: PullRequestDiffContext;
   /** From harness result metadata (result.json) for review coverage in the summary body. */
   readonly runMetadata?: Readonly<Record<string, string>>;
 }): Promise<PendingReviewPosted | PendingReviewCancelled> {
@@ -957,7 +963,7 @@ async function replacePendingPullRequestReview(input: {
   }
 
   const rawComments = findingsToPendingReviewComments(findings);
-  const diffContext = await loadPullRequestDiffContext(repo, prNumber, workspacePath);
+  const diffContext = input.preloadedPrDiffContext ?? await loadPullRequestDiffContext(repo, prNumber, workspacePath);
   warnPrAnchorIssues(findings, diffContext);
   const comments = rawComments
     .map((candidate) => candidateToComment(candidate, diffContext))
@@ -996,16 +1002,18 @@ async function replacePendingPullRequestReview(input: {
   // Best-effort cache update: map fingerprints from posted comments to thread IDs.
   // This lets future replacement checks query a small set of known threads rather
   // than scanning all PR threads.
-  try {
-    await updateLocalFindingThreadCacheAfterPost({
-      repo,
-      prNumber,
-      reviewId: created.id,
-      workspacePath,
-      allowedAuthors: new Set([login]),
-    });
-  } catch {
-    // Best-effort only.
+  if (pendingMine.length > 0) {
+    try {
+      await updateLocalFindingThreadCacheAfterPost({
+        repo,
+        prNumber,
+        reviewId: created.id,
+        workspacePath,
+        allowedAuthors: new Set([login]),
+      });
+    } catch {
+      // Best-effort only.
+    }
   }
 
   return {

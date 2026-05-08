@@ -438,18 +438,15 @@ export async function collectReviewDiff(
         return fromLocal;
       }
     }
-
-    const fallback = await collectReviewDiffFallback(
-      workspacePath,
-      commandRunner,
-      pullRequestNumber,
-      pullRequest?.baseRefName,
-      remoteScope,
-      requestedReviewPr,
-    );
-    if (fallback !== undefined) {
-      return fallback;
-    }
+    // For explicit PR reviews, avoid synthesizing a diff from local HEAD/@ when the
+    // PR head commit isn't available locally. That can accidentally include
+    // unpublished local changes in the review bundle.
+    return {
+      diff: "",
+      baseRef: undefined,
+      strategy: "pr_diff_unavailable",
+      reviewPr: requestedReviewPr,
+    };
   }
 
   const pullRequest = await discoverPullRequest(workspacePath, commandRunner, pullRequestNumber);
