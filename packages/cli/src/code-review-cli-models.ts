@@ -1,4 +1,4 @@
-/** Options for one `agents run code-review` invocation after config merge. */
+/** Options for one `agents code-review` invocation after config merge. */
 export interface CliOptions {
   readonly workspace?: string;
   readonly scratchpad?: string;

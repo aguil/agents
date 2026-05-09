@@ -15,12 +15,12 @@ The current implementation includes:
 
 ```bash
 # Deterministic smoke test (no provider/API calls)
-bun run agents run code-review --adapter fake
+bun run agents code-review --adapter fake
 
 # Real review runs
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
-bun run agents run code-review --adapter claude --model claude-sonnet-4
-bun run agents run code-review --adapter cursor --model sonnet-4
+bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex
+bun run agents code-review --adapter claude --model claude-sonnet-4
+bun run agents code-review --adapter cursor --model sonnet-4
 ```
 
 ## Adapter Examples
@@ -28,10 +28,10 @@ bun run agents run code-review --adapter cursor --model sonnet-4
 ### OpenCode
 
 ```bash
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --agent code-review
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --no-deterministic
+bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex
+bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --variant minimal
+bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --agent code-review
+bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --no-deterministic
 ```
 
 Common model IDs:
@@ -46,10 +46,10 @@ Discover models with `opencode models` (or `opencode models <provider>`).
 ### Claude
 
 ```bash
-bun run agents run code-review --adapter claude --model claude-sonnet-4
-bun run agents run code-review --adapter claude --model claude-opus-4
-bun run agents run code-review --adapter claude --model claude-haiku-4
-bun run agents run code-review --adapter claude --claude-args "-p,{prompt},--model,claude-sonnet-4"
+bun run agents code-review --adapter claude --model claude-sonnet-4
+bun run agents code-review --adapter claude --model claude-opus-4
+bun run agents code-review --adapter claude --model claude-haiku-4
+bun run agents code-review --adapter claude --claude-args "-p,{prompt},--model,claude-sonnet-4"
 ```
 
 Common model IDs:
@@ -61,10 +61,10 @@ Common model IDs:
 ### Cursor
 
 ```bash
-bun run agents run code-review --adapter cursor --model sonnet-4
-bun run agents run code-review --adapter cursor --model sonnet-4-thinking --cursor-mode plan
-bun run agents run code-review --adapter cursor --model gpt-5 --cursor "$(which agent)"
-bun run agents run code-review --adapter cursor --cursor-args "--print,--output-format,stream-json,--workspace,{workspace},--trust,--force,{prompt}"
+bun run agents code-review --adapter cursor --model sonnet-4
+bun run agents code-review --adapter cursor --model sonnet-4-thinking --cursor-mode plan
+bun run agents code-review --adapter cursor --model gpt-5 --cursor "$(which agent)"
+bun run agents code-review --adapter cursor --cursor-args "--print,--output-format,stream-json,--workspace,{workspace},--trust,--force,{prompt}"
 ```
 
 Common model IDs:
@@ -79,7 +79,7 @@ Discover models with `agent models`.
 ### Fake
 
 ```bash
-bun run agents run code-review --adapter fake
+bun run agents code-review --adapter fake
 ```
 
 ## Choosing an Adapter
@@ -93,22 +93,22 @@ bun run agents run code-review --adapter fake
 
 ```bash
 # Local debugging and adapter smoke tests
-bun run agents run code-review --adapter cursor --model sonnet-4 --dry-run --log all
+bun run agents code-review --adapter cursor --model sonnet-4 --dry-run --log all
 
 # Review context from a specific PR (including merged PRs)
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pr 42
+bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --pr 42
 
 # Create (or replace) pending review comments on the PR
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pr 42 --pending-review --no-confirm
+bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --pr 42 --pending-review --no-confirm
 
 # Replay from captured context for consistency checks
-bun run agents run code-review --adapter claude --model claude-sonnet-4 --context-bundle .review-agent/runs/<run-id>/context/bundle.json
+bun run agents code-review --adapter claude --model claude-sonnet-4 --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 
 # Multi-pass consensus run
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
+bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 
 # Publish existing findings without re-running models
-bun run agents run code-review post --result .review-agent/runs/<run-id>/result.json
+bun run agents code-review post --result .review-agent/runs/<run-id>/result.json
 ```
 
 ### Logging (`--log`)
@@ -119,7 +119,7 @@ bun run agents run code-review post --result .review-agent/runs/<run-id>/result.
 - `all`: summary and commands together.
 
 ```bash
-bun run agents run code-review --adapter fake --dry-run --log summary
+bun run agents code-review --adapter fake --dry-run --log summary
 ```
 
 ## Configuration files and presets
@@ -155,7 +155,7 @@ Example **`.review-agent/config.json`**:
 ```
 
 ```bash
-bun run agents run code-review --preset ci
+bun run agents code-review --preset ci
 ```
 
 ### Environment (`AGENTS_CODE_REVIEW_*`)
@@ -183,7 +183,7 @@ bun run agents run code-review --preset ci
 | `AGENTS_CODE_REVIEW_POST_PR` | `--post-pr` |
 | `AGENTS_CODE_REVIEW_REVIEW_SUMMARY` | `--review-summary` |
 | `AGENTS_CODE_REVIEW_DRY_RUN` | `--dry-run` (`true`/`false`/`1`/`0`/`yes`/`no`) |
-| `AGENTS_CODE_REVIEW_POST_ONLY` | Enables post-only mode on the default `run code-review` invocation (omit when using `run code-review post`) |
+| `AGENTS_CODE_REVIEW_POST_ONLY` | Enables post-only mode on the default `code-review` command (omit when using `code-review post`) |
 | `AGENTS_CODE_REVIEW_NO_CONFIRM` | `--no-confirm` |
 | `AGENTS_CODE_REVIEW_REPLACE_PENDING_REVIEW` | `--replace-pending-review` |
 | `AGENTS_CODE_REVIEW_NO_DETERMINISTIC` | `--no-deterministic` |
@@ -205,7 +205,7 @@ cat .review-agent/runs/<run-id>/roles/<role>/stderr.log
 cat .review-agent/runs/<run-id>/roles/<role>/stdout.log
 
 # Re-run with command/event visibility
-bun run agents run code-review --adapter cursor --model sonnet-4 --dry-run --log all
+bun run agents code-review --adapter cursor --model sonnet-4 --dry-run --log all
 ```
 
 For Cursor custom templates, keep `--trust` in `--cursor-args` for non-interactive runs.
@@ -239,22 +239,22 @@ Pending review mode:
   - In interactive runs, the CLI prompts before replacing it.
   - In non-interactive runs, pass `--replace-pending-review` to opt in to replacement.
 - Use `--pr <number>` to collect review context/diff from that PR (including merged PRs) and, with `--pending-review`, to post the pending review to the same PR by default. Omit `--pr` to auto-discover the current branch PR for posting only. PR lookups use the repo from `--workspace` and auto-resolve jj workspace pointers to canonical colocated repos for `git`/`gh` commands.
-- Use `--post-pr <number>` to post to a different PR than `--pr` (rare); with **`run code-review post`** (or `AGENTS_CODE_REVIEW_POST_ONLY` on the default command), **`--post-pr`** overrides **`--pr`** when both are set.
+- Use `--post-pr <number>` to post to a different PR than `--pr` (rare); with **`agents code-review post`** (or `AGENTS_CODE_REVIEW_POST_ONLY` on the default command), **`--post-pr`** overrides **`--pr`** when both are set.
 - `--no-confirm` skips interactive stale-review confirmation prompts (recommended for CI).
 - Use `--review-summary <triage|impact|evidence>` to choose the review body format (`impact` is the default).
 - Only anchorable findings (`file` + `line`) are posted as inline comments.
 - Before posting, the CLI checks if the PR head moved since context collection; stale postings require confirmation unless `--no-confirm` is set.
 
-## Post command (`run code-review post`)
+## Post command (`agents code-review post`)
 
-- **`bun run agents run code-review post`** publishes findings from an existing **`result.json`** without rerunning the review model.
+- **`bun run agents code-review post`** publishes findings from an existing **`result.json`** without rerunning the review model.
 - By default it auto-discovers the latest **`.review-agent/runs/<run-id>/result.json`** in the workspace.
 - Pass **`--result <path>`** to choose a specific result artifact.
 - Post requires **`pr_number`** and **`pr_reviewed_head_sha`** metadata in the stored result (produce them by running the review with **`--pr`** on a PR-backed context). Override the posting PR with **`--pr`** or **`--post-pr`**.
-- **`run code-review post`** keeps reviews pending (unsubmitted), same as **`--pending-review`** on a full run.
+- **`agents code-review post`** keeps reviews pending (unsubmitted), same as **`--pending-review`** on a full run.
 - Post does not mutate the selected **`result.json`**.
 
-Alternatively, **`AGENTS_CODE_REVIEW_POST_ONLY`** runs the default **`run code-review`** invocation in post-only mode (without the **`post`** subcommand).
+Alternatively, **`AGENTS_CODE_REVIEW_POST_ONLY`** runs the default **`agents code-review`** command in post-only mode (without the **`post`** subcommand).
 
 ## Consistency and replay mode:
 
@@ -279,7 +279,7 @@ Deterministic mode:
 - `triage`: use when the author needs immediate prioritization. This format emphasizes near-term actions with "Fix Now" and "Follow-up" sections so work can be sequenced quickly.
 
   ```bash
-  bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary triage
+  bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary triage
   ```
 
   ```markdown
@@ -291,7 +291,7 @@ Deterministic mode:
 - `impact` (default): use when the PR crosses subsystem boundaries or multiple reviewers. Grouping by impact area (security, runtime/performance, correctness/quality, docs/compliance) helps route issues to the right owners.
 
   ```bash
-  bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary impact
+  bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary impact
   ```
 
   ```markdown
@@ -305,7 +305,7 @@ Deterministic mode:
 - `evidence`: use when the author needs deeper rationale before acting. The "Why / Evidence / Fix" format is best for contentious findings, subtle behavior changes, or fixes that require tradeoff discussion.
 
   ```bash
-  bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary evidence
+  bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --pending-review --pr 1 --review-summary evidence
   ```
 
   ```markdown

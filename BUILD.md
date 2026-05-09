@@ -18,13 +18,13 @@ This runs three steps:
 
 ```bash
 ./dist/agents --help
-./dist/agents run code-review --adapter fake
+./dist/agents code-review --adapter fake
 ```
 
 You can also invoke it from another repository:
 
 ```bash
-/path/to/aguil/agents/dist/agents run code-review --workspace /path/to/work/repo --adapter opencode --model opencode/gpt-5.3-codex
+/path/to/aguil/agents/dist/agents code-review --workspace /path/to/work/repo --adapter opencode --model opencode/gpt-5.3-codex
 ```
 
 ## Notes

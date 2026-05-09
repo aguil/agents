@@ -99,6 +99,7 @@ test("peelCodeReviewSubcommand rejects unknown leading token", () => {
   if (!result.ok) {
     expect(result.error).toContain("publish");
     expect(result.error).toContain("post");
+    expect(result.error).toContain("code-review");
   }
 });
 

@@ -34,7 +34,7 @@ const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
 };
 
 /**
- * `argvTail` is everything after `agents run code-review`.
+ * `argvTail` is everything after `agents code-review`.
  * Leading token may be subcommand `post`, or options when the slice starts with `-`.
  */
 export function peelCodeReviewSubcommand(argvTail: readonly string[]):
@@ -50,7 +50,7 @@ export function peelCodeReviewSubcommand(argvTail: readonly string[]):
   return {
     ok: false,
     error:
-      `Unknown 'run code-review' subcommand '${head}'. Expected 'post' or options beginning with '-'.`,
+      `Unknown 'code-review' subcommand '${head}'. Expected 'post' or options beginning with '-'.`,
   };
 }
 

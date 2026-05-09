@@ -22,10 +22,10 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     console.log(`Usage: agents <command> [options]
 
 Commands:
-  run code-review [options]           Run reviewers, collect context, write report artifacts
-  run code-review post [options]     Publish pending PR review from a stored result (--result/--pr/…)
+  code-review [options]           Run reviewers, collect context, write report artifacts
+  code-review post [options]       Publish pending PR review from a stored result (--result/--pr/…)
 
-Options (both commands accept shared flags below; POST ignores adapters/models/consensus/context):
+Options (both accept shared flags below; post ignores adapters/models/consensus/context):
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
   --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
@@ -49,7 +49,7 @@ Options (both commands accept shared flags below; POST ignores adapters/models/c
   --no-confirm           Skip interactive confirmation prompts
   --replace-pending-review Replace an existing pending PR review (requires opt-in)
   --pr <number>          PR for review context/diff collection; default posting PR with --pending-review
-  --post-pr <number>     Override posting PR with --pending-review or run code-review post (rare)
+  --post-pr <number>     Override posting PR with --pending-review or code-review post (rare)
   --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
   --pure                 Run opencode without external plugins
   --print-logs           Ask opencode to print logs to stderr
@@ -69,8 +69,8 @@ Configuration (later values override earlier ones: user file < repo file < prese
     return 0;
   }
 
-  if (argv[0] === "run" && argv[1] === "code-review") {
-    const peeled = peelCodeReviewSubcommand(argv.slice(2));
+  if (argv[0] === "code-review") {
+    const peeled = peelCodeReviewSubcommand(argv.slice(1));
     if (!peeled.ok) {
       console.error(peeled.error);
       return 1;
@@ -273,6 +273,10 @@ Configuration (later values override earlier ones: user file < repo file < prese
     return result.status === "error" ? 1 : 0;
   }
 
+  if (argv[0] === "run" && argv[1] === "code-review") {
+    console.error('Use `agents code-review` (the "run" command was removed).');
+    return 1;
+  }
   console.error(`Unknown command: ${argv[0]}`);
   return 1;
 }
@@ -602,7 +606,7 @@ interface StoredReviewResult {
 
 async function runPostOnly(options: CliOptions): Promise<number> {
   if (options.pendingReview) {
-    console.warn("Ignoring --pending-review because run code-review post already publishes a pending review.");
+    console.warn("Ignoring --pending-review because code-review post already publishes a pending review.");
   }
   if (options.postPr !== undefined && parsePrNumber(options.postPr) === undefined) {
     console.error(`Invalid --post-pr value: ${options.postPr}`);
