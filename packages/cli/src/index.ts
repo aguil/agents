@@ -1685,15 +1685,16 @@ function renderImpactSummary(
     return lines.join("\n");
   }
 
-  const groups: Record<Finding["sourceRole"], Finding[]> = {
+  const groups: Record<"security" | "performance" | "quality" | "compliance" | "other", Finding[]> = {
     security: [],
     performance: [],
     quality: [],
     compliance: [],
+    other: [],
   };
 
   for (const finding of findings) {
-    groups[finding.sourceRole].push(finding);
+    groups[impactBucketForSourceRole(finding.sourceRole)].push(finding);
   }
 
   lines.push(
@@ -1710,7 +1711,27 @@ function renderImpactSummary(
     "### Documentation / Compliance",
     ...formatFindingBullets(groups.compliance, "No compliance findings.", prDiffContext),
   );
+
+  if (groups.other.length > 0) {
+    lines.push(
+      "",
+      "### Uncategorized findings",
+      "- _These findings omit `sourceRole` or use an unexpected reviewer label._",
+      ...formatFindingBullets(groups.other, "No uncategorized findings.", prDiffContext),
+    );
+  }
+
   return lines.join("\n");
+}
+
+function impactBucketForSourceRole(
+  role: Finding["sourceRole"] | undefined,
+): "security" | "performance" | "quality" | "compliance" | "other" {
+  const trimmed = typeof role === "string" ? role.trim() : "";
+  if (trimmed === "security" || trimmed === "performance" || trimmed === "quality" || trimmed === "compliance") {
+    return trimmed;
+  }
+  return "other";
 }
 
 function renderEvidenceSummary(

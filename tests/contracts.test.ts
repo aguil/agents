@@ -814,6 +814,31 @@ test("impact summary review coverage lists timed-out scheduled role", () => {
   expect(body).toContain("timed out");
 });
 
+test("impact summary buckets unknown or empty sourceRole without throwing", () => {
+  const base = {
+    id: "f-bad-role",
+    severity: "warning" as const,
+    title: "Role plumbing",
+    description: "d",
+    evidence: "e",
+    validation: { status: "verified" as const, details: "ok" },
+    file: "x.ts",
+    line: 1,
+  };
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [
+      { ...base, id: "f-empty", sourceRole: "" },
+      { ...base, id: "f-weird", sourceRole: "  Performance  " },
+    ],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("### Uncategorized findings");
+  expect(body).toContain("Role plumbing");
+});
+
 test("detects file:line anchors outside the PR diff map", () => {
   const finding: Finding = {
     id: "f1",
