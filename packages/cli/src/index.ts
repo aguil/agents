@@ -1,5 +1,12 @@
-import { createCodeReviewAdapter, runCodeReview } from "@aguil/agents-code-review";
-import type { CodeReviewAdapterName } from "@aguil/agents-code-review";
+import {
+  CODE_REVIEW_ROLE_IDS,
+  createCodeReviewAdapter,
+  expectedRolesForTriageTier,
+  parseCodeReviewRunMetadata,
+  roleReviewSectionLabel,
+  runCodeReview,
+  type CodeReviewAdapterName,
+} from "@aguil/agents-code-review";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
@@ -1551,53 +1558,6 @@ export function buildPendingReviewSummaryBody(input: {
   }
 }
 
-const FULL_CODE_REVIEW_ROLE_IDS: readonly string[] = [
-  "security",
-  "performance",
-  "quality",
-  "compliance",
-];
-
-function parseMetadataRolesList(raw: string | undefined): readonly string[] {
-  if (raw === undefined || raw.trim().length === 0) {
-    return [];
-  }
-  return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
-function parseTriageTierLabel(raw: string | undefined): "trivial" | "lite" | "full" | undefined {
-  if (raw === "trivial" || raw === "lite" || raw === "full") {
-    return raw;
-  }
-  return undefined;
-}
-
-function expectedRolesForTriageTier(tier: "trivial" | "lite" | "full"): readonly string[] {
-  if (tier === "trivial") {
-    return ["quality"];
-  }
-  if (tier === "lite") {
-    return ["security", "quality", "compliance"];
-  }
-  return [...FULL_CODE_REVIEW_ROLE_IDS];
-}
-
-function roleReviewSectionLabel(roleId: string): string {
-  if (roleId === "security") {
-    return "Security";
-  }
-  if (roleId === "performance") {
-    return "Runtime / Performance";
-  }
-  if (roleId === "quality") {
-    return "Correctness / Quality";
-  }
-  if (roleId === "compliance") {
-    return "Documentation / Compliance";
-  }
-  return roleId;
-}
-
 function triageTierRationale(tier: "trivial" | "lite" | "full"): string {
   if (tier === "trivial") {
     return "Triage tier **trivial**: only correctness/quality review is scheduled (small or low-risk change per context bundle).";
@@ -1614,35 +1574,32 @@ function triageTierRationale(tier: "trivial" | "lite" | "full"): string {
 export function formatReviewCoverageSectionLines(
   runMetadata: Readonly<Record<string, string>> | undefined,
 ): readonly string[] {
-  if (runMetadata === undefined) {
-    return [];
-  }
-
-  const triageRaw = runMetadata.triage?.trim();
-  const tier = parseTriageTierLabel(triageRaw);
+  const parsed = parseCodeReviewRunMetadata(runMetadata);
+  const tier = parsed.triageTier;
+  const triageRaw = parsed.triageRaw;
   const expected = tier === undefined ? undefined : new Set(expectedRolesForTriageTier(tier));
-  const skippedByTriage = FULL_CODE_REVIEW_ROLE_IDS.filter(
+  const skippedByTriage = CODE_REVIEW_ROLE_IDS.filter(
     (id) => expected !== undefined && !expected.has(id),
   );
 
-  const completed = parseMetadataRolesList(runMetadata.completed_roles);
-  const timedOutRaw = parseMetadataRolesList(runMetadata.timed_out_roles);
-  const failedRaw = parseMetadataRolesList(runMetadata.failed_roles);
+  const completed = parsed.completedRoles;
+  const timedOutRolesRaw = parsed.timedOutRoles;
+  const failedRolesRaw = parsed.failedRoles;
 
   const skipSet = new Set(skippedByTriage);
   const inScheduledTier = (roleId: string): boolean =>
     tier === undefined || expected?.has(roleId) === true;
 
-  const timedOut = timedOutRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
-  const failed = failedRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
+  const timedOut = timedOutRolesRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
+  const failed = failedRolesRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
 
   const hasOutcomeDetail =
     completed.length > 0 || timedOut.length > 0 || failed.length > 0;
   const hasSignal =
     (triageRaw !== undefined && triageRaw.length > 0)
     || skippedByTriage.length > 0
-    || timedOutRaw.length > 0
-    || failedRaw.length > 0
+    || timedOutRolesRaw.length > 0
+    || failedRolesRaw.length > 0
     || completed.length > 0;
 
   if (!hasSignal) {

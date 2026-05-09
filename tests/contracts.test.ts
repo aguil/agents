@@ -5,8 +5,11 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CODE_REVIEW_ROLE_IDS,
   createFakeCodeReviewAdapter,
   definitionForTriage,
+  expectedRolesForTriageTier,
+  roleReviewSectionLabel,
   runCodeReview,
 } from "@aguil/agents-code-review";
 import {
@@ -51,6 +54,7 @@ import {
   findingHasNonPostablePrLineAnchor,
   findingUsesFileNotInPrChangedFiles,
   findingsToPendingReviewComments,
+  formatReviewCoverageSectionLines,
   loadStoredReviewResult,
   parseReviewSummaryStyle,
 } from "../packages/cli/src/index";
@@ -1171,13 +1175,30 @@ test("reuses claude-style prompt guidance for cursor", () => {
   expect(prompt).toContain("Emit each finding as a single JSON line");
 });
 
-test("uses fewer reviewer roles for lower-risk triage tiers", () => {
-  expect(definitionForTriage("trivial").roles.map((role) => role.id)).toEqual(["quality"]);
-  expect(definitionForTriage("lite").roles.map((role) => role.id)).toEqual([
-    "security",
-    "quality",
-    "compliance",
-  ]);
+test("CLI review coverage matches harness scheduled roles for each triage tier", () => {
+  const tiers = ["trivial", "lite", "full"] as const;
+  for (const tier of tiers) {
+    expect(definitionForTriage(tier).roles.map((role) => role.id)).toEqual([
+      ...expectedRolesForTriageTier(tier),
+    ]);
+    const scheduled = new Set(expectedRolesForTriageTier(tier));
+    const lines = formatReviewCoverageSectionLines({
+      triage: tier,
+      completed_roles: [...scheduled].join(","),
+    });
+    for (const roleId of CODE_REVIEW_ROLE_IDS) {
+      const label = roleReviewSectionLabel(roleId);
+      const skipLine = lines.find((line) =>
+        line.includes(`**${label}:**`) &&
+        line.includes("not scheduled"),
+      );
+      if (scheduled.has(roleId)) {
+        expect(skipLine).toBeUndefined();
+      } else {
+        expect(skipLine).toBeDefined();
+      }
+    }
+  }
 });
 
 test("collects fake agent findings through the adapter contract", async () => {

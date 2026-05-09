@@ -33,6 +33,7 @@ import {
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import { EMBEDDED_PROMPTS } from "./embedded-prompts";
+import { expectedRolesForTriageTier, parseMetadataRolesList } from "./review-contract";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -277,7 +278,7 @@ function joinUniqueMetadataRoleList(
   const values = new Set<string>();
   for (const result of passResults) {
     const raw = result.metadata?.[key] ?? "";
-    for (const role of raw.split(",").map((item) => item.trim()).filter(Boolean)) {
+    for (const role of parseMetadataRolesList(raw)) {
       values.add(role);
     }
   }
@@ -358,12 +359,7 @@ function definitionForTriageWithCommands(
   triage: ReviewTriageTier,
   defaultAllowedCommands: readonly string[],
 ): HarnessDefinition {
-  const roleIdsByTriage: Record<ReviewTriageTier, readonly string[]> = {
-    trivial: ["quality"],
-    lite: ["security", "quality", "compliance"],
-    full: codeReviewHarnessDefinition.roles.map((role) => role.id),
-  };
-  const roleIds = new Set(roleIdsByTriage[triage]);
+  const roleIds = new Set(expectedRolesForTriageTier(triage));
   return {
     ...codeReviewHarnessDefinition,
     defaultAllowedCommands,
@@ -479,3 +475,14 @@ function normalizeConsensusRuns(value: number | undefined): number {
   }
   return value;
 }
+
+export type { CodeReviewRoleId, CodeReviewRunMetadata, RunMetadataSchema } from "./review-contract";
+export {
+  CODE_REVIEW_ROLE_IDS,
+  CODE_REVIEW_RUN_METADATA_KEYS,
+  expectedRolesForTriageTier,
+  parseCodeReviewRunMetadata,
+  parseMetadataRolesList,
+  parseTriageTierFromRunMetadata,
+  roleReviewSectionLabel,
+} from "./review-contract";
