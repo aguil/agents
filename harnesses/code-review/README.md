@@ -108,7 +108,7 @@ bun run agents run code-review --adapter claude --model claude-sonnet-4 --contex
 bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 
 # Publish existing findings without re-running models
-bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/result.json
+bun run agents run code-review post --result .review-agent/runs/<run-id>/result.json
 ```
 
 ### Logging (`--log`)
@@ -183,7 +183,7 @@ bun run agents run code-review --preset ci
 | `AGENTS_CODE_REVIEW_POST_PR` | `--post-pr` |
 | `AGENTS_CODE_REVIEW_REVIEW_SUMMARY` | `--review-summary` |
 | `AGENTS_CODE_REVIEW_DRY_RUN` | `--dry-run` (`true`/`false`/`1`/`0`/`yes`/`no`) |
-| `AGENTS_CODE_REVIEW_POST_ONLY` | `--post-only` |
+| `AGENTS_CODE_REVIEW_POST_ONLY` | Enables post-only mode on the default `run code-review` invocation (omit when using `run code-review post`) |
 | `AGENTS_CODE_REVIEW_NO_CONFIRM` | `--no-confirm` |
 | `AGENTS_CODE_REVIEW_REPLACE_PENDING_REVIEW` | `--replace-pending-review` |
 | `AGENTS_CODE_REVIEW_NO_DETERMINISTIC` | `--no-deterministic` |
@@ -239,22 +239,24 @@ Pending review mode:
   - In interactive runs, the CLI prompts before replacing it.
   - In non-interactive runs, pass `--replace-pending-review` to opt in to replacement.
 - Use `--pr <number>` to collect review context/diff from that PR (including merged PRs) and, with `--pending-review`, to post the pending review to the same PR by default. Omit `--pr` to auto-discover the current branch PR for posting only. PR lookups use the repo from `--workspace` and auto-resolve jj workspace pointers to canonical colocated repos for `git`/`gh` commands.
-- Use `--post-pr <number>` to post to a different PR than `--pr` (rare); with `--post-only`, `--post-pr` overrides `--pr` when both are set.
+- Use `--post-pr <number>` to post to a different PR than `--pr` (rare); with **`run code-review post`** (or `AGENTS_CODE_REVIEW_POST_ONLY` on the default command), **`--post-pr`** overrides **`--pr`** when both are set.
 - `--no-confirm` skips interactive stale-review confirmation prompts (recommended for CI).
 - Use `--review-summary <triage|impact|evidence>` to choose the review body format (`impact` is the default).
 - Only anchorable findings (`file` + `line`) are posted as inline comments.
 - Before posting, the CLI checks if the PR head moved since context collection; stale postings require confirmation unless `--no-confirm` is set.
 
-Post-only mode:
+## Post command (`run code-review post`)
 
-- `--post-only` publishes findings from an existing `result.json` without rerunning the review model.
-- By default it auto-discovers the latest `.review-agent/runs/<run-id>/result.json` in the workspace.
-- Use `--result <path>` to choose a specific result artifact.
-- Post-only requires `pr_number` and `pr_reviewed_head_sha` metadata in the stored result (produce them by running the review with `--pr` on a PR-backed context). Override the posting PR with `--pr` or `--post-pr`.
-- Post-only keeps reviews pending (unsubmitted) exactly like `--pending-review`.
-- Post-only does not mutate the selected `result.json`.
+- **`bun run agents run code-review post`** publishes findings from an existing **`result.json`** without rerunning the review model.
+- By default it auto-discovers the latest **`.review-agent/runs/<run-id>/result.json`** in the workspace.
+- Pass **`--result <path>`** to choose a specific result artifact.
+- Post requires **`pr_number`** and **`pr_reviewed_head_sha`** metadata in the stored result (produce them by running the review with **`--pr`** on a PR-backed context). Override the posting PR with **`--pr`** or **`--post-pr`**.
+- **`run code-review post`** keeps reviews pending (unsubmitted), same as **`--pending-review`** on a full run.
+- Post does not mutate the selected **`result.json`**.
 
-Consistency and replay mode:
+Alternatively, **`AGENTS_CODE_REVIEW_POST_ONLY`** runs the default **`run code-review`** invocation in post-only mode (without the **`post`** subcommand).
+
+## Consistency and replay mode:
 
 - `--context-bundle <path>` reuses a prior context bundle instead of collecting live PR/diff context again.
 - Replay mode is useful for comparing model behavior with stable input.

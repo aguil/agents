@@ -9,7 +9,7 @@ import {
 } from "@aguil/agents-code-review";
 import type { CliOptions } from "./code-review-cli-models";
 import { resolveCodeReviewCliOptions } from "./code-review-config";
-import { parseCodeReviewArgv } from "./parse-code-review-argv";
+import { parseCodeReviewArgv, peelCodeReviewSubcommand } from "./parse-code-review-argv";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
@@ -22,9 +22,10 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     console.log(`Usage: agents <command> [options]
 
 Commands:
-  run code-review        Run the code-review harness
+  run code-review [options]           Run reviewers, collect context, write report artifacts
+  run code-review post [options]     Publish pending PR review from a stored result (--result/--pr/…)
 
-Options:
+Options (both commands accept shared flags below; POST ignores adapters/models/consensus/context):
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
   --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
@@ -44,12 +45,11 @@ Options:
   --no-deterministic     Disable deterministic adapter defaults
   --strict               Fail run on any role error or timeout
   --pending-review       Create an unsubmitted GitHub PR review
-  --post-only            Post findings from an existing run result
-  --result <path>        Result JSON path (auto-discovers latest by default)
+  --result <path>        Result JSON path (auto-discovers latest for 'post'; optional otherwise)
   --no-confirm           Skip interactive confirmation prompts
   --replace-pending-review Replace an existing pending PR review (requires opt-in)
   --pr <number>          PR for review context/diff collection; default posting PR with --pending-review
-  --post-pr <number>     Override posting PR with --pending-review or --post-only (rare)
+  --post-pr <number>     Override posting PR with --pending-review or run code-review post (rare)
   --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
   --pure                 Run opencode without external plugins
   --print-logs           Ask opencode to print logs to stderr
@@ -70,14 +70,22 @@ Configuration (later values override earlier ones: user file < repo file < prese
   }
 
   if (argv[0] === "run" && argv[1] === "code-review") {
-    const parsed = parseCodeReviewArgv(argv.slice(2));
+    const peeled = peelCodeReviewSubcommand(argv.slice(2));
+    if (!peeled.ok) {
+      console.error(peeled.error);
+      return 1;
+    }
+    const parsed = parseCodeReviewArgv(peeled.optionArgv);
     const workspaceForConfig = resolve(parsed.options.workspace ?? process.cwd());
     const resolvedCli = await resolveCodeReviewCliOptions(workspaceForConfig, parsed);
     if (!resolvedCli.ok) {
       console.error(resolvedCli.error);
       return 1;
     }
-    const options = resolvedCli.options;
+    const options: CliOptions = {
+      ...resolvedCli.options,
+      postOnly: peeled.postSubcommand || resolvedCli.options.postOnly,
+    };
 
     const logLevelResolved = parseCliLogLevel(options.log ?? "none");
     if (logLevelResolved === undefined) {
@@ -594,7 +602,7 @@ interface StoredReviewResult {
 
 async function runPostOnly(options: CliOptions): Promise<number> {
   if (options.pendingReview) {
-    console.warn("Ignoring --pending-review because --post-only already publishes a pending review.");
+    console.warn("Ignoring --pending-review because run code-review post already publishes a pending review.");
   }
   if (options.postPr !== undefined && parsePrNumber(options.postPr) === undefined) {
     console.error(`Invalid --post-pr value: ${options.postPr}`);

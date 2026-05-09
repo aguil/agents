@@ -65,7 +65,47 @@ import {
   normalizeAdapterArgsTemplateField,
   resolveCodeReviewCliOptions,
 } from "../packages/cli/src/code-review-config";
-import { parseCodeReviewArgv } from "../packages/cli/src/parse-code-review-argv";
+import { parseCodeReviewArgv, peelCodeReviewSubcommand } from "../packages/cli/src/parse-code-review-argv";
+
+test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => {
+  expect(peelCodeReviewSubcommand([])).toEqual({
+    ok: true,
+    postSubcommand: false,
+    optionArgv: [],
+  });
+  expect(peelCodeReviewSubcommand(["--dry-run"])).toEqual({
+    ok: true,
+    postSubcommand: false,
+    optionArgv: ["--dry-run"],
+  });
+});
+
+test("peelCodeReviewSubcommand accepts post prefix", () => {
+  expect(peelCodeReviewSubcommand(["post"])).toEqual({
+    ok: true,
+    postSubcommand: true,
+    optionArgv: [],
+  });
+  expect(peelCodeReviewSubcommand(["post", "--result", "./r.json"])).toEqual({
+    ok: true,
+    postSubcommand: true,
+    optionArgv: ["--result", "./r.json"],
+  });
+});
+
+test("peelCodeReviewSubcommand rejects unknown leading token", () => {
+  const result = peelCodeReviewSubcommand(["publish"]);
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.error).toContain("publish");
+    expect(result.error).toContain("post");
+  }
+});
+
+test("parseCodeReviewArgv never enables postOnly from CLI flags", () => {
+  expect(parseCodeReviewArgv([]).options.postOnly).toBe(false);
+  expect(parseCodeReviewArgv(["--dry-run"]).options.postOnly).toBe(false);
+});
 
 test("serializes agent events as JSONL", () => {
   const event: AgentEvent = {

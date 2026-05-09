@@ -24,7 +24,6 @@ const STRING_OPTION_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
 
 const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   "dry-run": "dryRun",
-  "post-only": "postOnly",
   "no-confirm": "noConfirm",
   "replace-pending-review": "replacePendingReview",
   "no-deterministic": "noDeterministic",
@@ -34,7 +33,28 @@ const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   "print-logs": "printLogs",
 };
 
-/** Parse argv after `run code-review`. */
+/**
+ * `argvTail` is everything after `agents run code-review`.
+ * Leading token may be subcommand `post`, or options when the slice starts with `-`.
+ */
+export function peelCodeReviewSubcommand(argvTail: readonly string[]):
+  | { readonly ok: true; readonly postSubcommand: boolean; readonly optionArgv: readonly string[] }
+  | { readonly ok: false; readonly error: string } {
+  const head = argvTail[0];
+  if (head === undefined || head.startsWith("-")) {
+    return { ok: true, postSubcommand: false, optionArgv: argvTail };
+  }
+  if (head === "post") {
+    return { ok: true, postSubcommand: true, optionArgv: argvTail.slice(1) };
+  }
+  return {
+    ok: false,
+    error:
+      `Unknown 'run code-review' subcommand '${head}'. Expected 'post' or options beginning with '-'.`,
+  };
+}
+
+/** Parse argv after optional `post` peel (same slice `optionArgv`). */
 export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewArgv {
   const stringOptions: Record<string, string> = {};
   const flags = new Set<string>();
@@ -94,7 +114,7 @@ export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewAr
     pr: stringOptions.pr,
     postPr: stringOptions["post-pr"],
     reviewSummary: stringOptions["review-summary"],
-    postOnly: flags.has("post-only"),
+    postOnly: false,
     noConfirm: flags.has("no-confirm"),
     replacePendingReview: flags.has("replace-pending-review"),
     noDeterministic: flags.has("no-deterministic"),
