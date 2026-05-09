@@ -560,12 +560,18 @@ async function detectExecutableVersion(executable: string): Promise<string> {
   return line ?? "";
 }
 
-function parsePrNumber(value: string | undefined): number | undefined {
+export function parsePrNumber(value: string | undefined): number | undefined {
   if (value === undefined) {
     return undefined;
   }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (!/^[1-9]\d*$/.test(trimmed)) {
+    return undefined;
+  }
+  return Number.parseInt(trimmed, 10);
 }
 
 /** CLI diagnostics for code-review (`--log`); default resolved to `none` in main after validation. */

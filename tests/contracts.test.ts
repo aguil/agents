@@ -58,6 +58,7 @@ import {
   formatReviewCoverageSectionLines,
   loadStoredReviewResult,
   parseReviewSummaryStyle,
+  parsePrNumber,
 } from "../packages/cli/src/index";
 import {
   extractConfigDocument,
@@ -137,6 +138,18 @@ test("resolveEffectivePostOnly ignores merged postOnly for replay subcommand", (
   expect(resolveEffectivePostOnly("run", false)).toBe(false);
   expect(resolveEffectivePostOnly("post", false)).toBe(true);
   expect(resolveEffectivePostOnly("post", true)).toBe(true);
+});
+
+test("parsePrNumber rejects non-canonical Pull Request number strings", () => {
+  expect(parsePrNumber("123")).toBe(123);
+  expect(parsePrNumber(" 456 ")).toBe(456);
+  expect(parsePrNumber(undefined)).toBe(undefined);
+  expect(parsePrNumber("")).toBe(undefined);
+  expect(parsePrNumber("   ")).toBe(undefined);
+  expect(parsePrNumber("123abc")).toBe(undefined);
+  expect(parsePrNumber("12 3")).toBe(undefined);
+  expect(parsePrNumber("0")).toBe(undefined);
+  expect(parsePrNumber("012")).toBe(undefined);
 });
 
 test("resolveCodeReviewHelp skips normal runs lacking help tokens", () => {

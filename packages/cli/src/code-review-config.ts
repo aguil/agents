@@ -1,5 +1,5 @@
 import { codeReviewHarnessPackageCliDefaults } from "@aguil/agents-code-review";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CliOptions, ParsedCodeReviewArgv } from "./code-review-cli-models";
@@ -358,8 +358,9 @@ async function loadConfigAt(path: string): Promise<
   | { ok: false; error: string; path: string }
   | { ok: true; flat: CodeReviewMergedPartial; presets: Record<string, CodeReviewMergedPartial>; path?: string }
 > {
+  let rawUtf8: string;
   try {
-    await access(path);
+    rawUtf8 = await readFile(path, "utf8");
   } catch (error: unknown) {
     const errno = error as NodeJS.ErrnoException;
     if (errno.code === "ENOENT") {
@@ -372,7 +373,7 @@ async function loadConfigAt(path: string): Promise<
     };
   }
   try {
-    const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
+    const raw = JSON.parse(rawUtf8) as unknown;
     const parsed = extractConfigDocument(raw);
     if (!parsed.ok) {
       return { ok: false, error: parsed.error, path };
@@ -519,9 +520,9 @@ export async function resolveCodeReviewCliOptions(
     mergeFlatConfigLayers({ ...codeReviewHarnessPackageCliDefaults } as CodeReviewMergedPartial, user.flat),
     repoSanitized.flat,
   );
-  const presets = mergePresetMaps(user.presets, repoSanitized.presets);
 
   if (parsed.presetName !== undefined) {
+    const presets = mergePresetMaps(user.presets, repoSanitized.presets);
     const name = parsed.presetName.trim();
     if (name.length === 0) {
       return { ok: false, error: "Invalid --preset value (empty name)." };
