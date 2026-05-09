@@ -67,6 +67,7 @@ import {
   resolveCodeReviewCliOptions,
 } from "../packages/cli/src/code-review-config";
 import { parseCodeReviewArgv, peelCodeReviewSubcommand } from "../packages/cli/src/parse-code-review-argv";
+import { codeReviewHelpStderrExtras, resolveCodeReviewHelp } from "../packages/cli/src/code-review-help";
 
 test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => {
   expect(peelCodeReviewSubcommand([])).toEqual({
@@ -126,6 +127,54 @@ test("peelCodeReviewSubcommand rejects unknown leading token", () => {
 test("parseCodeReviewArgv never enables postOnly from CLI flags", () => {
   expect(parseCodeReviewArgv([]).options.postOnly).toBe(false);
   expect(parseCodeReviewArgv(["--dry-run"]).options.postOnly).toBe(false);
+});
+
+test("resolveCodeReviewHelp skips normal runs lacking help tokens", () => {
+  expect(resolveCodeReviewHelp(["code-review"])).toBeNull();
+  expect(resolveCodeReviewHelp(["code-review", "--adapter", "fake"])).toBeNull();
+});
+
+test("resolveCodeReviewHelp maps contextual help scopes", () => {
+  expect(resolveCodeReviewHelp([])).toEqual({ kind: "overview" });
+  expect(resolveCodeReviewHelp(["--help"])).toEqual({ kind: "overview" });
+  expect(resolveCodeReviewHelp(["-h"])).toEqual({ kind: "overview" });
+  expect(resolveCodeReviewHelp(["--help", "code-review"])).toEqual({
+    kind: "run_replay",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "--help"])).toEqual({ kind: "run_replay" });
+  expect(resolveCodeReviewHelp(["code-review", "-h"])).toEqual({ kind: "run_replay" });
+  expect(resolveCodeReviewHelp(["code-review", "--adapter", "fake", "-h"])).toEqual({
+    kind: "run_replay",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "post", "--help"])).toEqual({ kind: "post" });
+  expect(resolveCodeReviewHelp(["code-review", "--help", "post"])).toEqual({ kind: "post" });
+  expect(resolveCodeReviewHelp(["code-review", "replay", "--help"])).toEqual({
+    kind: "replay",
+  });
+  expect(resolveCodeReviewHelp(["unknown", "--help"])).toEqual({
+    kind: "overview",
+    unknownFirstToken: "unknown",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "waffles", "--help"])).toEqual({
+    kind: "overview",
+    codeReviewBadSubcommand: "waffles",
+  });
+  expect(resolveCodeReviewHelp(["run", "code-review", "--help"])).toEqual({
+    kind: "run_replay",
+    legacyRunSpelling: true,
+  });
+});
+
+test("codeReviewHelpStderrExtras surfaces unknown command hints", () => {
+  const top = resolveCodeReviewHelp(["nope", "-h"])!;
+  expect(codeReviewHelpStderrExtras(top)).toHaveLength(2);
+
+  const badCr = resolveCodeReviewHelp(["code-review", "nope-sub", "--help"])!;
+  expect(badCr).toMatchObject({
+    kind: "overview",
+    codeReviewBadSubcommand: "nope-sub",
+  });
+  expect(codeReviewHelpStderrExtras(badCr)).toHaveLength(2);
 });
 
 test("serializes agent events as JSONL", () => {

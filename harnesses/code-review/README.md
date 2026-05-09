@@ -91,6 +91,8 @@ bun run agents code-review --adapter fake
 
 ## Common Workflows
 
+Context help scopes flags to the invocation: `bun run agents` or `bun run agents --help` (overview), **`bun run agents code-review --help`**, **`… replay --help`**, **`… post --help`**.
+
 ```bash
 # Local debugging and adapter smoke tests
 bun run agents code-review --adapter cursor --model sonnet-4 --dry-run --log all

@@ -11,6 +11,11 @@ import {
 } from "@aguil/agents-code-review";
 import type { CliOptions } from "./code-review-cli-models";
 import { resolveCodeReviewCliOptions } from "./code-review-config";
+import {
+  codeReviewHelpStderrExtras,
+  renderCodeReviewHelp,
+  resolveCodeReviewHelp,
+} from "./code-review-help";
 import { parseCodeReviewArgv, peelCodeReviewSubcommand } from "./parse-code-review-argv";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
@@ -20,55 +25,12 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
-  if (argv.includes("--help") || argv.length === 0) {
-    console.log(`Usage: agents <command> [options]
-
-Commands:
-  code-review [options]              Run reviewers, collect context, write report artifacts
-  code-review replay [path] [options] Replay review using saved context (--context-bundle); path is optional if flag given
-  code-review post [options]           Publish pending PR review from a stored result (--result/--pr/…)
-
-Options (run and replay accept shared flags; post ignores adapters/models/consensus/context):
-  --workspace <path>     Workspace to review (default: cwd)
-  --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
-  --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
-  --context-bundle <path> Reuse an existing context bundle JSON for replay
-  --consensus <n>        Run n passes and keep recurring findings (default: 1 with --pending-review)
-  --adapter <name>       Execution adapter: fake, opencode, claude, or cursor (default: fake)
-  --model <id>           Model passed to opencode/claude/cursor
-  --variant <id>         OpenCode variant (provider-specific effort profile)
-  --agent <name>         OpenCode agent name
-  --opencode <path>      OpenCode executable (default: opencode)
-  --claude <path>        Claude Code executable (default: claude)
-  --claude-args <value>  Comma-separated arg template for Claude (supports {prompt})
-  --cursor <path>        Cursor CLI executable (default: agent)
-  --cursor-args <value>  Comma-separated arg template for Cursor (supports {prompt}; keep --trust)
-  --cursor-mode <mode>   Cursor mode: agent, plan, or ask
-  --log <level>          Log detail: none, summary, commands, all (default: none)
-  --no-deterministic     Disable deterministic adapter defaults
-  --strict               Fail run on any role error or timeout
-  --pending-review       Create an unsubmitted GitHub PR review
-  --result <path>        Result JSON path (auto-discovers latest for 'post'; optional otherwise)
-  --no-confirm           Skip interactive confirmation prompts
-  --replace-pending-review Replace an existing pending PR review (requires opt-in)
-  --pr <number>          PR for review context/diff collection; default posting PR with --pending-review
-  --post-pr <number>     Override posting PR with --pending-review or code-review post (rare)
-  --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
-  --pure                 Run opencode without external plugins
-  --print-logs           Ask opencode to print logs to stderr
-
-Configuration (later values override earlier ones: user file < repo file < preset < env < CLI):
-  Merge order loads defaults from optional JSON:
-    $XDG_CONFIG_HOME/agents/code-review/config.json (or ~/.config/... when unset),
-    then <workspace>/.review-agent/config.json (workspace = cwd or --workspace before merge).
-    Each file may declare a top-level "presets" object.
-
-  Environment: AGENTS_CODE_REVIEW_* (see harness README); booleans accept true/false/1/0/yes/no.
-
-  JSON may use string arrays for claudeArgs/cursorArgs; unknown keys warn (set
-  AGENTS_CODE_REVIEW_CONFIG_STRICT=yes to fail the run instead).
-
-  --preset <name>        Apply presets.<name> from merged JSON before env then CLI overrides`);
+  const helpReq = resolveCodeReviewHelp(argv);
+  if (helpReq !== null) {
+    console.log(renderCodeReviewHelp(helpReq));
+    for (const line of codeReviewHelpStderrExtras(helpReq)) {
+      console.error(line);
+    }
     return 0;
   }
 
