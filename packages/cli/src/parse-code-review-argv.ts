@@ -33,6 +33,17 @@ const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   "print-logs": "printLogs",
 };
 
+/** Tokens like `--preset`/`--dry-run`: not values for preceding string options (`--cursor-args --print,...`). */
+function isBundledCodeReviewCliKey(token: string | undefined): boolean {
+  if (token === undefined || !token.startsWith("--")) {
+    return false;
+  }
+  const optName = token.slice(2);
+  return (
+    optName === "preset" || optName in STRING_OPTION_TO_KEY || optName in FLAG_TO_KEY
+  );
+}
+
 export type PeeledCodeReviewArgv =
   | { readonly ok: true; readonly kind: "run"; readonly optionArgv: readonly string[] }
   | { readonly ok: true; readonly kind: "post"; readonly optionArgv: readonly string[] }
@@ -90,30 +101,50 @@ export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewAr
     if (!arg.startsWith("--")) {
       continue;
     }
-    const key = arg.slice(2);
+    const optName = arg.slice(2);
     const next = argv[index + 1];
-    const nextIsFlag = next === undefined || next.startsWith("--");
-    if (nextIsFlag) {
-      flags.add(key);
-      const flagKey = FLAG_TO_KEY[key];
-      if (flagKey !== undefined) {
-        explicitKeys.add(flagKey);
+
+    const stringOptKey = STRING_OPTION_TO_KEY[optName];
+    if (stringOptKey !== undefined) {
+      const hasValue =
+        next !== undefined
+        && (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
+      if (hasValue) {
+        stringOptions[optName] = next;
+        explicitKeys.add(stringOptKey);
+        index += 1;
       }
       continue;
     }
 
-    const value = next;
-    index += 1;
-
-    if (key === "preset") {
-      presetName = value.trim().length === 0 ? undefined : value;
+    if (optName === "preset") {
+      const hasValue =
+        next !== undefined && (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
+      if (hasValue) {
+        presetName = next.trim().length === 0 ? undefined : next;
+        index += 1;
+      }
       continue;
     }
 
-    stringOptions[key] = value;
-    const optKey = STRING_OPTION_TO_KEY[key];
-    if (optKey !== undefined) {
-      explicitKeys.add(optKey);
+    const boolKey = FLAG_TO_KEY[optName];
+    const boolStandalone = next === undefined || isBundledCodeReviewCliKey(next);
+    if (boolKey !== undefined) {
+      if (boolStandalone) {
+        flags.add(optName);
+        explicitKeys.add(boolKey);
+      } else {
+        flags.add(optName);
+      }
+      continue;
+    }
+
+    flags.add(optName);
+    const orphanValueConsumable =
+      next !== undefined && (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
+    if (orphanValueConsumable) {
+      stringOptions[optName] = next;
+      index += 1;
     }
   }
 
