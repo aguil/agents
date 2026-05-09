@@ -137,6 +137,59 @@ export function resolveRepoCodeReviewConfigPath(workspacePath: string): string {
   return join(workspacePath, ".review-agent", "config.json");
 }
 
+/** Adapter host binaries (`cursor` / `claude` / `opencode`) must not originate from `.review-agent` JSON. */
+const REPO_BLOCKED_ADAPTER_EXECUTABLE_KEYS =
+  ["cursor", "claude", "opencode"] as const satisfies readonly (keyof CliOptions)[];
+
+/** Strip executable overrides from workspace repo-config partials before merge. */
+export function sanitizeRepoAdapterExecutablePartial(
+  partial: CodeReviewMergedPartial,
+): { readonly sanitized: CodeReviewMergedPartial; readonly strippedKeys: readonly string[] } {
+  const stripped: string[] = [];
+  const sanitized: CodeReviewMergedPartial = { ...partial };
+  const rec = sanitized as Record<string, unknown>;
+  for (const key of REPO_BLOCKED_ADAPTER_EXECUTABLE_KEYS) {
+    if (rec[key] !== undefined) {
+      stripped.push(key);
+      delete rec[key];
+    }
+  }
+  return { sanitized, strippedKeys: stripped };
+}
+
+function sanitizeRepoConfigDocument(
+  flat: CodeReviewMergedPartial,
+  presets: Record<string, CodeReviewMergedPartial>,
+  loadedFromPath?: string,
+): { readonly flat: CodeReviewMergedPartial; readonly presets: Record<string, CodeReviewMergedPartial> } {
+  const removed = new Set<string>();
+  const top = sanitizeRepoAdapterExecutablePartial(flat);
+  const nextFlat = top.sanitized;
+  for (const k of top.strippedKeys) {
+    removed.add(k);
+  }
+
+  const nextPresets: Record<string, CodeReviewMergedPartial> = { ...presets };
+  for (const name of Object.keys(nextPresets)) {
+    const body = nextPresets[name]!;
+    const inner = sanitizeRepoAdapterExecutablePartial(body);
+    nextPresets[name] = inner.sanitized;
+    for (const k of inner.strippedKeys) {
+      removed.add(`preset:${name}.${k}`);
+    }
+  }
+
+  if (removed.size > 0 && loadedFromPath !== undefined) {
+    console.warn(
+      `${loadedFromPath}: ignoring repo-managed adapter executable settings (${[...removed].sort().join(
+        ", ",
+      )}). Configure opencode, claude, and cursor paths via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_* environment variables, or CLI flags.`,
+    );
+  }
+
+  return { flat: nextFlat, presets: nextPresets };
+}
+
 const ARGS_MERGE_FIELDS: ReadonlySet<keyof CliOptions> = new Set(["claudeArgs", "cursorArgs"]);
 
 export function mergeFlatConfigLayers(base: CodeReviewMergedPartial, overlay: CodeReviewMergedPartial): CodeReviewMergedPartial {
@@ -460,11 +513,13 @@ export async function resolveCodeReviewCliOptions(
     return { ok: false, error: `${repo.path}: ${repo.error}` };
   }
 
+  const repoSanitized = sanitizeRepoConfigDocument(repo.flat, repo.presets, repo.path);
+
   let merged = mergeFlatConfigLayers(
     mergeFlatConfigLayers({ ...codeReviewHarnessPackageCliDefaults } as CodeReviewMergedPartial, user.flat),
-    repo.flat,
+    repoSanitized.flat,
   );
-  const presets = mergePresetMaps(user.presets, repo.presets);
+  const presets = mergePresetMaps(user.presets, repoSanitized.presets);
 
   if (parsed.presetName !== undefined) {
     const name = parsed.presetName.trim();

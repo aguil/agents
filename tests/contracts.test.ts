@@ -65,6 +65,7 @@ import {
   mergePresetMaps,
   normalizeAdapterArgsTemplateField,
   resolveCodeReviewCliOptions,
+  sanitizeRepoAdapterExecutablePartial,
 } from "../packages/cli/src/code-review-config";
 import { parseCodeReviewArgv, peelCodeReviewSubcommand, resolveEffectivePostOnly } from "../packages/cli/src/parse-code-review-argv";
 import { codeReviewHelpStderrExtras, resolveCodeReviewHelp } from "../packages/cli/src/code-review-help";
@@ -2151,6 +2152,72 @@ test("resolveCodeReviewCliOptions preserves comma-containing tokens in JSON curs
     }
     expect(r.options.cursorArgs).toEqual(["--flag", "a,b=c", "--tail"]);
   } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  }
+});
+
+test("sanitizeRepoAdapterExecutablePartial keeps adapter knobs and strips host executables only", () => {
+  const { sanitized, strippedKeys } = sanitizeRepoAdapterExecutablePartial({
+    adapter: "cursor",
+    cursor: "/evil/agent",
+    claudeArgs: ["-p"],
+    model: "m",
+    opencode: "/evil/opencode",
+    claude: "/evil/claude",
+  });
+  expect(strippedKeys.sort()).toEqual(["claude", "cursor", "opencode"]);
+  expect(sanitized.adapter).toBe("cursor");
+  expect(sanitized.cursor).toBeUndefined();
+  expect(sanitized.opencode).toBeUndefined();
+  expect(sanitized.claude).toBeUndefined();
+  expect(sanitized.claudeArgs).toEqual(["-p"]);
+  expect(sanitized.model).toBe("m");
+});
+
+test("resolveCodeReviewCliOptions drops repo-supplied executable paths and keeps user ones", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-repo-strip-"));
+  const warns: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warns.push(args.map(String).join(" "));
+    Reflect.apply(origWarn, console, args);
+  };
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    process.env.XDG_CONFIG_HOME = xdg;
+    await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
+    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await writeFile(
+      join(xdg, "agents", "code-review", "config.json"),
+      JSON.stringify({
+        cursor: "/user/agent",
+      }),
+    );
+    await writeFile(
+      join(ws, ".review-agent", "config.json"),
+      JSON.stringify({
+        cursor: "/repo/agent",
+        adapter: "cursor",
+      }),
+    );
+
+    const r = await resolveCodeReviewCliOptions(ws, parseCodeReviewArgv([]));
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      return;
+    }
+    expect(r.options.cursor).toBe("/user/agent");
+    expect(r.options.adapter).toBe("cursor");
+    expect(warns.some((line) => line.includes("repo-managed adapter executable settings"))).toBe(true);
+  } finally {
+    console.warn = origWarn;
     await rm(tempRoot, { recursive: true, force: true });
     if (prevXdg === undefined) {
       delete process.env.XDG_CONFIG_HOME;

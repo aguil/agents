@@ -134,6 +134,8 @@ Merge order (**later wins**): **harness packaged defaults** (currently **`adapte
 - **User file:** `$XDG_CONFIG_HOME/agents/code-review/config.json` (when `XDG_CONFIG_HOME` is set), otherwise `~/.config/agents/code-review/config.json`. Omit the file when unused.
 - **Repo file:** `<workspace>/.review-agent/config.json`. The **`workspace`** used to locate this file is `resolve(process.cwd)` or **`--workspace`** **before** any `workspace` value from config is applied (configure one path explicitly if you rely on repo-scoped defaults while running from elsewhere).
 
+  Repo JSON is intentionally **unable to inject adapter host-binary paths**. Keys **`cursor`**, **`claude`**, and **`opencode`** (including inside **`presets`**) are stripped with a **`console.warn`** when present; configure those binaries only via the **user** config file above, **`AGENTS_CODE_REVIEW_*`**, or **CLI**.
+
 Optional JSON keys use **camelCase** and mirror stable CLI knobs (omit keys you don’t care about):
 
 - Strings: **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
