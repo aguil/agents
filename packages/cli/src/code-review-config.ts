@@ -1,3 +1,4 @@
+import { codeReviewHarnessPackageCliDefaults } from "@aguil/agents-code-review";
 import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -426,7 +427,8 @@ export type ResolveCodeReviewCliResult =
   | { readonly ok: false; readonly error: string };
 
 /**
- * Merge order: user config < repo config < named `--preset` < environment < explicit CLI flags.
+ * Merge order: harness package defaults < user config < repo config < named `--preset`
+ * < environment < explicit CLI flags.
  * Repo config is read from `<workspace>/.review-agent/config.json` where workspace is
  * `resolve(parsed.options.workspace ?? cwd)` before merge (see README).
  */
@@ -445,7 +447,10 @@ export async function resolveCodeReviewCliOptions(
     return { ok: false, error: `${repo.path}: ${repo.error}` };
   }
 
-  let merged = mergeFlatConfigLayers(mergeFlatConfigLayers({}, user.flat), repo.flat);
+  let merged = mergeFlatConfigLayers(
+    mergeFlatConfigLayers({ ...codeReviewHarnessPackageCliDefaults } as CodeReviewMergedPartial, user.flat),
+    repo.flat,
+  );
   const presets = mergePresetMaps(user.presets, repo.presets);
 
   if (parsed.presetName !== undefined) {

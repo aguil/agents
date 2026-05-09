@@ -33,7 +33,7 @@ import {
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import { EMBEDDED_PROMPTS } from "./embedded-prompts";
-import { expectedRolesForTriageTier, parseMetadataRolesList } from "./review-contract";
+import { expectedRolesForTriageTier, parseMetadataRolesList, type CodeReviewRoleId } from "./review-contract";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -363,7 +363,7 @@ function definitionForTriageWithCommands(
   return {
     ...codeReviewHarnessDefinition,
     defaultAllowedCommands,
-    roles: codeReviewHarnessDefinition.roles.filter((role) => roleIds.has(role.id)),
+    roles: codeReviewHarnessDefinition.roles.filter((role) => roleIds.has(role.id as CodeReviewRoleId)),
   };
 }
 
@@ -486,3 +486,7 @@ export {
   parseTriageTierFromRunMetadata,
   roleReviewSectionLabel,
 } from "./review-contract";
+export {
+  CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
+  codeReviewHarnessPackageCliDefaults,
+} from "./harness-package-defaults";

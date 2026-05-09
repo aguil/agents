@@ -33,28 +33,42 @@ const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   "print-logs": "printLogs",
 };
 
+export type PeeledCodeReviewArgv =
+  | { readonly ok: true; readonly kind: "run"; readonly optionArgv: readonly string[] }
+  | { readonly ok: true; readonly kind: "post"; readonly optionArgv: readonly string[] }
+  | { readonly ok: true; readonly kind: "replay"; readonly optionArgv: readonly string[] }
+  | { readonly ok: false; readonly error: string };
+
 /**
  * `argvTail` is everything after `agents code-review`.
- * Leading token may be subcommand `post`, or options when the slice starts with `-`.
+ * Leading token may be subcommand `post` / `replay`, or options when the slice starts with `-`.
+ *
+ * For `replay`, an optional positional context-bundle path becomes `--context-bundle` + path
+ * before the remaining flags (`replay ./bundle.json --adapter fake`).
  */
-export function peelCodeReviewSubcommand(argvTail: readonly string[]):
-  | { readonly ok: true; readonly postSubcommand: boolean; readonly optionArgv: readonly string[] }
-  | { readonly ok: false; readonly error: string } {
+export function peelCodeReviewSubcommand(argvTail: readonly string[]): PeeledCodeReviewArgv {
   const head = argvTail[0];
   if (head === undefined || head.startsWith("-")) {
-    return { ok: true, postSubcommand: false, optionArgv: argvTail };
+    return { ok: true, kind: "run", optionArgv: argvTail };
   }
   if (head === "post") {
-    return { ok: true, postSubcommand: true, optionArgv: argvTail.slice(1) };
+    return { ok: true, kind: "post", optionArgv: argvTail.slice(1) };
+  }
+  if (head === "replay") {
+    const rest = argvTail.slice(1);
+    const bundle = rest[0] !== undefined && !rest[0].startsWith("-") ? rest[0] : undefined;
+    const tail = bundle !== undefined ? rest.slice(1) : rest;
+    const optionArgv = bundle !== undefined ? ["--context-bundle", bundle, ...tail] : tail;
+    return { ok: true, kind: "replay", optionArgv };
   }
   return {
     ok: false,
     error:
-      `Unknown 'code-review' subcommand '${head}'. Expected 'post' or options beginning with '-'.`,
+      `Unknown 'code-review' subcommand '${head}'. Expected 'post', 'replay', or options beginning with '-'.`,
   };
 }
 
-/** Parse argv after optional `post` peel (same slice `optionArgv`). */
+/** Parse argv after optional peel (`optionArgv`). */
 export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewArgv {
   const stringOptions: Record<string, string> = {};
   const flags = new Set<string>();

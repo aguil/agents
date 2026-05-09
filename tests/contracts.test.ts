@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   CODE_REVIEW_ROLE_IDS,
   createFakeCodeReviewAdapter,
   definitionForTriage,
@@ -70,12 +71,12 @@ import { parseCodeReviewArgv, peelCodeReviewSubcommand } from "../packages/cli/s
 test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => {
   expect(peelCodeReviewSubcommand([])).toEqual({
     ok: true,
-    postSubcommand: false,
+    kind: "run",
     optionArgv: [],
   });
   expect(peelCodeReviewSubcommand(["--dry-run"])).toEqual({
     ok: true,
-    postSubcommand: false,
+    kind: "run",
     optionArgv: ["--dry-run"],
   });
 });
@@ -83,13 +84,31 @@ test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => 
 test("peelCodeReviewSubcommand accepts post prefix", () => {
   expect(peelCodeReviewSubcommand(["post"])).toEqual({
     ok: true,
-    postSubcommand: true,
+    kind: "post",
     optionArgv: [],
   });
   expect(peelCodeReviewSubcommand(["post", "--result", "./r.json"])).toEqual({
     ok: true,
-    postSubcommand: true,
+    kind: "post",
     optionArgv: ["--result", "./r.json"],
+  });
+});
+
+test("peelCodeReviewSubcommand injects context-bundle for replay positional path", () => {
+  expect(peelCodeReviewSubcommand(["replay", "./bundle.json"])).toEqual({
+    ok: true,
+    kind: "replay",
+    optionArgv: ["--context-bundle", "./bundle.json"],
+  });
+  expect(peelCodeReviewSubcommand(["replay", "--adapter", "fake"])).toEqual({
+    ok: true,
+    kind: "replay",
+    optionArgv: ["--adapter", "fake"],
+  });
+  expect(peelCodeReviewSubcommand(["replay", "./b.json", "--dry-run"])).toEqual({
+    ok: true,
+    kind: "replay",
+    optionArgv: ["--context-bundle", "./b.json", "--dry-run"],
   });
 });
 
@@ -98,6 +117,7 @@ test("peelCodeReviewSubcommand rejects unknown leading token", () => {
   expect(result.ok).toBe(false);
   if (!result.ok) {
     expect(result.error).toContain("publish");
+    expect(result.error).toContain("replay");
     expect(result.error).toContain("post");
     expect(result.error).toContain("code-review");
   }
@@ -2015,6 +2035,31 @@ test("resolveCodeReviewCliOptions merges configs and applies preset and CLI prec
     const badPreset = parseCodeReviewArgv(["--preset", "missing"]);
     const r3 = await resolveCodeReviewCliOptions(ws, badPreset);
     expect(r3.ok).toBe(false);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  }
+});
+
+test("resolveCodeReviewCliOptions uses harness packaged adapter below empty configs", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-pack-layer-"));
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    process.env.XDG_CONFIG_HOME = xdg;
+    await mkdir(xdg, { recursive: true });
+    await mkdir(ws, { recursive: true });
+
+    const r = await resolveCodeReviewCliOptions(ws, parseCodeReviewArgv([]));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
+    }
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
     if (prevXdg === undefined) {

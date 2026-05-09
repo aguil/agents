@@ -104,6 +104,9 @@ bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --p
 # Replay from captured context for consistency checks
 bun run agents code-review --adapter claude --model claude-sonnet-4 --context-bundle .review-agent/runs/<run-id>/context/bundle.json
 
+# Equivalent shorthand (positional bundle path injects `--context-bundle`)
+bun run agents code-review replay .review-agent/runs/<run-id>/context/bundle.json --adapter claude --model claude-sonnet-4
+
 # Multi-pass consensus run
 bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 
@@ -124,7 +127,7 @@ bun run agents code-review --adapter fake --dry-run --log summary
 
 ## Configuration files and presets
 
-Merge order (**later wins**): defaults from merged JSON (**user → repo**) → selected **`presets`** entry when you pass **`--preset`** → **`AGENTS_CODE_REVIEW_*`** environment variables → **explicit CLI flags**.
+Merge order (**later wins**): **harness packaged defaults** (currently **`adapter: fake`** from `@aguil/agents-code-review`) → merged JSON (**user → repo**) → selected **`presets`** entry when you pass **`--preset`** → **`AGENTS_CODE_REVIEW_*`** environment variables → **explicit CLI flags**.
 
 - **User file:** `$XDG_CONFIG_HOME/agents/code-review/config.json` (when `XDG_CONFIG_HOME` is set), otherwise `~/.config/agents/code-review/config.json`. Omit the file when unused.
 - **Repo file:** `<workspace>/.review-agent/config.json`. The **`workspace`** used to locate this file is `resolve(process.cwd)` or **`--workspace`** **before** any `workspace` value from config is applied (configure one path explicitly if you rely on repo-scoped defaults while running from elsewhere).
@@ -259,6 +262,7 @@ Alternatively, **`AGENTS_CODE_REVIEW_POST_ONLY`** runs the default **`agents cod
 ## Consistency and replay mode:
 
 - `--context-bundle <path>` reuses a prior context bundle instead of collecting live PR/diff context again.
+- **`agents code-review replay`** is equivalent: optional bundle path immediately after **`replay`** is turned into **`--context-bundle`**; you must still pass **`--context-bundle`** explicitly if you skip the positional.
 - Replay mode is useful for comparing model behavior with stable input.
 - `result.json` metadata includes `vcs_mode`, `context_source`, and `context_fingerprint` for run-to-run comparison.
 - `--consensus <n>` runs `n` review passes and keeps only findings that recur in every pass.

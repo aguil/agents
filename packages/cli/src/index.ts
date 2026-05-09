@@ -1,11 +1,13 @@
 import {
   CODE_REVIEW_ROLE_IDS,
+  CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   createCodeReviewAdapter,
   expectedRolesForTriageTier,
   parseCodeReviewRunMetadata,
   roleReviewSectionLabel,
   runCodeReview,
   type CodeReviewAdapterName,
+  type CodeReviewRoleId,
 } from "@aguil/agents-code-review";
 import type { CliOptions } from "./code-review-cli-models";
 import { resolveCodeReviewCliOptions } from "./code-review-config";
@@ -22,10 +24,11 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     console.log(`Usage: agents <command> [options]
 
 Commands:
-  code-review [options]           Run reviewers, collect context, write report artifacts
-  code-review post [options]       Publish pending PR review from a stored result (--result/--pr/…)
+  code-review [options]              Run reviewers, collect context, write report artifacts
+  code-review replay [path] [options] Replay review using saved context (--context-bundle); path is optional if flag given
+  code-review post [options]           Publish pending PR review from a stored result (--result/--pr/…)
 
-Options (both accept shared flags below; post ignores adapters/models/consensus/context):
+Options (run and replay accept shared flags; post ignores adapters/models/consensus/context):
   --workspace <path>     Workspace to review (default: cwd)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
   --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
@@ -84,7 +87,7 @@ Configuration (later values override earlier ones: user file < repo file < prese
     }
     const options: CliOptions = {
       ...resolvedCli.options,
-      postOnly: peeled.postSubcommand || resolvedCli.options.postOnly,
+      postOnly: peeled.kind === "post" || resolvedCli.options.postOnly,
     };
 
     const logLevelResolved = parseCliLogLevel(options.log ?? "none");
@@ -97,6 +100,13 @@ Configuration (later values override earlier ones: user file < repo file < prese
 
     if (options.postOnly) {
       return runPostOnly(options);
+    }
+    if (peeled.kind === "replay") {
+      const bundle = options.contextBundle?.trim();
+      if (bundle === undefined || bundle.length === 0) {
+        console.error("replay requires a context bundle (--context-bundle <path> or positional path after `replay`).");
+        return 1;
+      }
     }
     const adapterName = parseAdapterName(options.adapter);
     if (adapterName === undefined) {
@@ -478,7 +488,7 @@ function parseConsensusRuns(value: string | undefined): number | undefined {
 
 function parseAdapterName(value: string | undefined): CodeReviewAdapterName | undefined {
   if (value === undefined || value === "fake" || value === "opencode" || value === "claude" || value === "cursor") {
-    return value ?? "fake";
+    return value ?? CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT;
   }
   return undefined;
 }
@@ -1576,10 +1586,14 @@ export function formatReviewCoverageSectionLines(
 
   const skipSet = new Set(skippedByTriage);
   const inScheduledTier = (roleId: string): boolean =>
-    tier === undefined || expected?.has(roleId) === true;
+    tier === undefined || expected?.has(roleId as CodeReviewRoleId) === true;
 
-  const timedOut = timedOutRolesRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
-  const failed = failedRolesRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
+  const timedOut = timedOutRolesRaw.filter(
+    (id) => !skipSet.has(id as CodeReviewRoleId) && inScheduledTier(id),
+  );
+  const failed = failedRolesRaw.filter(
+    (id) => !skipSet.has(id as CodeReviewRoleId) && inScheduledTier(id),
+  );
 
   const hasOutcomeDetail =
     completed.length > 0 || timedOut.length > 0 || failed.length > 0;
