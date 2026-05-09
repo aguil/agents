@@ -62,6 +62,9 @@ Configuration (later values override earlier ones: user file < repo file < prese
 
   Environment: AGENTS_CODE_REVIEW_* (see harness README); booleans accept true/false/1/0/yes/no.
 
+  JSON may use string arrays for claudeArgs/cursorArgs; unknown keys warn (set
+  AGENTS_CODE_REVIEW_CONFIG_STRICT=yes to fail the run instead).
+
   --preset <name>        Apply presets.<name> from merged JSON before env then CLI overrides`);
     return 0;
   }

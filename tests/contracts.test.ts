@@ -62,6 +62,7 @@ import {
   extractConfigDocument,
   mergeFlatConfigLayers,
   mergePresetMaps,
+  normalizeAdapterArgsTemplateField,
   resolveCodeReviewCliOptions,
 } from "../packages/cli/src/code-review-config";
 import { parseCodeReviewArgv } from "../packages/cli/src/parse-code-review-argv";
@@ -1860,6 +1861,70 @@ test("extractConfigDocument parses top-level flat options and presets", () => {
   expect(doc.flat.adapter).toBe("fake");
   expect(doc.flat.log).toBe("summary");
   expect(doc.presets.ci).toEqual({ dryRun: true });
+  expect(doc.diagnostics.length).toBe(0);
+});
+
+test("normalizeAdapterArgsTemplateField normalizes subprocess arg arrays to comma-separated form", () => {
+  expect(normalizeAdapterArgsTemplateField("cursorArgs", undefined)).toEqual({ ok: true });
+  const joined = normalizeAdapterArgsTemplateField("cursorArgs", ["--print", "a,b", "  spaced  "]);
+  expect(joined).toEqual({ ok: true, normalized: "--print,a,b,spaced" });
+});
+
+test("normalizeAdapterArgsTemplateField rejects mixed-type arrays", () => {
+  const badFixture: unknown[] = ["--ok", false];
+  expect(normalizeAdapterArgsTemplateField("claudeArgs", badFixture).ok).toBe(false);
+});
+
+test("extractConfigDocument accepts adapter arg templates as JSON string arrays", () => {
+  const doc = extractConfigDocument({
+    cursorArgs: ["--trust", "--print"],
+    presets: {
+      demo: {
+        claudeArgs: ["-p", "--model", "x"],
+      },
+    },
+  });
+  expect(doc.ok).toBe(true);
+  if (!doc.ok) {
+    return;
+  }
+  expect(doc.flat.cursorArgs).toBe("--trust,--print");
+  expect(doc.presets.demo?.claudeArgs).toBe("-p,--model,x");
+});
+
+test("extractConfigDocument lists unknown JSON keys in diagnostics when not strict", () => {
+  const doc = extractConfigDocument({
+    adapter: "fake",
+    customFieldNobodyKnows: 1,
+  });
+  expect(doc.ok).toBe(true);
+  if (!doc.ok) {
+    return;
+  }
+  expect(doc.diagnostics.some((m) => m.includes("unknown keys"))).toBe(true);
+});
+
+test("extractConfigDocument rejects unknown keys when AGENTS_CODE_REVIEW_CONFIG_STRICT is truthy", () => {
+  const prev = process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT;
+  process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT = "true";
+  try {
+    expect(
+      extractConfigDocument({
+        adapter: "fake",
+        orphanKeyForTests: {},
+      }).ok,
+    ).toBe(false);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT;
+    } else {
+      process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT = prev;
+    }
+  }
+});
+
+test("extractConfigDocument rejects invalid cursorArgs array shapes", () => {
+  expect(extractConfigDocument({ cursorArgs: [1 as unknown as string] }).ok).toBe(false);
 });
 
 test("resolveCodeReviewCliOptions merges configs and applies preset and CLI precedence", async () => {

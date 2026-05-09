@@ -131,9 +131,11 @@ Merge order (**later wins**): defaults from merged JSON (**user → repo**) → 
 
 Optional JSON keys use **camelCase** and mirror stable CLI knobs (omit keys you don’t care about):
 
-- Strings: **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`claudeArgs`**, **`cursor`**, **`cursorArgs`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
+- Strings: **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
+  - **`claudeArgs`** / **`cursorArgs`**: optional string (same comma-separated shape as **`--claude-args`** / **`--cursor-args`**) or a JSON **array of strings** (preferred when tokens contain commas; empty entries are trimmed out).
 - Booleans: **`dryRun`**, **`postOnly`**, **`noConfirm`**, **`replacePendingReview`**, **`noDeterministic`**, **`strict`**, **`pendingReview`**, **`pure`**, **`printLogs`**.
 - **`presets`**: an object mapping preset names to nested partial-option objects **without** a nested **`presets`** key. Repo preset entries **overlay** user preset entries for the same name (same rules as top-level merge).
+- Unknown keys (**not** in the camelCase vocabulary above—besides **`presets`**) are **skipped** but produce a **`console.warn` when loading a JSON file**. Set **`AGENTS_CODE_REVIEW_CONFIG_STRICT`** to **`true`**, **`1`**, **`yes`**, or **`on`** before running the CLI to turn unknown keys into a **fatal error** instead.
 
 Example **`.review-agent/config.json`**:
 
@@ -141,6 +143,7 @@ Example **`.review-agent/config.json`**:
 {
   "adapter": "opencode",
   "model": "opencode/gpt-5.3-codex",
+  "cursorArgs": ["--print", "--output-format", "stream-json", "--trust", "--force", "{prompt}"],
   "presets": {
     "ci": {
       "adapter": "fake",
@@ -159,6 +162,7 @@ bun run agents run code-review --preset ci
 
 | Variable | Maps to |
 |----------|---------|
+| `AGENTS_CODE_REVIEW_CONFIG_STRICT` | When true/1/yes/on, unknown JSON keys in config files are errors (default: warn only) |
 | `AGENTS_CODE_REVIEW_WORKSPACE` | `--workspace` |
 | `AGENTS_CODE_REVIEW_SCRATCHPAD` | `--scratchpad` |
 | `AGENTS_CODE_REVIEW_CONTEXT_BUNDLE` | `--context-bundle` |

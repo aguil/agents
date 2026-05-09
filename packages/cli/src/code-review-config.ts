@@ -42,6 +42,59 @@ const BOOLEAN_FIELDS: readonly (keyof CliOptions & string)[] = [
   "printLogs",
 ];
 
+/** camelCase CLI option keys accepted at the root of JSON or inside a preset body. */
+const ALLOWED_JSON_FLAT_KEYS: ReadonlySet<string> = new Set([...STRING_FIELDS, ...BOOLEAN_FIELDS]);
+
+/** In JSON configs, comma-separated subprocess arg templates may be arrays of strings instead. */
+const ARGS_TEMPLATE_FIELDS = ["claudeArgs", "cursorArgs"] as const satisfies readonly (keyof CliOptions & string)[];
+
+function isStrictUnknownConfigEnv(): boolean {
+  return parseBoolEnv(process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT) === true;
+}
+
+/** Validate and normalize `cursorArgs` / `claudeArgs` from JSON (string or string[] → comma-split style used internally). */
+export function normalizeAdapterArgsTemplateField(
+  fieldKey: keyof CliOptions,
+  value: unknown,
+):
+  | { readonly ok: true; readonly normalized?: string }
+  | { readonly ok: false; readonly error: string } {
+  if (value === undefined) {
+    return { ok: true };
+  }
+  if (typeof value === "string") {
+    const t = value.trim();
+    return t.length === 0 ? { ok: true } : { ok: true, normalized: t };
+  }
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      error: `'${fieldKey}' must be a string or an array of non-empty strings`,
+    };
+  }
+  const parts: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") {
+      return {
+        ok: false,
+        error: `'${fieldKey}' array entries must all be strings`,
+      };
+    }
+    const trimmed = item.trim();
+    if (trimmed.length > 0) {
+      parts.push(trimmed);
+    }
+  }
+  if (parts.length === 0) {
+    return { ok: true };
+  }
+  return { ok: true, normalized: parts.join(",") };
+}
+
+function unknownFlatKeys(record: Record<string, unknown>): string[] {
+  return Object.keys(record).filter((key) => !ALLOWED_JSON_FLAT_KEYS.has(key)).sort();
+}
+
 const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
   WORKSPACE: "workspace",
   SCRATCHPAD: "scratchpad",
@@ -122,14 +175,51 @@ function parseStringJson(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function extractFlatFields(raw: Record<string, unknown>): CodeReviewMergedPartial {
+function extractFlatFields(
+  raw: Record<string, unknown>,
+  diagnosticsPrefix: string,
+  strictUnknownKeys: boolean,
+):
+  | { ok: false; error: string }
+  | {
+      readonly ok: true;
+      readonly flat: CodeReviewMergedPartial;
+      readonly unknownKeysDiagnostic?: string;
+    } {
+  const unknown = unknownFlatKeys(raw);
+  if (unknown.length > 0) {
+    const detail = `${diagnosticsPrefix}: unknown keys: ${unknown.join(", ")}`;
+    if (strictUnknownKeys) {
+      return {
+        ok: false,
+        error: detail,
+      };
+    }
+  }
+
   const out: CodeReviewMergedPartial = {};
-  for (const field of STRING_FIELDS) {
+  const plainStringFields = STRING_FIELDS.filter(
+    (f) => !(ARGS_TEMPLATE_FIELDS as readonly string[]).includes(f),
+  );
+
+  for (const field of plainStringFields) {
     if (field in raw) {
       const s = parseStringJson(raw[field]);
       if (s !== undefined && s.length > 0) {
         (out as Record<string, unknown>)[field] = s;
       }
+    }
+  }
+  for (const field of ARGS_TEMPLATE_FIELDS) {
+    if (!(field in raw)) {
+      continue;
+    }
+    const norm = normalizeAdapterArgsTemplateField(field, raw[field]);
+    if (!norm.ok) {
+      return { ok: false, error: `${diagnosticsPrefix}: ${norm.error}` };
+    }
+    if (norm.normalized !== undefined) {
+      (out as Record<string, unknown>)[field] = norm.normalized;
     }
   }
   for (const field of BOOLEAN_FIELDS) {
@@ -141,7 +231,13 @@ function extractFlatFields(raw: Record<string, unknown>): CodeReviewMergedPartia
       (out as Record<string, unknown>)[field] = b;
     }
   }
-  return out;
+  return unknown.length === 0
+    ? { ok: true, flat: out }
+    : {
+        ok: true,
+        flat: out,
+        unknownKeysDiagnostic: `${diagnosticsPrefix}: unknown keys ignored: ${unknown.join(", ")}`,
+      };
 }
 
 export function extractConfigDocument(raw: unknown):
@@ -150,9 +246,13 @@ export function extractConfigDocument(raw: unknown):
       ok: true;
       readonly flat: CodeReviewMergedPartial;
       readonly presets: Record<string, CodeReviewMergedPartial>;
+      readonly diagnostics: readonly string[];
     } {
+  const strictUnknown = isStrictUnknownConfigEnv();
+  const diagnostics: string[] = [];
+
   if (raw === undefined) {
-    return { ok: true, flat: {}, presets: {} };
+    return { ok: true, flat: {}, presets: {}, diagnostics: [] };
   }
   if (typeof raw !== "object" || raw === null) {
     return { ok: false, error: "Config root must be a JSON object" };
@@ -167,7 +267,13 @@ export function extractConfigDocument(raw: unknown):
   const flatSource = { ...root };
   delete flatSource.presets;
 
-  const flat = extractFlatFields(flatSource);
+  const flatExtracted = extractFlatFields(flatSource, "config (top-level)", strictUnknown);
+  if (!flatExtracted.ok) {
+    return flatExtracted;
+  }
+  if (flatExtracted.unknownKeysDiagnostic !== undefined) {
+    diagnostics.push(flatExtracted.unknownKeysDiagnostic);
+  }
   const presets: Record<string, CodeReviewMergedPartial> = {};
   for (const name of Object.keys(presetsSource)) {
     const body = presetsSource[name];
@@ -178,9 +284,16 @@ export function extractConfigDocument(raw: unknown):
     if (nestedPresets !== undefined) {
       return { ok: false, error: `Preset '${name}' must not declare nested 'presets'` };
     }
-    presets[name] = extractFlatFields(body as Record<string, unknown>);
+    const bodyFlat = extractFlatFields(body as Record<string, unknown>, `preset '${name}'`, strictUnknown);
+    if (!bodyFlat.ok) {
+      return bodyFlat;
+    }
+    if (bodyFlat.unknownKeysDiagnostic !== undefined) {
+      diagnostics.push(bodyFlat.unknownKeysDiagnostic);
+    }
+    presets[name] = bodyFlat.flat;
   }
-  return { ok: true, flat, presets };
+  return { ok: true, flat: flatExtracted.flat, presets, diagnostics };
 }
 
 async function loadConfigAt(path: string): Promise<
@@ -205,6 +318,9 @@ async function loadConfigAt(path: string): Promise<
     const parsed = extractConfigDocument(raw);
     if (!parsed.ok) {
       return { ok: false, error: parsed.error, path };
+    }
+    for (const diag of parsed.diagnostics) {
+      console.warn(`${path}: ${diag}`);
     }
     return { ok: true, flat: parsed.flat, presets: parsed.presets, path };
   } catch (error: unknown) {
