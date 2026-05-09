@@ -16,7 +16,7 @@ import {
   renderCodeReviewHelp,
   resolveCodeReviewHelp,
 } from "./code-review-help";
-import { parseCodeReviewArgv, peelCodeReviewSubcommand } from "./parse-code-review-argv";
+import { parseCodeReviewArgv, peelCodeReviewSubcommand, resolveEffectivePostOnly } from "./parse-code-review-argv";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
@@ -49,7 +49,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     }
     const options: CliOptions = {
       ...resolvedCli.options,
-      postOnly: peeled.kind === "post" || resolvedCli.options.postOnly,
+      postOnly: resolveEffectivePostOnly(peeled.kind, resolvedCli.options.postOnly),
     };
 
     const logLevelResolved = parseCliLogLevel(options.log ?? "none");

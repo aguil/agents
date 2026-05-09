@@ -66,7 +66,7 @@ import {
   normalizeAdapterArgsTemplateField,
   resolveCodeReviewCliOptions,
 } from "../packages/cli/src/code-review-config";
-import { parseCodeReviewArgv, peelCodeReviewSubcommand } from "../packages/cli/src/parse-code-review-argv";
+import { parseCodeReviewArgv, peelCodeReviewSubcommand, resolveEffectivePostOnly } from "../packages/cli/src/parse-code-review-argv";
 import { codeReviewHelpStderrExtras, resolveCodeReviewHelp } from "../packages/cli/src/code-review-help";
 
 test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => {
@@ -127,6 +127,15 @@ test("peelCodeReviewSubcommand rejects unknown leading token", () => {
 test("parseCodeReviewArgv never enables postOnly from CLI flags", () => {
   expect(parseCodeReviewArgv([]).options.postOnly).toBe(false);
   expect(parseCodeReviewArgv(["--dry-run"]).options.postOnly).toBe(false);
+});
+
+test("resolveEffectivePostOnly ignores merged postOnly for replay subcommand", () => {
+  expect(resolveEffectivePostOnly("replay", true)).toBe(false);
+  expect(resolveEffectivePostOnly("replay", false)).toBe(false);
+  expect(resolveEffectivePostOnly("run", true)).toBe(true);
+  expect(resolveEffectivePostOnly("run", false)).toBe(false);
+  expect(resolveEffectivePostOnly("post", false)).toBe(true);
+  expect(resolveEffectivePostOnly("post", true)).toBe(true);
 });
 
 test("resolveCodeReviewHelp skips normal runs lacking help tokens", () => {

@@ -68,6 +68,16 @@ export function peelCodeReviewSubcommand(argvTail: readonly string[]): PeeledCod
   };
 }
 
+export type PeeledCodeReviewKind = Exclude<PeeledCodeReviewArgv, { readonly ok: false }>["kind"];
+
+/**
+ * Resolved `postOnly` after merges: repo/env may set postOnly, but `replay` must still run the
+ * replay path (finding generation from a bundle), not post-from-result plumbing.
+ */
+export function resolveEffectivePostOnly(peeledKind: PeeledCodeReviewKind, mergedPostOnly: boolean): boolean {
+  return peeledKind === "post" || (peeledKind !== "replay" && mergedPostOnly);
+}
+
 /** Parse argv after optional peel (`optionArgv`). */
 export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewArgv {
   const stringOptions: Record<string, string> = {};
