@@ -476,6 +476,18 @@ function parseCommaSeparated(value: string | undefined): readonly string[] | und
   return parsed.length > 0 ? parsed : undefined;
 }
 
+/** Config may store JSON string arrays verbatim; CLI and env supply comma-split strings. */
+function coerceAdapterArgsTemplate(value: string | readonly string[] | undefined): readonly string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    const trimmed = value.map((part) => part.trim()).filter((part) => part.length > 0);
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  return parseCommaSeparated(value as string);
+}
+
 function resolveEffectiveAdapterOptions(
   options: CliOptions,
   adapterName: CodeReviewAdapterName,
@@ -490,11 +502,11 @@ function resolveEffectiveAdapterOptions(
     },
     claude: {
       model: options.model,
-      argsTemplate: parseCommaSeparated(options.claudeArgs),
+      argsTemplate: coerceAdapterArgsTemplate(options.claudeArgs),
     },
     cursor: {
       model: options.model,
-      argsTemplate: parseCommaSeparated(options.cursorArgs),
+      argsTemplate: coerceAdapterArgsTemplate(options.cursorArgs),
       mode: parseCursorMode(options.cursorMode),
       force: true,
     },
@@ -521,13 +533,19 @@ async function buildDeterminismMetadata(
 
   if (adapterName === "claude") {
     metadata.claude_model = effective.claude.model ?? "";
-    metadata.claude_args_template = effective.claude.argsTemplate?.join(",") ?? "";
+    metadata.claude_args_template =
+      effective.claude.argsTemplate === undefined || effective.claude.argsTemplate.length === 0
+        ? ""
+        : JSON.stringify([...effective.claude.argsTemplate]);
     metadata.claude_version = await detectExecutableVersion(options.claude ?? "claude");
   }
 
   if (adapterName === "cursor") {
     metadata.cursor_model = effective.cursor.model ?? "";
-    metadata.cursor_args_template = effective.cursor.argsTemplate?.join(",") ?? "";
+    metadata.cursor_args_template =
+      effective.cursor.argsTemplate === undefined || effective.cursor.argsTemplate.length === 0
+        ? ""
+        : JSON.stringify([...effective.cursor.argsTemplate]);
     metadata.cursor_mode = effective.cursor.mode ?? "";
     metadata.cursor_force = effective.cursor.force ? "true" : "false";
     metadata.cursor_version = await detectExecutableVersion(options.cursor ?? "agent");

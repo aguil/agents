@@ -137,7 +137,7 @@ Merge order (**later wins**): **harness packaged defaults** (currently **`adapte
 Optional JSON keys use **camelCase** and mirror stable CLI knobs (omit keys you don’t care about):
 
 - Strings: **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
-  - **`claudeArgs`** / **`cursorArgs`**: optional string (same comma-separated shape as **`--claude-args`** / **`--cursor-args`**) or a JSON **array of strings** (preferred when tokens contain commas; empty entries are trimmed out).
+  - **`claudeArgs`** / **`cursorArgs`**: optional string (**`--claude-args` / `--cursor-args`** use comma-splitting—tokens cannot reliably contain commas) or a JSON **array of strings** (each element is one argv token, including commas inside a token).
 - Booleans: **`dryRun`**, **`postOnly`**, **`noConfirm`**, **`replacePendingReview`**, **`noDeterministic`**, **`strict`**, **`pendingReview`**, **`pure`**, **`printLogs`**.
 - **`presets`**: an object mapping preset names to nested partial-option objects **without** a nested **`presets`** key. Repo preset entries **overlay** user preset entries for the same name (same rules as top-level merge).
 - Unknown keys (**not** in the camelCase vocabulary above—besides **`presets`**) are **skipped** but produce a **`console.warn` when loading a JSON file**. Set **`AGENTS_CODE_REVIEW_CONFIG_STRICT`** to **`true`**, **`1`**, **`yes`**, or **`on`** before running the CLI to turn unknown keys into a **fatal error** instead.

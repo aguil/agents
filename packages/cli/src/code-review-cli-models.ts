@@ -12,9 +12,10 @@ export interface CliOptions {
   readonly agent?: string;
   readonly opencode?: string;
   readonly claude?: string;
-  readonly claudeArgs?: string;
+  /** CLI supplies a comma-separated string; merged JSON may supply a string or string array (preserves commas in tokens). */
+  readonly claudeArgs?: string | readonly string[];
   readonly cursor?: string;
-  readonly cursorArgs?: string;
+  readonly cursorArgs?: string | readonly string[];
   readonly cursorMode?: string;
   readonly log?: string;
   readonly pr?: string;

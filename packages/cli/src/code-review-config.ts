@@ -53,12 +53,12 @@ function isStrictUnknownConfigEnv(): boolean {
   return parseBoolEnv(process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT) === true;
 }
 
-/** Validate and normalize `cursorArgs` / `claudeArgs` from JSON (string or string[] → comma-split style used internally). */
+/** Validate and normalize `cursorArgs` / `claudeArgs` from JSON (trimmed string, or string array kept verbatim). */
 export function normalizeAdapterArgsTemplateField(
   fieldKey: keyof CliOptions,
   value: unknown,
 ):
-  | { readonly ok: true; readonly normalized?: string }
+  | { readonly ok: true; readonly normalized?: string | readonly string[] }
   | { readonly ok: false; readonly error: string } {
   if (value === undefined) {
     return { ok: true };
@@ -89,7 +89,7 @@ export function normalizeAdapterArgsTemplateField(
   if (parts.length === 0) {
     return { ok: true };
   }
-  return { ok: true, normalized: parts.join(",") };
+  return { ok: true, normalized: parts };
 }
 
 function unknownFlatKeys(record: Record<string, unknown>): string[] {
@@ -137,12 +137,16 @@ export function resolveRepoCodeReviewConfigPath(workspacePath: string): string {
   return join(workspacePath, ".review-agent", "config.json");
 }
 
+const ARGS_MERGE_FIELDS: ReadonlySet<keyof CliOptions> = new Set(["claudeArgs", "cursorArgs"]);
+
 export function mergeFlatConfigLayers(base: CodeReviewMergedPartial, overlay: CodeReviewMergedPartial): CodeReviewMergedPartial {
   const next: CodeReviewMergedPartial = { ...base };
   for (const key of STRING_FIELDS) {
     const v = overlay[key];
     if (typeof v === "string") {
       (next as Record<string, unknown>)[key as string] = v;
+    } else if (ARGS_MERGE_FIELDS.has(key) && Array.isArray(v) && v.every((part) => typeof part === "string")) {
+      (next as Record<string, unknown>)[key as string] = v as readonly string[];
     }
   }
   for (const key of BOOLEAN_FIELDS) {
@@ -388,6 +392,15 @@ function applyExplicitCliOptions(flat: CodeReviewMergedPartial, parsed: ParsedCo
   const ex = parsed.explicitKeys;
   const o = parsed.options;
   const stringOr = (k: keyof CliOptions): string | undefined => (ex.has(k) ? o[k] as string | undefined : flat[k] as string | undefined);
+  const adapterArgsTemplateOr = (
+    k: "claudeArgs" | "cursorArgs",
+  ): string | readonly string[] | undefined => {
+    if (ex.has(k)) {
+      const fromCli = o[k];
+      return typeof fromCli === "string" ? fromCli : undefined;
+    }
+    return flat[k] as string | readonly string[] | undefined;
+  };
   const boolOr = (k: keyof CliOptions, def: boolean): boolean => (ex.has(k) ? (o[k] as boolean) : (flat[k] as boolean | undefined) ?? def);
 
   return {
@@ -403,9 +416,9 @@ function applyExplicitCliOptions(flat: CodeReviewMergedPartial, parsed: ParsedCo
     agent: stringOr("agent"),
     opencode: stringOr("opencode"),
     claude: stringOr("claude"),
-    claudeArgs: stringOr("claudeArgs"),
+    claudeArgs: adapterArgsTemplateOr("claudeArgs"),
     cursor: stringOr("cursor"),
-    cursorArgs: stringOr("cursorArgs"),
+    cursorArgs: adapterArgsTemplateOr("cursorArgs"),
     cursorMode: stringOr("cursorMode"),
     log: stringOr("log"),
     pr: stringOr("pr"),

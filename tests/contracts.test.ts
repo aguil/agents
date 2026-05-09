@@ -2008,10 +2008,10 @@ test("extractConfigDocument parses top-level flat options and presets", () => {
   expect(doc.diagnostics.length).toBe(0);
 });
 
-test("normalizeAdapterArgsTemplateField normalizes subprocess arg arrays to comma-separated form", () => {
+test("normalizeAdapterArgsTemplateField preserves JSON array tokens (including embedded commas)", () => {
   expect(normalizeAdapterArgsTemplateField("cursorArgs", undefined)).toEqual({ ok: true });
-  const joined = normalizeAdapterArgsTemplateField("cursorArgs", ["--print", "a,b", "  spaced  "]);
-  expect(joined).toEqual({ ok: true, normalized: "--print,a,b,spaced" });
+  const normalized = normalizeAdapterArgsTemplateField("cursorArgs", ["--print", "a,b", "  spaced  "]);
+  expect(normalized).toEqual({ ok: true, normalized: ["--print", "a,b", "spaced"] });
 });
 
 test("normalizeAdapterArgsTemplateField rejects mixed-type arrays", () => {
@@ -2032,8 +2032,8 @@ test("extractConfigDocument accepts adapter arg templates as JSON string arrays"
   if (!doc.ok) {
     return;
   }
-  expect(doc.flat.cursorArgs).toBe("--trust,--print");
-  expect(doc.presets.demo?.claudeArgs).toBe("-p,--model,x");
+  expect(doc.flat.cursorArgs).toEqual(["--trust", "--print"]);
+  expect(doc.presets.demo?.claudeArgs).toEqual(["-p", "--model", "x"]);
 });
 
 test("extractConfigDocument lists unknown JSON keys in diagnostics when not strict", () => {
@@ -2118,6 +2118,38 @@ test("resolveCodeReviewCliOptions merges configs and applies preset and CLI prec
     const badPreset = parseCodeReviewArgv(["--preset", "missing"]);
     const r3 = await resolveCodeReviewCliOptions(ws, badPreset);
     expect(r3.ok).toBe(false);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  }
+});
+
+test("resolveCodeReviewCliOptions preserves comma-containing tokens in JSON cursorArgs arrays", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-args-comma-"));
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    process.env.XDG_CONFIG_HOME = xdg;
+    await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
+    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await writeFile(
+      join(xdg, "agents", "code-review", "config.json"),
+      JSON.stringify({
+        cursorArgs: ["--flag", "a,b=c", "--tail"],
+      }),
+    );
+
+    const r = await resolveCodeReviewCliOptions(ws, parseCodeReviewArgv([]));
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      return;
+    }
+    expect(r.options.cursorArgs).toEqual(["--flag", "a,b=c", "--tail"]);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
     if (prevXdg === undefined) {
