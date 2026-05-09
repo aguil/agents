@@ -2111,11 +2111,27 @@ interface GitHubPullRequestFile {
   readonly patch?: string;
 }
 
-if (import.meta.main) {
-  process.exitCode = await main();
-}
+const pullRequestDiffContextCache = new Map<string, Promise<PullRequestDiffContext>>();
 
 async function loadPullRequestDiffContext(
+  repo: string,
+  prNumber: number,
+  workspacePath?: string,
+): Promise<PullRequestDiffContext> {
+  const key = `${repo}\0${prNumber}\0${resolveWorkspaceCwd(workspacePath)}`;
+  const cached = pullRequestDiffContextCache.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const pending = loadPullRequestDiffContextUncached(repo, prNumber, workspacePath);
+  pullRequestDiffContextCache.set(key, pending);
+  pending.catch(() => {
+    pullRequestDiffContextCache.delete(key);
+  });
+  return pending;
+}
+
+async function loadPullRequestDiffContextUncached(
   repo: string,
   prNumber: number,
   workspacePath?: string,
@@ -2187,4 +2203,8 @@ function extractRightSideHunkPositions(patch: string | undefined): ReadonlyMap<n
     }
   }
   return positions;
+}
+
+if (import.meta.main) {
+  process.exitCode = await main();
 }
