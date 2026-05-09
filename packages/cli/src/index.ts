@@ -37,8 +37,7 @@ Options:
   --cursor <path>        Cursor CLI executable (default: agent)
   --cursor-args <value>  Comma-separated arg template for Cursor (supports {prompt}; keep --trust)
   --cursor-mode <mode>   Cursor mode: agent, plan, or ask
-  --verbose, -v          Print compact progress and finding summaries
-  --show-commands        Print adapter commands before and after execution
+  --log <level>          Log detail: none, summary, commands, all (default: none)
   --no-deterministic     Disable deterministic adapter defaults
   --strict               Fail run on any role error or timeout
   --pending-review       Create an unsubmitted GitHub PR review
@@ -46,8 +45,8 @@ Options:
   --result <path>        Result JSON path (auto-discovers latest by default)
   --no-confirm           Skip interactive confirmation prompts
   --replace-pending-review Replace an existing pending PR review (requires opt-in)
-  --review-pr <number>   PR number used for review context and diff collection
-  --pr <number>          PR number for pending review (auto-discover if omitted)
+  --pr <number>          PR for review context/diff collection; default posting PR with --pending-review
+  --post-pr <number>     Override posting PR with --pending-review or --post-only (rare)
   --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
   --pure                 Run opencode without external plugins
   --print-logs           Ask opencode to print logs to stderr`);
@@ -56,6 +55,12 @@ Options:
 
   if (argv[0] === "run" && argv[1] === "code-review") {
     const options = parseOptions(argv.slice(2));
+    if (options.log !== undefined && parseCliLogLevel(options.log) === undefined) {
+      console.error(`Invalid --log value: ${options.log}`);
+      console.error("Expected one of: none, summary, commands, all.");
+      return 1;
+    }
+    const logLevel: CliLogLevel = parseCliLogLevel(options.log) ?? "none";
     if (options.postOnly) {
       return runPostOnly(options);
     }
@@ -103,13 +108,13 @@ Options:
     }
     const pendingReviewEnabled = options.pendingReview && !options.dryRun;
     const consensusRuns = requestedConsensusRuns ?? (pendingReviewEnabled ? 1 : undefined);
-    const reviewPrNumber = parsePrNumber(options.reviewPr);
-    if (options.reviewPr !== undefined && reviewPrNumber === undefined) {
-      console.error(`Invalid --review-pr value: ${options.reviewPr}`);
+    const reviewPrNumber = parsePrNumber(options.pr);
+    if (options.pr !== undefined && reviewPrNumber === undefined) {
+      console.error(`Invalid --pr value: ${options.pr}`);
       return 1;
     }
 
-    if (options.verbose) {
+    if (logShowsSummary(logLevel)) {
       console.log(`Starting code review with adapter '${adapterName}'.`);
       if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
         console.log("Using default consensus=1 for --pending-review (override with --consensus <n>).");
@@ -125,10 +130,10 @@ Options:
       strict: options.strict,
       metadata: await buildDeterminismMetadata(adapterName, effectiveAdapter, options, deterministicEnabled),
       adapter,
-      onEvent: createRunEventLogger(options),
+      onEvent: createRunEventLogger(logLevel),
     });
     let verbosePrDiffContext: PullRequestDiffContext | undefined;
-    if (options.verbose) {
+    if (logShowsSummary(logLevel)) {
       printVerboseFindingSummary(result.findings);
       const summaryStyle = parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
       const rawCommentCandidates = findingsToPendingReviewComments(result.findings);
@@ -185,11 +190,11 @@ Options:
     }
 
     if (pendingReviewEnabled) {
-      const prNumber = parsePrNumber(options.pr);
-      if (options.pr !== undefined && prNumber === undefined) {
-        console.error(`Invalid --pr value: ${options.pr}`);
+      if (options.postPr !== undefined && parsePrNumber(options.postPr) === undefined) {
+        console.error(`Invalid --post-pr value: ${options.postPr}`);
         return 1;
       }
+      const postingPrNumber = parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
       const reviewSummaryStyle = parseReviewSummaryStyle(options.reviewSummary);
       if (options.reviewSummary !== undefined && reviewSummaryStyle === undefined) {
         console.error(`Invalid --review-summary value: ${options.reviewSummary}`);
@@ -199,15 +204,19 @@ Options:
 
       const posted = await replacePendingPullRequestReview({
         findings: result.findings,
-        prNumber,
+        prNumber: postingPrNumber,
         reviewSummaryStyle: reviewSummaryStyle ?? "impact",
         reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
         noConfirm: options.noConfirm,
         replacePendingReview: options.replacePendingReview,
         workspacePath: options.workspace,
-        preloadedPrDiffContext: (options.verbose && reviewPrNumber !== undefined && prNumber !== undefined && prNumber === reviewPrNumber)
-          ? verbosePrDiffContext
-          : undefined,
+        preloadedPrDiffContext:
+          (logShowsSummary(logLevel)
+            && reviewPrNumber !== undefined
+            && postingPrNumber !== undefined
+            && postingPrNumber === reviewPrNumber)
+            ? verbosePrDiffContext
+            : undefined,
         runMetadata: result.metadata,
       });
       if (posted.cancelled === true) {
@@ -251,10 +260,9 @@ interface CliOptions {
   readonly cursor?: string;
   readonly cursorArgs?: string;
   readonly cursorMode?: string;
-  readonly verbose: boolean;
-  readonly showCommands: boolean;
-  readonly reviewPr?: string;
+  readonly log?: string;
   readonly pr?: string;
+  readonly postPr?: string;
   readonly reviewSummary?: string;
   readonly postOnly: boolean;
   readonly noConfirm: boolean;
@@ -332,10 +340,6 @@ function parseOptions(argv: readonly string[]): CliOptions {
   const flags = new Set<string>();
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "-v") {
-      flags.add("verbose");
-      continue;
-    }
     if (!arg.startsWith("--")) {
       continue;
     }
@@ -365,10 +369,9 @@ function parseOptions(argv: readonly string[]): CliOptions {
     cursor: options.cursor,
     cursorArgs: options["cursor-args"],
     cursorMode: options["cursor-mode"],
-    verbose: flags.has("verbose"),
-    showCommands: flags.has("show-commands"),
-    reviewPr: options["review-pr"],
+    log: options.log,
     pr: options.pr,
+    postPr: options["post-pr"],
     reviewSummary: options["review-summary"],
     postOnly: flags.has("post-only"),
     noConfirm: flags.has("no-confirm"),
@@ -419,20 +422,20 @@ function summarizeFindingMessage(message: string): string {
   return firstSentence && firstSentence.length > 0 ? firstSentence : message.trim();
 }
 
-function createRunEventLogger(options: CliOptions): ((event: AgentEvent) => void) | undefined {
-  if (!options.verbose && !options.showCommands) {
+function createRunEventLogger(logLevel: CliLogLevel): ((event: AgentEvent) => void) | undefined {
+  if (!logShowsSummary(logLevel) && !logShowsCommands(logLevel)) {
     return undefined;
   }
 
   return (event) => {
-    if (options.showCommands && event.type === "tool") {
+    if (logShowsCommands(logLevel) && event.type === "tool") {
       const commandData = parseCommandEventData(event.data);
       if (commandData?.phase === "before") {
         console.log(`[${event.roleId}] command (before): ${formatCommand(commandData.cmd)}`);
       }
     }
 
-    if (options.showCommands && (event.type === "completed" || event.type === "error")) {
+    if (logShowsCommands(logLevel) && (event.type === "completed" || event.type === "error")) {
       const completionData = parseCommandCompletionData(event.data);
       if (completionData !== undefined) {
         const durationLabel = completionData.elapsedMs === undefined
@@ -445,7 +448,7 @@ function createRunEventLogger(options: CliOptions): ((event: AgentEvent) => void
       }
     }
 
-    if (!options.verbose) {
+    if (!logShowsSummary(logLevel)) {
       return;
     }
     if (event.type === "started") {
@@ -615,6 +618,27 @@ function parsePrNumber(value: string | undefined): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+/** CLI diagnostics for code-review (`--log`); default resolved to `none` in main after validation. */
+type CliLogLevel = "none" | "summary" | "commands" | "all";
+
+function parseCliLogLevel(value: string | undefined): CliLogLevel | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "none" || value === "summary" || value === "commands" || value === "all") {
+    return value;
+  }
+  return undefined;
+}
+
+function logShowsSummary(level: CliLogLevel): boolean {
+  return level === "summary" || level === "all";
+}
+
+function logShowsCommands(level: CliLogLevel): boolean {
+  return level === "commands" || level === "all";
+}
+
 interface StoredReviewResult {
   readonly findings: readonly Finding[];
   readonly metadata?: Readonly<Record<string, string>>;
@@ -624,11 +648,15 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   if (options.pendingReview) {
     console.warn("Ignoring --pending-review because --post-only already publishes a pending review.");
   }
-  const explicitPrNumber = parsePrNumber(options.pr);
-  if (options.pr !== undefined && explicitPrNumber === undefined) {
+  if (options.postPr !== undefined && parsePrNumber(options.postPr) === undefined) {
+    console.error(`Invalid --post-pr value: ${options.postPr}`);
+    return 1;
+  }
+  if (options.pr !== undefined && parsePrNumber(options.pr) === undefined) {
     console.error(`Invalid --pr value: ${options.pr}`);
     return 1;
   }
+  const explicitPrNumber = parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
 
   const reviewSummaryStyle = parseReviewSummaryStyle(options.reviewSummary);
   if (options.reviewSummary !== undefined && reviewSummaryStyle === undefined) {
@@ -660,7 +688,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   const reviewedHeadSha = metadata.pr_reviewed_head_sha?.trim();
   if (metadataPrNumber === undefined || reviewedHeadSha === undefined || reviewedHeadSha.length === 0) {
     console.error("Selected result is missing PR metadata required for stale checks.");
-    console.error("Re-run with --review-pr to capture pr_number and pr_reviewed_head_sha.");
+    console.error("Re-run with --pr to capture pr_number and pr_reviewed_head_sha.");
     return 1;
   }
   const prNumber = explicitPrNumber ?? metadataPrNumber;

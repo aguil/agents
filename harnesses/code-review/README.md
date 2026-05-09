@@ -93,13 +93,13 @@ bun run agents run code-review --adapter fake
 
 ```bash
 # Local debugging and adapter smoke tests
-bun run agents run code-review --adapter cursor --model sonnet-4 --dry-run --verbose --show-commands
+bun run agents run code-review --adapter cursor --model sonnet-4 --dry-run --log all
 
 # Review context from a specific PR (including merged PRs)
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 42
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pr 42
 
 # Create (or replace) pending review comments on the PR
-bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --review-pr 42 --pending-review --pr 42 --no-confirm
+bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex --pr 42 --pending-review --no-confirm
 
 # Replay from captured context for consistency checks
 bun run agents run code-review --adapter claude --model claude-sonnet-4 --context-bundle .review-agent/runs/<run-id>/context/bundle.json
@@ -109,6 +109,17 @@ bun run agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
 
 # Publish existing findings without re-running models
 bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/result.json
+```
+
+### Logging (`--log`)
+
+- `none` (default): minimal status output.
+- `summary`: adapter progress messages and expanded review summary/finding previews (replaces former `--verbose` / `-v`).
+- `commands`: adapter subprocess commands before and after execution (replaces former `--show-commands`).
+- `all`: summary and commands together.
+
+```bash
+bun run agents run code-review --adapter fake --dry-run --log summary
 ```
 
 ## Troubleshooting
@@ -124,7 +135,7 @@ cat .review-agent/runs/<run-id>/roles/<role>/stderr.log
 cat .review-agent/runs/<run-id>/roles/<role>/stdout.log
 
 # Re-run with command/event visibility
-bun run agents run code-review --adapter cursor --model sonnet-4 --dry-run --verbose --show-commands
+bun run agents run code-review --adapter cursor --model sonnet-4 --dry-run --log all
 ```
 
 For Cursor custom templates, keep `--trust` in `--cursor-args` for non-interactive runs.
@@ -157,8 +168,8 @@ Pending review mode:
 - If you already have an existing pending review on that PR:
   - In interactive runs, the CLI prompts before replacing it.
   - In non-interactive runs, pass `--replace-pending-review` to opt in to replacement.
-- Use `--pr <number>` to target a specific PR, otherwise the current branch PR is auto-discovered.
-- Use `--review-pr <number>` to collect review context/diff from a specific PR (including merged PRs); PR lookups use the repo from `--workspace` and auto-resolve jj workspace pointers to canonical colocated repos for git/gh commands.
+- Use `--pr <number>` to collect review context/diff from that PR (including merged PRs) and, with `--pending-review`, to post the pending review to the same PR by default. Omit `--pr` to auto-discover the current branch PR for posting only. PR lookups use the repo from `--workspace` and auto-resolve jj workspace pointers to canonical colocated repos for `git`/`gh` commands.
+- Use `--post-pr <number>` to post to a different PR than `--pr` (rare); with `--post-only`, `--post-pr` overrides `--pr` when both are set.
 - `--no-confirm` skips interactive stale-review confirmation prompts (recommended for CI).
 - Use `--review-summary <triage|impact|evidence>` to choose the review body format (`impact` is the default).
 - Only anchorable findings (`file` + `line`) are posted as inline comments.
@@ -169,7 +180,7 @@ Post-only mode:
 - `--post-only` publishes findings from an existing `result.json` without rerunning the review model.
 - By default it auto-discovers the latest `.review-agent/runs/<run-id>/result.json` in the workspace.
 - Use `--result <path>` to choose a specific result artifact.
-- Post-only requires `pr_number` and `pr_reviewed_head_sha` metadata in the stored result; runs without `--review-pr` are rejected.
+- Post-only requires `pr_number` and `pr_reviewed_head_sha` metadata in the stored result (produce them by running the review with `--pr` on a PR-backed context). Override the posting PR with `--pr` or `--post-pr`.
 - Post-only keeps reviews pending (unsubmitted) exactly like `--pending-review`.
 - Post-only does not mutate the selected `result.json`.
 
@@ -236,7 +247,7 @@ Deterministic mode:
 ## PR Context Discovery
 
 - The harness auto-discovers the related PR for the current branch with `gh pr view`.
-- If `--review-pr <number>` is provided, the harness fetches PR metadata/diff from that PR directly.
+- If `--pr <number>` is provided, the harness fetches PR metadata/diff from that PR directly.
 - It reads PR title and description/body into review context.
 - The review diff is built from the PR base branch patch (`<base>...HEAD`), not untracked `.review-agent` artifacts.
 - It extracts docs/links referenced in the PR description.
@@ -279,7 +290,7 @@ Core artifacts:
 - `metadata.consensus_dropped_findings`: count filtered by consensus
 - `metadata.deterministic_mode`: `true` when deterministic profile is enabled
 - `metadata.opencode_*` / `metadata.claude_*`: adapter-specific model/runtime settings and detected executable version
-- `metadata.pr_number`: PR number when `--review-pr` is used
+- `metadata.pr_number`: PR number when the run used PR-backed context (`--pr`)
 - `metadata.pr_reviewed_head_sha`: PR head SHA captured during context collection
 - `metadata.pr_reviewed_at`: ISO-8601 timestamp when PR patch context was collected
 - `metadata.pr_posting_head_sha`: PR head SHA seen immediately before posting (`--pending-review`)
@@ -288,7 +299,7 @@ Core artifacts:
 
 ## Rate Limiting
 
-- A full `--review-pr` + `--pending-review` flow usually performs around 7-8 GitHub API requests.
+- A full `--pr` + `--pending-review` flow usually performs around 7-8 GitHub API requests.
 - Check quota with `gh api rate_limit` if you encounter `403`/`429` responses.
 - The CLI does not currently implement automatic rate-limit retries/backoff.
 
