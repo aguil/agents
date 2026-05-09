@@ -34,7 +34,7 @@ bun run build
 Then run reviews from your work-repo terminal with the bundled launcher:
 
 ```bash
-/path/to/aguil/agents/dist/agents run code-review --adapter opencode --model opencode/gpt-5.3-codex
+/path/to/aguil/agents/dist/agents code-review --adapter opencode --model opencode/gpt-5.3-codex
 ```
 
 `dist/` is gitignored, so the build stays local to each host checkout.

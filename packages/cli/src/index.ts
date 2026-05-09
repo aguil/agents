@@ -1,12 +1,22 @@
 import {
   CODE_REVIEW_ROLE_IDS,
+  CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   createCodeReviewAdapter,
   expectedRolesForTriageTier,
   parseCodeReviewRunMetadata,
   roleReviewSectionLabel,
   runCodeReview,
   type CodeReviewAdapterName,
+  type CodeReviewRoleId,
 } from "@aguil/agents-code-review";
+import type { CliOptions } from "./code-review-cli-models";
+import { resolveCodeReviewCliOptions } from "./code-review-config";
+import {
+  codeReviewHelpStderrExtras,
+  renderCodeReviewHelp,
+  resolveCodeReviewHelp,
+} from "./code-review-help";
+import { parseCodeReviewArgv, peelCodeReviewSubcommand, resolveEffectivePostOnly } from "./parse-code-review-argv";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
@@ -15,49 +25,50 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
-  if (argv.includes("--help") || argv.length === 0) {
-    console.log(`Usage: agents <command> [options]
-
-Commands:
-  run code-review        Run the code-review harness
-
-Options:
-  --workspace <path>     Workspace to review (default: cwd)
-  --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
-  --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
-  --context-bundle <path> Reuse an existing context bundle JSON for replay
-  --consensus <n>        Run n passes and keep recurring findings (default: 1 with --pending-review)
-  --adapter <name>       Execution adapter: fake, opencode, claude, or cursor (default: fake)
-  --model <id>           Model passed to opencode/claude/cursor
-  --variant <id>         OpenCode variant (provider-specific effort profile)
-  --agent <name>         OpenCode agent name
-  --opencode <path>      OpenCode executable (default: opencode)
-  --claude <path>        Claude Code executable (default: claude)
-  --claude-args <value>  Comma-separated arg template for Claude (supports {prompt})
-  --cursor <path>        Cursor CLI executable (default: agent)
-  --cursor-args <value>  Comma-separated arg template for Cursor (supports {prompt}; keep --trust)
-  --cursor-mode <mode>   Cursor mode: agent, plan, or ask
-  --verbose, -v          Print compact progress and finding summaries
-  --show-commands        Print adapter commands before and after execution
-  --no-deterministic     Disable deterministic adapter defaults
-  --strict               Fail run on any role error or timeout
-  --pending-review       Create an unsubmitted GitHub PR review
-  --post-only            Post findings from an existing run result
-  --result <path>        Result JSON path (auto-discovers latest by default)
-  --no-confirm           Skip interactive confirmation prompts
-  --replace-pending-review Replace an existing pending PR review (requires opt-in)
-  --review-pr <number>   PR number used for review context and diff collection
-  --pr <number>          PR number for pending review (auto-discover if omitted)
-  --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
-  --pure                 Run opencode without external plugins
-  --print-logs           Ask opencode to print logs to stderr`);
+  const helpReq = resolveCodeReviewHelp(argv);
+  if (helpReq !== null) {
+    console.log(renderCodeReviewHelp(helpReq));
+    for (const line of codeReviewHelpStderrExtras(helpReq)) {
+      console.error(line);
+    }
     return 0;
   }
 
-  if (argv[0] === "run" && argv[1] === "code-review") {
-    const options = parseOptions(argv.slice(2));
+  if (argv[0] === "code-review") {
+    const peeled = peelCodeReviewSubcommand(argv.slice(1));
+    if (!peeled.ok) {
+      console.error(peeled.error);
+      return 1;
+    }
+    const parsed = parseCodeReviewArgv(peeled.optionArgv);
+    const workspaceForConfig = resolve(parsed.options.workspace ?? process.cwd());
+    const resolvedCli = await resolveCodeReviewCliOptions(workspaceForConfig, parsed);
+    if (!resolvedCli.ok) {
+      console.error(resolvedCli.error);
+      return 1;
+    }
+    const options: CliOptions = {
+      ...resolvedCli.options,
+      postOnly: resolveEffectivePostOnly(peeled.kind, resolvedCli.options.postOnly),
+    };
+
+    const logLevelResolved = parseCliLogLevel(options.log ?? "none");
+    if (logLevelResolved === undefined) {
+      console.error(`Invalid --log value: ${options.log}`);
+      console.error("Expected one of: none, summary, commands, all.");
+      return 1;
+    }
+    const logLevel: CliLogLevel = logLevelResolved;
+
     if (options.postOnly) {
       return runPostOnly(options);
+    }
+    if (peeled.kind === "replay") {
+      const bundle = options.contextBundle?.trim();
+      if (bundle === undefined || bundle.length === 0) {
+        console.error("replay requires a context bundle (--context-bundle <path> or positional path after `replay`).");
+        return 1;
+      }
     }
     const adapterName = parseAdapterName(options.adapter);
     if (adapterName === undefined) {
@@ -103,13 +114,13 @@ Options:
     }
     const pendingReviewEnabled = options.pendingReview && !options.dryRun;
     const consensusRuns = requestedConsensusRuns ?? (pendingReviewEnabled ? 1 : undefined);
-    const reviewPrNumber = parsePrNumber(options.reviewPr);
-    if (options.reviewPr !== undefined && reviewPrNumber === undefined) {
-      console.error(`Invalid --review-pr value: ${options.reviewPr}`);
+    const reviewPrNumber = parsePrNumber(options.pr);
+    if (options.pr !== undefined && reviewPrNumber === undefined) {
+      console.error(`Invalid --pr value: ${options.pr}`);
       return 1;
     }
 
-    if (options.verbose) {
+    if (logShowsSummary(logLevel)) {
       console.log(`Starting code review with adapter '${adapterName}'.`);
       if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
         console.log("Using default consensus=1 for --pending-review (override with --consensus <n>).");
@@ -125,10 +136,10 @@ Options:
       strict: options.strict,
       metadata: await buildDeterminismMetadata(adapterName, effectiveAdapter, options, deterministicEnabled),
       adapter,
-      onEvent: createRunEventLogger(options),
+      onEvent: createRunEventLogger(logLevel),
     });
     let verbosePrDiffContext: PullRequestDiffContext | undefined;
-    if (options.verbose) {
+    if (logShowsSummary(logLevel)) {
       printVerboseFindingSummary(result.findings);
       const summaryStyle = parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
       const rawCommentCandidates = findingsToPendingReviewComments(result.findings);
@@ -185,11 +196,11 @@ Options:
     }
 
     if (pendingReviewEnabled) {
-      const prNumber = parsePrNumber(options.pr);
-      if (options.pr !== undefined && prNumber === undefined) {
-        console.error(`Invalid --pr value: ${options.pr}`);
+      if (options.postPr !== undefined && parsePrNumber(options.postPr) === undefined) {
+        console.error(`Invalid --post-pr value: ${options.postPr}`);
         return 1;
       }
+      const postingPrNumber = parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
       const reviewSummaryStyle = parseReviewSummaryStyle(options.reviewSummary);
       if (options.reviewSummary !== undefined && reviewSummaryStyle === undefined) {
         console.error(`Invalid --review-summary value: ${options.reviewSummary}`);
@@ -199,15 +210,19 @@ Options:
 
       const posted = await replacePendingPullRequestReview({
         findings: result.findings,
-        prNumber,
+        prNumber: postingPrNumber,
         reviewSummaryStyle: reviewSummaryStyle ?? "impact",
         reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
         noConfirm: options.noConfirm,
         replacePendingReview: options.replacePendingReview,
         workspacePath: options.workspace,
-        preloadedPrDiffContext: (options.verbose && reviewPrNumber !== undefined && prNumber !== undefined && prNumber === reviewPrNumber)
-          ? verbosePrDiffContext
-          : undefined,
+        preloadedPrDiffContext:
+          (logShowsSummary(logLevel)
+            && reviewPrNumber !== undefined
+            && postingPrNumber !== undefined
+            && postingPrNumber === reviewPrNumber)
+            ? verbosePrDiffContext
+            : undefined,
         runMetadata: result.metadata,
       });
       if (posted.cancelled === true) {
@@ -230,42 +245,16 @@ Options:
     return result.status === "error" ? 1 : 0;
   }
 
+  if (argv[0] === "run" && argv[1] === "code-review") {
+    console.error('Use `agents code-review` (the "run" command was removed).');
+    return 1;
+  }
   console.error(`Unknown command: ${argv[0]}`);
   return 1;
 }
 
-interface CliOptions {
-  readonly workspace?: string;
-  readonly scratchpad?: string;
-  readonly dryRun: boolean;
-  readonly contextBundle?: string;
-  readonly result?: string;
-  readonly consensus?: string;
-  readonly adapter?: string;
-  readonly model?: string;
-  readonly variant?: string;
-  readonly agent?: string;
-  readonly opencode?: string;
-  readonly claude?: string;
-  readonly claudeArgs?: string;
-  readonly cursor?: string;
-  readonly cursorArgs?: string;
-  readonly cursorMode?: string;
-  readonly verbose: boolean;
-  readonly showCommands: boolean;
-  readonly reviewPr?: string;
-  readonly pr?: string;
-  readonly reviewSummary?: string;
-  readonly postOnly: boolean;
-  readonly noConfirm: boolean;
-  readonly replacePendingReview: boolean;
-  readonly noDeterministic: boolean;
-  readonly strict: boolean;
-  readonly pendingReview: boolean;
-  readonly pure: boolean;
-  readonly printLogs: boolean;
-}
 
+export type { CliOptions } from "./code-review-cli-models";
 export type ReviewSummaryStyle = "triage" | "impact" | "evidence";
 
 export interface PendingReviewComment {
@@ -327,60 +316,6 @@ interface EffectiveAdapterOptions {
   };
 }
 
-function parseOptions(argv: readonly string[]): CliOptions {
-  const options: Record<string, string> = {};
-  const flags = new Set<string>();
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "-v") {
-      flags.add("verbose");
-      continue;
-    }
-    if (!arg.startsWith("--")) {
-      continue;
-    }
-    const key = arg.slice(2);
-    const value = argv[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      flags.add(key);
-      continue;
-    }
-    options[key] = value;
-    index += 1;
-  }
-  return {
-    workspace: options.workspace,
-    scratchpad: options.scratchpad,
-    dryRun: flags.has("dry-run"),
-    contextBundle: options["context-bundle"],
-    result: options.result,
-    consensus: options.consensus,
-    adapter: options.adapter,
-    model: options.model,
-    variant: options.variant,
-    agent: options.agent,
-    opencode: options.opencode,
-    claude: options.claude,
-    claudeArgs: options["claude-args"],
-    cursor: options.cursor,
-    cursorArgs: options["cursor-args"],
-    cursorMode: options["cursor-mode"],
-    verbose: flags.has("verbose"),
-    showCommands: flags.has("show-commands"),
-    reviewPr: options["review-pr"],
-    pr: options.pr,
-    reviewSummary: options["review-summary"],
-    postOnly: flags.has("post-only"),
-    noConfirm: flags.has("no-confirm"),
-    replacePendingReview: flags.has("replace-pending-review"),
-    noDeterministic: flags.has("no-deterministic"),
-    strict: flags.has("strict"),
-    pendingReview: flags.has("pending-review"),
-    pure: flags.has("pure"),
-    printLogs: flags.has("print-logs"),
-  };
-}
-
 function resolveScratchpadRoot(options: CliOptions): string | undefined {
   if (options.scratchpad !== undefined) {
     return options.scratchpad;
@@ -419,20 +354,20 @@ function summarizeFindingMessage(message: string): string {
   return firstSentence && firstSentence.length > 0 ? firstSentence : message.trim();
 }
 
-function createRunEventLogger(options: CliOptions): ((event: AgentEvent) => void) | undefined {
-  if (!options.verbose && !options.showCommands) {
+function createRunEventLogger(logLevel: CliLogLevel): ((event: AgentEvent) => void) | undefined {
+  if (!logShowsSummary(logLevel) && !logShowsCommands(logLevel)) {
     return undefined;
   }
 
   return (event) => {
-    if (options.showCommands && event.type === "tool") {
+    if (logShowsCommands(logLevel) && event.type === "tool") {
       const commandData = parseCommandEventData(event.data);
       if (commandData?.phase === "before") {
         console.log(`[${event.roleId}] command (before): ${formatCommand(commandData.cmd)}`);
       }
     }
 
-    if (options.showCommands && (event.type === "completed" || event.type === "error")) {
+    if (logShowsCommands(logLevel) && (event.type === "completed" || event.type === "error")) {
       const completionData = parseCommandCompletionData(event.data);
       if (completionData !== undefined) {
         const durationLabel = completionData.elapsedMs === undefined
@@ -445,7 +380,7 @@ function createRunEventLogger(options: CliOptions): ((event: AgentEvent) => void
       }
     }
 
-    if (!options.verbose) {
+    if (!logShowsSummary(logLevel)) {
       return;
     }
     if (event.type === "started") {
@@ -515,7 +450,7 @@ function parseConsensusRuns(value: string | undefined): number | undefined {
 
 function parseAdapterName(value: string | undefined): CodeReviewAdapterName | undefined {
   if (value === undefined || value === "fake" || value === "opencode" || value === "claude" || value === "cursor") {
-    return value ?? "fake";
+    return value ?? CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT;
   }
   return undefined;
 }
@@ -541,6 +476,18 @@ function parseCommaSeparated(value: string | undefined): readonly string[] | und
   return parsed.length > 0 ? parsed : undefined;
 }
 
+/** Config may store JSON string arrays verbatim; CLI and env supply comma-split strings. */
+function coerceAdapterArgsTemplate(value: string | readonly string[] | undefined): readonly string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    const trimmed = value.map((part) => part.trim()).filter((part) => part.length > 0);
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  return parseCommaSeparated(value as string);
+}
+
 function resolveEffectiveAdapterOptions(
   options: CliOptions,
   adapterName: CodeReviewAdapterName,
@@ -555,11 +502,11 @@ function resolveEffectiveAdapterOptions(
     },
     claude: {
       model: options.model,
-      argsTemplate: parseCommaSeparated(options.claudeArgs),
+      argsTemplate: coerceAdapterArgsTemplate(options.claudeArgs),
     },
     cursor: {
       model: options.model,
-      argsTemplate: parseCommaSeparated(options.cursorArgs),
+      argsTemplate: coerceAdapterArgsTemplate(options.cursorArgs),
       mode: parseCursorMode(options.cursorMode),
       force: true,
     },
@@ -586,13 +533,19 @@ async function buildDeterminismMetadata(
 
   if (adapterName === "claude") {
     metadata.claude_model = effective.claude.model ?? "";
-    metadata.claude_args_template = effective.claude.argsTemplate?.join(",") ?? "";
+    metadata.claude_args_template =
+      effective.claude.argsTemplate === undefined || effective.claude.argsTemplate.length === 0
+        ? ""
+        : JSON.stringify([...effective.claude.argsTemplate]);
     metadata.claude_version = await detectExecutableVersion(options.claude ?? "claude");
   }
 
   if (adapterName === "cursor") {
     metadata.cursor_model = effective.cursor.model ?? "";
-    metadata.cursor_args_template = effective.cursor.argsTemplate?.join(",") ?? "";
+    metadata.cursor_args_template =
+      effective.cursor.argsTemplate === undefined || effective.cursor.argsTemplate.length === 0
+        ? ""
+        : JSON.stringify([...effective.cursor.argsTemplate]);
     metadata.cursor_mode = effective.cursor.mode ?? "";
     metadata.cursor_force = effective.cursor.force ? "true" : "false";
     metadata.cursor_version = await detectExecutableVersion(options.cursor ?? "agent");
@@ -607,12 +560,39 @@ async function detectExecutableVersion(executable: string): Promise<string> {
   return line ?? "";
 }
 
-function parsePrNumber(value: string | undefined): number | undefined {
+export function parsePrNumber(value: string | undefined): number | undefined {
   if (value === undefined) {
     return undefined;
   }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (!/^[1-9]\d*$/.test(trimmed)) {
+    return undefined;
+  }
+  return Number.parseInt(trimmed, 10);
+}
+
+/** CLI diagnostics for code-review (`--log`); default resolved to `none` in main after validation. */
+type CliLogLevel = "none" | "summary" | "commands" | "all";
+
+function parseCliLogLevel(value: string | undefined): CliLogLevel | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "none" || value === "summary" || value === "commands" || value === "all") {
+    return value;
+  }
+  return undefined;
+}
+
+function logShowsSummary(level: CliLogLevel): boolean {
+  return level === "summary" || level === "all";
+}
+
+function logShowsCommands(level: CliLogLevel): boolean {
+  return level === "commands" || level === "all";
 }
 
 interface StoredReviewResult {
@@ -622,13 +602,17 @@ interface StoredReviewResult {
 
 async function runPostOnly(options: CliOptions): Promise<number> {
   if (options.pendingReview) {
-    console.warn("Ignoring --pending-review because --post-only already publishes a pending review.");
+    console.warn("Ignoring --pending-review because code-review post already publishes a pending review.");
   }
-  const explicitPrNumber = parsePrNumber(options.pr);
-  if (options.pr !== undefined && explicitPrNumber === undefined) {
+  if (options.postPr !== undefined && parsePrNumber(options.postPr) === undefined) {
+    console.error(`Invalid --post-pr value: ${options.postPr}`);
+    return 1;
+  }
+  if (options.pr !== undefined && parsePrNumber(options.pr) === undefined) {
     console.error(`Invalid --pr value: ${options.pr}`);
     return 1;
   }
+  const explicitPrNumber = parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
 
   const reviewSummaryStyle = parseReviewSummaryStyle(options.reviewSummary);
   if (options.reviewSummary !== undefined && reviewSummaryStyle === undefined) {
@@ -660,7 +644,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   const reviewedHeadSha = metadata.pr_reviewed_head_sha?.trim();
   if (metadataPrNumber === undefined || reviewedHeadSha === undefined || reviewedHeadSha.length === 0) {
     console.error("Selected result is missing PR metadata required for stale checks.");
-    console.error("Re-run with --review-pr to capture pr_number and pr_reviewed_head_sha.");
+    console.error("Re-run with --pr to capture pr_number and pr_reviewed_head_sha.");
     return 1;
   }
   const prNumber = explicitPrNumber ?? metadataPrNumber;
@@ -1588,10 +1572,14 @@ export function formatReviewCoverageSectionLines(
 
   const skipSet = new Set(skippedByTriage);
   const inScheduledTier = (roleId: string): boolean =>
-    tier === undefined || expected?.has(roleId) === true;
+    tier === undefined || expected?.has(roleId as CodeReviewRoleId) === true;
 
-  const timedOut = timedOutRolesRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
-  const failed = failedRolesRaw.filter((id) => !skipSet.has(id) && inScheduledTier(id));
+  const timedOut = timedOutRolesRaw.filter(
+    (id) => !skipSet.has(id as CodeReviewRoleId) && inScheduledTier(id),
+  );
+  const failed = failedRolesRaw.filter(
+    (id) => !skipSet.has(id as CodeReviewRoleId) && inScheduledTier(id),
+  );
 
   const hasOutcomeDetail =
     completed.length > 0 || timedOut.length > 0 || failed.length > 0;
@@ -1721,15 +1709,16 @@ function renderImpactSummary(
     return lines.join("\n");
   }
 
-  const groups: Record<Finding["sourceRole"], Finding[]> = {
+  const groups: Record<"security" | "performance" | "quality" | "compliance" | "other", Finding[]> = {
     security: [],
     performance: [],
     quality: [],
     compliance: [],
+    other: [],
   };
 
   for (const finding of findings) {
-    groups[finding.sourceRole].push(finding);
+    groups[impactBucketForSourceRole(finding.sourceRole)].push(finding);
   }
 
   lines.push(
@@ -1746,7 +1735,27 @@ function renderImpactSummary(
     "### Documentation / Compliance",
     ...formatFindingBullets(groups.compliance, "No compliance findings.", prDiffContext),
   );
+
+  if (groups.other.length > 0) {
+    lines.push(
+      "",
+      "### Uncategorized findings",
+      "- _These findings omit `sourceRole` or use an unexpected reviewer label._",
+      ...formatFindingBullets(groups.other, "No uncategorized findings.", prDiffContext),
+    );
+  }
+
   return lines.join("\n");
+}
+
+function impactBucketForSourceRole(
+  role: Finding["sourceRole"] | undefined,
+): "security" | "performance" | "quality" | "compliance" | "other" {
+  const trimmed = typeof role === "string" ? role.trim() : "";
+  if (trimmed === "security" || trimmed === "performance" || trimmed === "quality" || trimmed === "compliance") {
+    return trimmed;
+  }
+  return "other";
 }
 
 function renderEvidenceSummary(
@@ -2108,11 +2117,27 @@ interface GitHubPullRequestFile {
   readonly patch?: string;
 }
 
-if (import.meta.main) {
-  process.exitCode = await main();
-}
+const pullRequestDiffContextCache = new Map<string, Promise<PullRequestDiffContext>>();
 
 async function loadPullRequestDiffContext(
+  repo: string,
+  prNumber: number,
+  workspacePath?: string,
+): Promise<PullRequestDiffContext> {
+  const key = `${repo}\0${prNumber}\0${resolveWorkspaceCwd(workspacePath)}`;
+  const cached = pullRequestDiffContextCache.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const pending = loadPullRequestDiffContextUncached(repo, prNumber, workspacePath);
+  pullRequestDiffContextCache.set(key, pending);
+  pending.catch(() => {
+    pullRequestDiffContextCache.delete(key);
+  });
+  return pending;
+}
+
+async function loadPullRequestDiffContextUncached(
   repo: string,
   prNumber: number,
   workspacePath?: string,
@@ -2184,4 +2209,8 @@ function extractRightSideHunkPositions(patch: string | undefined): ReadonlyMap<n
     }
   }
   return positions;
+}
+
+if (import.meta.main) {
+  process.exitCode = await main();
 }

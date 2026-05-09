@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   CODE_REVIEW_ROLE_IDS,
   createFakeCodeReviewAdapter,
   definitionForTriage,
@@ -57,7 +58,147 @@ import {
   formatReviewCoverageSectionLines,
   loadStoredReviewResult,
   parseReviewSummaryStyle,
+  parsePrNumber,
 } from "../packages/cli/src/index";
+import {
+  extractConfigDocument,
+  mergeFlatConfigLayers,
+  mergePresetMaps,
+  normalizeAdapterArgsTemplateField,
+  resolveCodeReviewCliOptions,
+  sanitizeRepoAdapterExecutablePartial,
+} from "../packages/cli/src/code-review-config";
+import { parseCodeReviewArgv, peelCodeReviewSubcommand, resolveEffectivePostOnly } from "../packages/cli/src/parse-code-review-argv";
+import { codeReviewHelpStderrExtras, resolveCodeReviewHelp } from "../packages/cli/src/code-review-help";
+
+test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => {
+  expect(peelCodeReviewSubcommand([])).toEqual({
+    ok: true,
+    kind: "run",
+    optionArgv: [],
+  });
+  expect(peelCodeReviewSubcommand(["--dry-run"])).toEqual({
+    ok: true,
+    kind: "run",
+    optionArgv: ["--dry-run"],
+  });
+});
+
+test("peelCodeReviewSubcommand accepts post prefix", () => {
+  expect(peelCodeReviewSubcommand(["post"])).toEqual({
+    ok: true,
+    kind: "post",
+    optionArgv: [],
+  });
+  expect(peelCodeReviewSubcommand(["post", "--result", "./r.json"])).toEqual({
+    ok: true,
+    kind: "post",
+    optionArgv: ["--result", "./r.json"],
+  });
+});
+
+test("peelCodeReviewSubcommand injects context-bundle for replay positional path", () => {
+  expect(peelCodeReviewSubcommand(["replay", "./bundle.json"])).toEqual({
+    ok: true,
+    kind: "replay",
+    optionArgv: ["--context-bundle", "./bundle.json"],
+  });
+  expect(peelCodeReviewSubcommand(["replay", "--adapter", "fake"])).toEqual({
+    ok: true,
+    kind: "replay",
+    optionArgv: ["--adapter", "fake"],
+  });
+  expect(peelCodeReviewSubcommand(["replay", "./b.json", "--dry-run"])).toEqual({
+    ok: true,
+    kind: "replay",
+    optionArgv: ["--context-bundle", "./b.json", "--dry-run"],
+  });
+});
+
+test("peelCodeReviewSubcommand rejects unknown leading token", () => {
+  const result = peelCodeReviewSubcommand(["publish"]);
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.error).toContain("publish");
+    expect(result.error).toContain("replay");
+    expect(result.error).toContain("post");
+    expect(result.error).toContain("code-review");
+  }
+});
+
+test("parseCodeReviewArgv never enables postOnly from CLI flags", () => {
+  expect(parseCodeReviewArgv([]).options.postOnly).toBe(false);
+  expect(parseCodeReviewArgv(["--dry-run"]).options.postOnly).toBe(false);
+});
+
+test("resolveEffectivePostOnly ignores merged postOnly for replay subcommand", () => {
+  expect(resolveEffectivePostOnly("replay", true)).toBe(false);
+  expect(resolveEffectivePostOnly("replay", false)).toBe(false);
+  expect(resolveEffectivePostOnly("run", true)).toBe(true);
+  expect(resolveEffectivePostOnly("run", false)).toBe(false);
+  expect(resolveEffectivePostOnly("post", false)).toBe(true);
+  expect(resolveEffectivePostOnly("post", true)).toBe(true);
+});
+
+test("parsePrNumber rejects non-canonical Pull Request number strings", () => {
+  expect(parsePrNumber("123")).toBe(123);
+  expect(parsePrNumber(" 456 ")).toBe(456);
+  expect(parsePrNumber(undefined)).toBe(undefined);
+  expect(parsePrNumber("")).toBe(undefined);
+  expect(parsePrNumber("   ")).toBe(undefined);
+  expect(parsePrNumber("123abc")).toBe(undefined);
+  expect(parsePrNumber("12 3")).toBe(undefined);
+  expect(parsePrNumber("0")).toBe(undefined);
+  expect(parsePrNumber("012")).toBe(undefined);
+});
+
+test("resolveCodeReviewHelp skips normal runs lacking help tokens", () => {
+  expect(resolveCodeReviewHelp(["code-review"])).toBeNull();
+  expect(resolveCodeReviewHelp(["code-review", "--adapter", "fake"])).toBeNull();
+});
+
+test("resolveCodeReviewHelp maps contextual help scopes", () => {
+  expect(resolveCodeReviewHelp([])).toEqual({ kind: "overview" });
+  expect(resolveCodeReviewHelp(["--help"])).toEqual({ kind: "overview" });
+  expect(resolveCodeReviewHelp(["-h"])).toEqual({ kind: "overview" });
+  expect(resolveCodeReviewHelp(["--help", "code-review"])).toEqual({
+    kind: "run_replay",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "--help"])).toEqual({ kind: "run_replay" });
+  expect(resolveCodeReviewHelp(["code-review", "-h"])).toEqual({ kind: "run_replay" });
+  expect(resolveCodeReviewHelp(["code-review", "--adapter", "fake", "-h"])).toEqual({
+    kind: "run_replay",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "post", "--help"])).toEqual({ kind: "post" });
+  expect(resolveCodeReviewHelp(["code-review", "--help", "post"])).toEqual({ kind: "post" });
+  expect(resolveCodeReviewHelp(["code-review", "replay", "--help"])).toEqual({
+    kind: "replay",
+  });
+  expect(resolveCodeReviewHelp(["unknown", "--help"])).toEqual({
+    kind: "overview",
+    unknownFirstToken: "unknown",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "waffles", "--help"])).toEqual({
+    kind: "overview",
+    codeReviewBadSubcommand: "waffles",
+  });
+  expect(resolveCodeReviewHelp(["run", "code-review", "--help"])).toEqual({
+    kind: "run_replay",
+    legacyRunSpelling: true,
+  });
+});
+
+test("codeReviewHelpStderrExtras surfaces unknown command hints", () => {
+  const top = resolveCodeReviewHelp(["nope", "-h"])!;
+  expect(codeReviewHelpStderrExtras(top)).toHaveLength(2);
+
+  const badCr = resolveCodeReviewHelp(["code-review", "nope-sub", "--help"])!;
+  expect(badCr).toMatchObject({
+    kind: "overview",
+    codeReviewBadSubcommand: "nope-sub",
+  });
+  expect(codeReviewHelpStderrExtras(badCr)).toHaveLength(2);
+});
 
 test("serializes agent events as JSONL", () => {
   const event: AgentEvent = {
@@ -694,6 +835,31 @@ test("impact summary review coverage lists timed-out scheduled role", () => {
 
   expect(body).toContain("**Security:** not performed");
   expect(body).toContain("timed out");
+});
+
+test("impact summary buckets unknown or empty sourceRole without throwing", () => {
+  const base = {
+    id: "f-bad-role",
+    severity: "warning" as const,
+    title: "Role plumbing",
+    description: "d",
+    evidence: "e",
+    validation: { status: "verified" as const, details: "ok" },
+    file: "x.ts",
+    line: 1,
+  };
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [
+      { ...base, id: "f-empty", sourceRole: "" },
+      { ...base, id: "f-weird", sourceRole: "  Performance  " },
+    ],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+  });
+
+  expect(body).toContain("### Uncategorized findings");
+  expect(body).toContain("Role plumbing");
 });
 
 test("detects file:line anchors outside the PR diff map", () => {
@@ -1805,5 +1971,296 @@ test("resolveGitAwarePath warns and falls back when canonical .git is missing", 
     expect(result.warning).toContain("was not found");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("mergeFlatConfigLayers overlays strings and booleans onto base partials", () => {
+  expect(
+    mergeFlatConfigLayers(
+      { model: "keep", adapter: "opencode" },
+      { model: "overlay", strict: true },
+    ),
+  ).toEqual({
+    model: "overlay",
+    adapter: "opencode",
+    strict: true,
+  });
+});
+
+test("mergePresetMaps merges each named preset user then repo (repo wins on overlap)", () => {
+  expect(
+    mergePresetMaps({ ci: { dryRun: false, model: "m0" } }, { ci: { dryRun: true, adapter: "fake" } }),
+  ).toEqual({
+    ci: { dryRun: true, model: "m0", adapter: "fake" },
+  });
+});
+
+test("extractConfigDocument rejects nested presets inside a preset body", () => {
+  expect(
+    extractConfigDocument({
+      presets: {
+        ci: { presets: {} },
+      },
+    }).ok,
+  ).toBe(false);
+});
+
+test("extractConfigDocument parses top-level flat options and presets", () => {
+  const doc = extractConfigDocument({
+    adapter: "fake",
+    log: "summary",
+    dryRun: false,
+    presets: { ci: { dryRun: true } },
+  });
+  expect(doc.ok).toBe(true);
+  if (!doc.ok) {
+    return;
+  }
+  expect(doc.flat.adapter).toBe("fake");
+  expect(doc.flat.log).toBe("summary");
+  expect(doc.presets.ci).toEqual({ dryRun: true });
+  expect(doc.diagnostics.length).toBe(0);
+});
+
+test("normalizeAdapterArgsTemplateField preserves JSON array tokens (including embedded commas)", () => {
+  expect(normalizeAdapterArgsTemplateField("cursorArgs", undefined)).toEqual({ ok: true });
+  const normalized = normalizeAdapterArgsTemplateField("cursorArgs", ["--print", "a,b", "  spaced  "]);
+  expect(normalized).toEqual({ ok: true, normalized: ["--print", "a,b", "spaced"] });
+});
+
+test("normalizeAdapterArgsTemplateField rejects mixed-type arrays", () => {
+  const badFixture: unknown[] = ["--ok", false];
+  expect(normalizeAdapterArgsTemplateField("claudeArgs", badFixture).ok).toBe(false);
+});
+
+test("extractConfigDocument accepts adapter arg templates as JSON string arrays", () => {
+  const doc = extractConfigDocument({
+    cursorArgs: ["--trust", "--print"],
+    presets: {
+      demo: {
+        claudeArgs: ["-p", "--model", "x"],
+      },
+    },
+  });
+  expect(doc.ok).toBe(true);
+  if (!doc.ok) {
+    return;
+  }
+  expect(doc.flat.cursorArgs).toEqual(["--trust", "--print"]);
+  expect(doc.presets.demo?.claudeArgs).toEqual(["-p", "--model", "x"]);
+});
+
+test("extractConfigDocument lists unknown JSON keys in diagnostics when not strict", () => {
+  const doc = extractConfigDocument({
+    adapter: "fake",
+    customFieldNobodyKnows: 1,
+  });
+  expect(doc.ok).toBe(true);
+  if (!doc.ok) {
+    return;
+  }
+  expect(doc.diagnostics.some((m) => m.includes("unknown keys"))).toBe(true);
+});
+
+test("extractConfigDocument rejects unknown keys when AGENTS_CODE_REVIEW_CONFIG_STRICT is truthy", () => {
+  const prev = process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT;
+  process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT = "true";
+  try {
+    expect(
+      extractConfigDocument({
+        adapter: "fake",
+        orphanKeyForTests: {},
+      }).ok,
+    ).toBe(false);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT;
+    } else {
+      process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT = prev;
+    }
+  }
+});
+
+test("extractConfigDocument rejects invalid cursorArgs array shapes", () => {
+  expect(extractConfigDocument({ cursorArgs: [1 as unknown as string] }).ok).toBe(false);
+});
+
+test("resolveCodeReviewCliOptions merges configs and applies preset and CLI precedence", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-cfg-resolve-"));
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
+    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await writeFile(
+      join(xdg, "agents", "code-review", "config.json"),
+      JSON.stringify({
+        model: "from-user",
+        presets: { ci: { consensus: "2" } },
+      }),
+    );
+    await writeFile(
+      join(ws, ".review-agent", "config.json"),
+      JSON.stringify({
+        adapter: "opencode",
+        presets: { ci: { dryRun: true, adapter: "cursor" } },
+      }),
+    );
+    process.env.XDG_CONFIG_HOME = xdg;
+
+    const parsedCi = parseCodeReviewArgv(["--preset", "ci"]);
+    const r1 = await resolveCodeReviewCliOptions(ws, parsedCi);
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) {
+      return;
+    }
+    expect(r1.options.adapter).toBe("cursor");
+    expect(r1.options.model).toBe("from-user");
+    expect(r1.options.consensus).toBe("2");
+    expect(r1.options.dryRun).toBe(true);
+
+    const parsedCliWins = parseCodeReviewArgv(["--preset", "ci", "--adapter", "fake", "--dry-run"]);
+    const r2 = await resolveCodeReviewCliOptions(ws, parsedCliWins);
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) {
+      return;
+    }
+    expect(r2.options.adapter).toBe("fake");
+    expect(r2.options.dryRun).toBe(true);
+
+    const badPreset = parseCodeReviewArgv(["--preset", "missing"]);
+    const r3 = await resolveCodeReviewCliOptions(ws, badPreset);
+    expect(r3.ok).toBe(false);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  }
+});
+
+test("resolveCodeReviewCliOptions preserves comma-containing tokens in JSON cursorArgs arrays", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-args-comma-"));
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    process.env.XDG_CONFIG_HOME = xdg;
+    await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
+    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await writeFile(
+      join(xdg, "agents", "code-review", "config.json"),
+      JSON.stringify({
+        cursorArgs: ["--flag", "a,b=c", "--tail"],
+      }),
+    );
+
+    const r = await resolveCodeReviewCliOptions(ws, parseCodeReviewArgv([]));
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      return;
+    }
+    expect(r.options.cursorArgs).toEqual(["--flag", "a,b=c", "--tail"]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  }
+});
+
+test("sanitizeRepoAdapterExecutablePartial keeps adapter knobs and strips host executables only", () => {
+  const { sanitized, strippedKeys } = sanitizeRepoAdapterExecutablePartial({
+    adapter: "cursor",
+    cursor: "/evil/agent",
+    claudeArgs: ["-p"],
+    model: "m",
+    opencode: "/evil/opencode",
+    claude: "/evil/claude",
+  });
+  expect(strippedKeys.sort()).toEqual(["claude", "cursor", "opencode"]);
+  expect(sanitized.adapter).toBe("cursor");
+  expect(sanitized.cursor).toBeUndefined();
+  expect(sanitized.opencode).toBeUndefined();
+  expect(sanitized.claude).toBeUndefined();
+  expect(sanitized.claudeArgs).toEqual(["-p"]);
+  expect(sanitized.model).toBe("m");
+});
+
+test("resolveCodeReviewCliOptions drops repo-supplied executable paths and keeps user ones", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-repo-strip-"));
+  const warns: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warns.push(args.map(String).join(" "));
+    Reflect.apply(origWarn, console, args);
+  };
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    process.env.XDG_CONFIG_HOME = xdg;
+    await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
+    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await writeFile(
+      join(xdg, "agents", "code-review", "config.json"),
+      JSON.stringify({
+        cursor: "/user/agent",
+      }),
+    );
+    await writeFile(
+      join(ws, ".review-agent", "config.json"),
+      JSON.stringify({
+        cursor: "/repo/agent",
+        adapter: "cursor",
+      }),
+    );
+
+    const r = await resolveCodeReviewCliOptions(ws, parseCodeReviewArgv([]));
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      return;
+    }
+    expect(r.options.cursor).toBe("/user/agent");
+    expect(r.options.adapter).toBe("cursor");
+    expect(warns.some((line) => line.includes("repo-managed adapter executable settings"))).toBe(true);
+  } finally {
+    console.warn = origWarn;
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  }
+});
+
+test("resolveCodeReviewCliOptions uses harness packaged adapter below empty configs", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-pack-layer-"));
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    process.env.XDG_CONFIG_HOME = xdg;
+    await mkdir(xdg, { recursive: true });
+    await mkdir(ws, { recursive: true });
+
+    const r = await resolveCodeReviewCliOptions(ws, parseCodeReviewArgv([]));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
+    }
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
   }
 });
