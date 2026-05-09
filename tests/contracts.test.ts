@@ -320,6 +320,41 @@ test("discovers pull request by explicit number", async () => {
   expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName,headRefOid");
 });
 
+test("discovers pull request coalesces concurrent gh pr view calls per workspace and number", async () => {
+  let invocationCount = 0;
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      invocationCount += 1;
+    }
+    return JSON.stringify({
+      number: 7,
+      title: "T",
+      body: "B",
+      url: "https://github.com/aguil/agents/pull/7",
+      baseRefName: "main",
+      headRefOid: "aaa",
+    });
+  };
+
+  await Promise.all([
+    discoverPullRequest("/agents/pr-scope-a", commandRunner, 7),
+    discoverPullRequest("/agents/pr-scope-b", commandRunner, 7),
+  ]);
+  expect(invocationCount).toBe(2);
+
+  invocationCount = 0;
+  await Promise.all([
+    discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7),
+    discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7),
+    discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7),
+  ]);
+  expect(invocationCount).toBe(1);
+
+  invocationCount = 0;
+  await discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7);
+  expect(invocationCount).toBe(1);
+});
+
 test("prefers explicit PR patch diff when review PR is provided", async () => {
   const commands: string[] = [];
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {

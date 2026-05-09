@@ -820,9 +820,15 @@ export function parseRemoteHeadBranch(value: string | undefined): string | undef
   return match?.[1];
 }
 
-export async function discoverPullRequest(
+const discoverPullRequestInFlight = new Map<string, Promise<PullRequestMetadata | undefined>>();
+
+function pullRequestDiscoverCacheKey(workspacePath: string, pullRequestNumber?: number): string {
+  return `${resolve(workspacePath)}\0${pullRequestNumber ?? ""}`;
+}
+
+async function fetchPullRequestJson(
   workspacePath: string,
-  commandRunner: CommandRunner = runCommand,
+  commandRunner: CommandRunner,
   pullRequestNumber?: number,
 ): Promise<PullRequestMetadata | undefined> {
   const json = await commandRunner(
@@ -854,15 +860,32 @@ export async function discoverPullRequest(
 
     return {
       number: parsed.number,
-        title: parsed.title,
-        body: parsed.body,
-        url: parsed.url,
-        baseRefName: typeof parsed.baseRefName === "string" ? parsed.baseRefName : undefined,
-        headRefOid: typeof parsed.headRefOid === "string" ? parsed.headRefOid : undefined,
-      };
+      title: parsed.title,
+      body: parsed.body,
+      url: parsed.url,
+      baseRefName: typeof parsed.baseRefName === "string" ? parsed.baseRefName : undefined,
+      headRefOid: typeof parsed.headRefOid === "string" ? parsed.headRefOid : undefined,
+    };
   } catch {
     return undefined;
   }
+}
+
+export async function discoverPullRequest(
+  workspacePath: string,
+  commandRunner: CommandRunner = runCommand,
+  pullRequestNumber?: number,
+): Promise<PullRequestMetadata | undefined> {
+  const key = pullRequestDiscoverCacheKey(workspacePath, pullRequestNumber);
+  let pending = discoverPullRequestInFlight.get(key);
+  if (pending === undefined) {
+    pending = fetchPullRequestJson(workspacePath, commandRunner, pullRequestNumber);
+    discoverPullRequestInFlight.set(key, pending);
+    void pending.finally(() => {
+      discoverPullRequestInFlight.delete(key);
+    });
+  }
+  return pending;
 }
 
 export async function resolvePreferredRemoteScope(
