@@ -7,6 +7,9 @@ import {
   runCodeReview,
   type CodeReviewAdapterName,
 } from "@aguil/agents-code-review";
+import type { CliOptions } from "./code-review-cli-models";
+import { resolveCodeReviewCliOptions } from "./code-review-config";
+import { parseCodeReviewArgv } from "./parse-code-review-argv";
 import { resolveGitAwarePath } from "@aguil/agents-core";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
@@ -49,18 +52,38 @@ Options:
   --post-pr <number>     Override posting PR with --pending-review or --post-only (rare)
   --review-summary <id>  Review summary style: triage, impact, evidence (default: impact)
   --pure                 Run opencode without external plugins
-  --print-logs           Ask opencode to print logs to stderr`);
+  --print-logs           Ask opencode to print logs to stderr
+
+Configuration (later values override earlier ones: user file < repo file < preset < env < CLI):
+  Merge order loads defaults from optional JSON:
+    $XDG_CONFIG_HOME/agents/code-review/config.json (or ~/.config/... when unset),
+    then <workspace>/.review-agent/config.json (workspace = cwd or --workspace before merge).
+    Each file may declare a top-level "presets" object.
+
+  Environment: AGENTS_CODE_REVIEW_* (see harness README); booleans accept true/false/1/0/yes/no.
+
+  --preset <name>        Apply presets.<name> from merged JSON before env then CLI overrides`);
     return 0;
   }
 
   if (argv[0] === "run" && argv[1] === "code-review") {
-    const options = parseOptions(argv.slice(2));
-    if (options.log !== undefined && parseCliLogLevel(options.log) === undefined) {
+    const parsed = parseCodeReviewArgv(argv.slice(2));
+    const workspaceForConfig = resolve(parsed.options.workspace ?? process.cwd());
+    const resolvedCli = await resolveCodeReviewCliOptions(workspaceForConfig, parsed);
+    if (!resolvedCli.ok) {
+      console.error(resolvedCli.error);
+      return 1;
+    }
+    const options = resolvedCli.options;
+
+    const logLevelResolved = parseCliLogLevel(options.log ?? "none");
+    if (logLevelResolved === undefined) {
       console.error(`Invalid --log value: ${options.log}`);
       console.error("Expected one of: none, summary, commands, all.");
       return 1;
     }
-    const logLevel: CliLogLevel = parseCliLogLevel(options.log) ?? "none";
+    const logLevel: CliLogLevel = logLevelResolved;
+
     if (options.postOnly) {
       return runPostOnly(options);
     }
@@ -243,37 +266,8 @@ Options:
   return 1;
 }
 
-interface CliOptions {
-  readonly workspace?: string;
-  readonly scratchpad?: string;
-  readonly dryRun: boolean;
-  readonly contextBundle?: string;
-  readonly result?: string;
-  readonly consensus?: string;
-  readonly adapter?: string;
-  readonly model?: string;
-  readonly variant?: string;
-  readonly agent?: string;
-  readonly opencode?: string;
-  readonly claude?: string;
-  readonly claudeArgs?: string;
-  readonly cursor?: string;
-  readonly cursorArgs?: string;
-  readonly cursorMode?: string;
-  readonly log?: string;
-  readonly pr?: string;
-  readonly postPr?: string;
-  readonly reviewSummary?: string;
-  readonly postOnly: boolean;
-  readonly noConfirm: boolean;
-  readonly replacePendingReview: boolean;
-  readonly noDeterministic: boolean;
-  readonly strict: boolean;
-  readonly pendingReview: boolean;
-  readonly pure: boolean;
-  readonly printLogs: boolean;
-}
 
+export type { CliOptions } from "./code-review-cli-models";
 export type ReviewSummaryStyle = "triage" | "impact" | "evidence";
 
 export interface PendingReviewComment {
@@ -332,55 +326,6 @@ interface EffectiveAdapterOptions {
     readonly argsTemplate?: readonly string[];
     readonly mode?: "agent" | "plan" | "ask";
     readonly force: boolean;
-  };
-}
-
-function parseOptions(argv: readonly string[]): CliOptions {
-  const options: Record<string, string> = {};
-  const flags = new Set<string>();
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (!arg.startsWith("--")) {
-      continue;
-    }
-    const key = arg.slice(2);
-    const value = argv[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      flags.add(key);
-      continue;
-    }
-    options[key] = value;
-    index += 1;
-  }
-  return {
-    workspace: options.workspace,
-    scratchpad: options.scratchpad,
-    dryRun: flags.has("dry-run"),
-    contextBundle: options["context-bundle"],
-    result: options.result,
-    consensus: options.consensus,
-    adapter: options.adapter,
-    model: options.model,
-    variant: options.variant,
-    agent: options.agent,
-    opencode: options.opencode,
-    claude: options.claude,
-    claudeArgs: options["claude-args"],
-    cursor: options.cursor,
-    cursorArgs: options["cursor-args"],
-    cursorMode: options["cursor-mode"],
-    log: options.log,
-    pr: options.pr,
-    postPr: options["post-pr"],
-    reviewSummary: options["review-summary"],
-    postOnly: flags.has("post-only"),
-    noConfirm: flags.has("no-confirm"),
-    replacePendingReview: flags.has("replace-pending-review"),
-    noDeterministic: flags.has("no-deterministic"),
-    strict: flags.has("strict"),
-    pendingReview: flags.has("pending-review"),
-    pure: flags.has("pure"),
-    printLogs: flags.has("print-logs"),
   };
 }
 

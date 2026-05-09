@@ -58,6 +58,13 @@ import {
   loadStoredReviewResult,
   parseReviewSummaryStyle,
 } from "../packages/cli/src/index";
+import {
+  extractConfigDocument,
+  mergeFlatConfigLayers,
+  mergePresetMaps,
+  resolveCodeReviewCliOptions,
+} from "../packages/cli/src/code-review-config";
+import { parseCodeReviewArgv } from "../packages/cli/src/parse-code-review-argv";
 
 test("serializes agent events as JSONL", () => {
   const event: AgentEvent = {
@@ -1805,5 +1812,109 @@ test("resolveGitAwarePath warns and falls back when canonical .git is missing", 
     expect(result.warning).toContain("was not found");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("mergeFlatConfigLayers overlays strings and booleans onto base partials", () => {
+  expect(
+    mergeFlatConfigLayers(
+      { model: "keep", adapter: "opencode" },
+      { model: "overlay", strict: true },
+    ),
+  ).toEqual({
+    model: "overlay",
+    adapter: "opencode",
+    strict: true,
+  });
+});
+
+test("mergePresetMaps merges each named preset user then repo (repo wins on overlap)", () => {
+  expect(
+    mergePresetMaps({ ci: { dryRun: false, model: "m0" } }, { ci: { dryRun: true, adapter: "fake" } }),
+  ).toEqual({
+    ci: { dryRun: true, model: "m0", adapter: "fake" },
+  });
+});
+
+test("extractConfigDocument rejects nested presets inside a preset body", () => {
+  expect(
+    extractConfigDocument({
+      presets: {
+        ci: { presets: {} },
+      },
+    }).ok,
+  ).toBe(false);
+});
+
+test("extractConfigDocument parses top-level flat options and presets", () => {
+  const doc = extractConfigDocument({
+    adapter: "fake",
+    log: "summary",
+    dryRun: false,
+    presets: { ci: { dryRun: true } },
+  });
+  expect(doc.ok).toBe(true);
+  if (!doc.ok) {
+    return;
+  }
+  expect(doc.flat.adapter).toBe("fake");
+  expect(doc.flat.log).toBe("summary");
+  expect(doc.presets.ci).toEqual({ dryRun: true });
+});
+
+test("resolveCodeReviewCliOptions merges configs and applies preset and CLI precedence", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-cfg-resolve-"));
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
+    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await writeFile(
+      join(xdg, "agents", "code-review", "config.json"),
+      JSON.stringify({
+        model: "from-user",
+        presets: { ci: { consensus: "2" } },
+      }),
+    );
+    await writeFile(
+      join(ws, ".review-agent", "config.json"),
+      JSON.stringify({
+        adapter: "opencode",
+        presets: { ci: { dryRun: true, adapter: "cursor" } },
+      }),
+    );
+    process.env.XDG_CONFIG_HOME = xdg;
+
+    const parsedCi = parseCodeReviewArgv(["--preset", "ci"]);
+    const r1 = await resolveCodeReviewCliOptions(ws, parsedCi);
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) {
+      return;
+    }
+    expect(r1.options.adapter).toBe("cursor");
+    expect(r1.options.model).toBe("from-user");
+    expect(r1.options.consensus).toBe("2");
+    expect(r1.options.dryRun).toBe(true);
+
+    const parsedCliWins = parseCodeReviewArgv(["--preset", "ci", "--adapter", "fake", "--dry-run"]);
+    const r2 = await resolveCodeReviewCliOptions(ws, parsedCliWins);
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) {
+      return;
+    }
+    expect(r2.options.adapter).toBe("fake");
+    expect(r2.options.dryRun).toBe(true);
+
+    const badPreset = parseCodeReviewArgv(["--preset", "missing"]);
+    const r3 = await resolveCodeReviewCliOptions(ws, badPreset);
+    expect(r3.ok).toBe(false);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
   }
 });

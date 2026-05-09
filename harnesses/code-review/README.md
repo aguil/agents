@@ -122,6 +122,72 @@ bun run agents run code-review --post-only --result .review-agent/runs/<run-id>/
 bun run agents run code-review --adapter fake --dry-run --log summary
 ```
 
+## Configuration files and presets
+
+Merge order (**later wins**): defaults from merged JSON (**user → repo**) → selected **`presets`** entry when you pass **`--preset`** → **`AGENTS_CODE_REVIEW_*`** environment variables → **explicit CLI flags**.
+
+- **User file:** `$XDG_CONFIG_HOME/agents/code-review/config.json` (when `XDG_CONFIG_HOME` is set), otherwise `~/.config/agents/code-review/config.json`. Omit the file when unused.
+- **Repo file:** `<workspace>/.review-agent/config.json`. The **`workspace`** used to locate this file is `resolve(process.cwd)` or **`--workspace`** **before** any `workspace` value from config is applied (configure one path explicitly if you rely on repo-scoped defaults while running from elsewhere).
+
+Optional JSON keys use **camelCase** and mirror stable CLI knobs (omit keys you don’t care about):
+
+- Strings: **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`claudeArgs`**, **`cursor`**, **`cursorArgs`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
+- Booleans: **`dryRun`**, **`postOnly`**, **`noConfirm`**, **`replacePendingReview`**, **`noDeterministic`**, **`strict`**, **`pendingReview`**, **`pure`**, **`printLogs`**.
+- **`presets`**: an object mapping preset names to nested partial-option objects **without** a nested **`presets`** key. Repo preset entries **overlay** user preset entries for the same name (same rules as top-level merge).
+
+Example **`.review-agent/config.json`**:
+
+```json
+{
+  "adapter": "opencode",
+  "model": "opencode/gpt-5.3-codex",
+  "presets": {
+    "ci": {
+      "adapter": "fake",
+      "dryRun": true,
+      "log": "commands"
+    }
+  }
+}
+```
+
+```bash
+bun run agents run code-review --preset ci
+```
+
+### Environment (`AGENTS_CODE_REVIEW_*`)
+
+| Variable | Maps to |
+|----------|---------|
+| `AGENTS_CODE_REVIEW_WORKSPACE` | `--workspace` |
+| `AGENTS_CODE_REVIEW_SCRATCHPAD` | `--scratchpad` |
+| `AGENTS_CODE_REVIEW_CONTEXT_BUNDLE` | `--context-bundle` |
+| `AGENTS_CODE_REVIEW_RESULT` | `--result` |
+| `AGENTS_CODE_REVIEW_CONSENSUS` | `--consensus` |
+| `AGENTS_CODE_REVIEW_ADAPTER` | `--adapter` |
+| `AGENTS_CODE_REVIEW_MODEL` | `--model` |
+| `AGENTS_CODE_REVIEW_VARIANT` | `--variant` |
+| `AGENTS_CODE_REVIEW_AGENT` | `--agent` |
+| `AGENTS_CODE_REVIEW_OPENCODE` | `--opencode` |
+| `AGENTS_CODE_REVIEW_CLAUDE` | `--claude` |
+| `AGENTS_CODE_REVIEW_CLAUDE_ARGS` | `--claude-args` |
+| `AGENTS_CODE_REVIEW_CURSOR` | `--cursor` |
+| `AGENTS_CODE_REVIEW_CURSOR_ARGS` | `--cursor-args` |
+| `AGENTS_CODE_REVIEW_CURSOR_MODE` | `--cursor-mode` |
+| `AGENTS_CODE_REVIEW_LOG` | `--log` |
+| `AGENTS_CODE_REVIEW_PR` | `--pr` |
+| `AGENTS_CODE_REVIEW_POST_PR` | `--post-pr` |
+| `AGENTS_CODE_REVIEW_REVIEW_SUMMARY` | `--review-summary` |
+| `AGENTS_CODE_REVIEW_DRY_RUN` | `--dry-run` (`true`/`false`/`1`/`0`/`yes`/`no`) |
+| `AGENTS_CODE_REVIEW_POST_ONLY` | `--post-only` |
+| `AGENTS_CODE_REVIEW_NO_CONFIRM` | `--no-confirm` |
+| `AGENTS_CODE_REVIEW_REPLACE_PENDING_REVIEW` | `--replace-pending-review` |
+| `AGENTS_CODE_REVIEW_NO_DETERMINISTIC` | `--no-deterministic` |
+| `AGENTS_CODE_REVIEW_STRICT` | `--strict` |
+| `AGENTS_CODE_REVIEW_PENDING_REVIEW` | `--pending-review` |
+| `AGENTS_CODE_REVIEW_PURE` | `--pure` |
+| `AGENTS_CODE_REVIEW_PRINT_LOGS` | `--print-logs` |
+
 ## Troubleshooting
 
 ```bash
