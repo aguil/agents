@@ -82,3 +82,25 @@ On [npmjs.com](https://www.npmjs.com/), open **`@aguil/agents`** → **Package s
 - **Workflow file name** **`release.yml`** (filename only; case-sensitive).
 
 You do **not** need a **`NPM_TOKEN`** secret for CI publishes once this is wired. Local/manual **`npm publish`** from your laptop still uses **`npm login`** or a granular token—not OIDC.
+
+### Annotated release tags
+
+Publishing on tag runs **GitHub Actions only** ([`.github/workflows/release.yml`](.github/workflows/release.yml)); this workflow does **not** create a GitHub Release. Annotation text is **not** stored in git: copy the committed [**`distribution/npm/release-tag-message.template.example`**](distribution/npm/release-tag-message.template.example) to **`distribution/npm/release-tag-message.local`** (gitignored), edit your release notes there, and keep the literal token **`VERSION`** exactly once (leading **`#`** lines are stripped before substitution). Alternatively pass **`--message-file`** to point at any UTF-8 file with the same contract.
+
+```bash
+cp distribution/npm/release-tag-message.template.example distribution/npm/release-tag-message.local
+# edit release-tag-message.local, then:
+
+bun run release:tag -- 0.1.0
+bun run release:tag -- 0.1.0 --push
+```
+
+With an explicit message file (path is relative to repo root if not absolute):
+
+```bash
+bun run release:tag -- 0.1.0 --message-file path/to/message.txt
+```
+
+Add **`--dry-run`** to print the annotation and commands without calling **`git`**. Add **`--sign`** to use **`git tag -s`** instead of **`git tag -a`** (requires a working GPG signing setup).
+
+If you use **jj** with colocated **git**, tags are normal git objects — run the same command from the checkout whose **`.git`**/`jj` view should receive the tag (and use your usual **`jj git`** flow to push tags if you do not rely on plain **`git push origin vX.Y.Z`**).

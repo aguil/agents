@@ -21,6 +21,7 @@
     "prepare-npm-publish": "bun run scripts/prepare-npm-publish.ts",
     "publish:npm:pack:test": "bun run publish:npm:verify && bun run build && bun run scripts/prepare-npm-publish.ts -- --version 0.0.0-canary && npm pack ./.npm-publish-pack --pack-destination ./.npm-publish-pack",
     "publish:npm:verify": "bun install --frozen-lockfile && bun run check && bun run test:ci",
+    "release:tag": "bun run scripts/release-annotated-tag.ts",
     "prebuild": "bun run prepare-prompts",
     "prepare-prompts": "bun run scripts/embed-prompts.ts",
     "pretest": "bun run prepare-prompts",
