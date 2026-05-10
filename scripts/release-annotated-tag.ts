@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -126,6 +126,7 @@ type ParsedCli = Readonly<{
   dryRun: boolean;
   sign: boolean;
   messageFileRelativeOrAbsolute?: string;
+  gitCwd?: string;
 }>;
 
 function parseArgv(argv: readonly string[]): ParsedCli | null {
@@ -134,6 +135,7 @@ function parseArgv(argv: readonly string[]): ParsedCli | null {
   let dryRun = false;
   let sign = false;
   let messageFile: string | undefined;
+  let gitCwd: string | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const tok = argv[i];
@@ -161,6 +163,22 @@ function parseArgv(argv: readonly string[]): ParsedCli | null {
         continue;
       }
 
+      if (flag === "git-cwd") {
+        if (inline !== undefined) {
+          gitCwd = inline;
+        } else {
+          const next = argv[i + 1];
+          if (next === undefined || next.startsWith("--")) {
+            console.error(`--git-cwd requires a path`);
+            process.exitCode = 2;
+            return null;
+          }
+          gitCwd = next;
+          i += 1;
+        }
+        continue;
+      }
+
       const asFlag = eqIdx !== -1 ? `--${flag}` : tok;
       switch (asFlag) {
         case "--push":
@@ -175,7 +193,7 @@ function parseArgv(argv: readonly string[]): ParsedCli | null {
         default:
           console.error(`Unknown flag: ${tok}`);
           console.error(
-            `Usage: bun run scripts/release-annotated-tag.ts -- <semver> [--message-file <path>] [--push] [--sign] [--dry-run]`,
+            `Usage: bun run scripts/release-annotated-tag.ts -- <semver> [--message-file <path>] [--git-cwd <path>] [--push] [--sign] [--dry-run]`,
           );
           process.exitCode = 2;
           return null;
@@ -196,7 +214,7 @@ function parseArgv(argv: readonly string[]): ParsedCli | null {
       );
     }
     console.error(
-      `Usage: bun run scripts/release-annotated-tag.ts -- <semver> [--message-file <path>] [--push] [--sign] [--dry-run]`,
+      `Usage: bun run scripts/release-annotated-tag.ts -- <semver> [--message-file <path>] [--git-cwd <path>] [--push] [--sign] [--dry-run]`,
     );
     process.exitCode = 2;
     return null;
@@ -221,7 +239,146 @@ function parseArgv(argv: readonly string[]): ParsedCli | null {
     dryRun,
     sign,
     messageFileRelativeOrAbsolute: messageFile,
+    gitCwd,
   };
+}
+
+function isInsideGitWorkTree(git: string, cwd: string): boolean {
+  const result = spawnSync(git, ["rev-parse", "--is-inside-work-tree"], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return result.status === 0 && result.stdout?.trim() === "true";
+}
+
+/**
+ * Jujutsu stores the repo database at `<working-tree>/.jj/repo`.
+ * In a linked workspace, `.jj/repo` is a **file** whose contents are a path (often relative to
+ * the workspace root) to the backing `.jj/repo` **directory**. The git working tree is two levels
+ * above that directory (`…/repo` → `…/.jj` → working tree root).
+ */
+function workingTreeFromJjRepoStore(storePath: string): string {
+  return dirname(dirname(storePath));
+}
+
+function discoverGitRootViaJjWorkspace(startDir: string): string | null {
+  let dir = resolvePath(startDir);
+  while (true) {
+    const jjRepo = join(dir, ".jj", "repo");
+    if (existsSync(jjRepo)) {
+      try {
+        const st = statSync(jjRepo);
+        if (st.isDirectory()) {
+          return dir;
+        }
+        if (st.isFile()) {
+          const raw = readFileSync(jjRepo, "utf8").trim();
+          if (raw.length === 0) {
+            return null;
+          }
+          const storePath = resolveJjPointerToRepoStore(dir, raw);
+          if (storePath === null) {
+            return null;
+          }
+          return workingTreeFromJjRepoStore(storePath);
+        }
+      } catch {
+        return null;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  return null;
+}
+
+function resolveJjPointerToRepoStore(
+  workspaceRoot: string,
+  raw: string,
+): string | null {
+  const candidates = isAbsolute(raw)
+    ? [resolvePath(raw)]
+    : [
+        resolvePath(workspaceRoot, raw),
+        resolvePath(join(workspaceRoot, ".jj"), raw),
+      ];
+
+  for (const normalized of candidates) {
+    if (!existsSync(normalized)) {
+      continue;
+    }
+    const targetSt = statSync(normalized);
+    if (targetSt.isDirectory()) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function resolveGitCwd(
+  cliGitCwd: string | undefined,
+  git: string,
+): string | null {
+  const raw =
+    cliGitCwd !== undefined && cliGitCwd.length > 0
+      ? cliGitCwd
+      : process.env.RELEASE_TAG_GIT_CWD?.trim();
+  if (raw !== undefined && raw.length > 0) {
+    const resolved = isAbsolute(raw)
+      ? resolvePath(raw)
+      : resolvePath(process.cwd(), raw);
+    if (!existsSync(resolved)) {
+      console.error(
+        `--git-cwd / RELEASE_TAG_GIT_CWD path does not exist:\n  ${resolved}`,
+      );
+      process.exitCode = 2;
+      return null;
+    }
+    return resolved;
+  }
+
+  if (isInsideGitWorkTree(git, REPO_ROOT)) {
+    return REPO_ROOT;
+  }
+
+  const triedStarts = new Set<string>();
+  for (const start of [process.cwd(), REPO_ROOT]) {
+    const key = resolvePath(start);
+    if (triedStarts.has(key)) {
+      continue;
+    }
+    triedStarts.add(key);
+    const fromJj = discoverGitRootViaJjWorkspace(start);
+    if (fromJj !== null && isInsideGitWorkTree(git, fromJj)) {
+      return fromJj;
+    }
+  }
+
+  return REPO_ROOT;
+}
+
+function assertGitWorkTree(git: string, cwd: string): boolean {
+  const ok = isInsideGitWorkTree(git, cwd);
+  if (!ok) {
+    console.error(
+      `Not a git working tree (no .git reachable from):\n  ${cwd}\n`,
+    );
+    console.error(
+      `Run from your canonical clone, or set the repo where tags should be created:\n` +
+        `  bun run release:tag -- 0.1.0 --git-cwd /path/to/aguil/agents\n` +
+        `  # or: RELEASE_TAG_GIT_CWD=/path/to/aguil/agents bun run release:tag -- 0.1.0\n`,
+    );
+    console.error(
+      `(If you use a jj workspace with a .jj/repo pointer file, run from that tree so the path can be resolved; or pass --git-cwd explicitly.)\n`,
+    );
+    process.exitCode = 128;
+    return false;
+  }
+  return true;
 }
 
 function runGit(
@@ -263,8 +420,14 @@ function main(): void {
   const tagName = `v${cli.versionDigits}`;
   const git = process.env.GIT ?? "git";
 
+  const gitCwd = resolveGitCwd(cli.gitCwd, git);
+  if (gitCwd === null) {
+    return;
+  }
+
   if (cli.dryRun) {
     process.stdout.write(`[dry-run] message file: ${templatePath}\n`);
+    process.stdout.write(`[dry-run] git working directory: ${gitCwd}\n`);
     process.stdout.write(`[dry-run] tag annotation message:\n\n${message}\n`);
     const tagArgs = [
       ...(cli.sign ? (["tag", "-s"] as const) : (["tag", "-a"] as const)),
@@ -281,6 +444,10 @@ function main(): void {
     return;
   }
 
+  if (!assertGitWorkTree(git, gitCwd)) {
+    return;
+  }
+
   const tagArgs = [
     ...(cli.sign ? (["tag", "-s"] as const) : (["tag", "-a"] as const)),
     tagName,
@@ -289,7 +456,7 @@ function main(): void {
   ];
 
   if (
-    !runGit(git, [...tagArgs], REPO_ROOT, {
+    !runGit(git, [...tagArgs], gitCwd, {
       input: Buffer.from(message, "utf8"),
     })
   ) {
@@ -297,7 +464,7 @@ function main(): void {
   }
 
   if (cli.push) {
-    runGit(git, ["push", "origin", tagName], REPO_ROOT);
+    runGit(git, ["push", "origin", tagName], gitCwd);
   }
 }
 

@@ -103,4 +103,6 @@ bun run release:tag -- 0.1.0 --message-file path/to/message.txt
 
 Add **`--dry-run`** to print the annotation and commands without calling **`git`**. Add **`--sign`** to use **`git tag -s`** instead of **`git tag -a`** (requires a working GPG signing setup).
 
-If you use **jj** with colocated **git**, tags are normal git objects — run the same command from the checkout whose **`.git`**/`jj` view should receive the tag (and use your usual **`jj git`** flow to push tags if you do not rely on plain **`git push origin vX.Y.Z`**).
+**Project-task workspaces** (see repository **`AGENTS.md`**) often have **no** **`.git`** at the project path. If the tree has Jujutsu metadata whose **`.jj/repo`** entry is a **pointer file** (linked workspace) or a **directory** (colocated), **`release:tag`** walks up from **`cwd`** and from the package root to resolve the backing **git** working tree automatically. If that fails, pass **`--git-cwd /path/to/aguil/agents`** or set **`RELEASE_TAG_GIT_CWD`**. The tag message file stays repo-root–relative to the harness checkout (or use **`--message-file`**).
+
+If you use **jj** with colocated **git**, tags are normal git objects — **`release:tag`** runs **`git tag`** in the resolved working tree (and use your usual **`jj git`** flow to push **bookmarks**; semver tags are still pushed with **`git push origin vX.Y.Z`** unless you only use **`jj tag set`** and **`git push`** for the tag ref).
