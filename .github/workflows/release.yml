@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+# Trusted publishing (OIDC): https://docs.npmjs.com/trusted-publishers
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      # npm 11.5.1+ exchanges the GitHub Actions OIDC token for a short-lived publish grant.
+      # Node 22.14+ required; see npm trusted publishing docs.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+
+      - run: bun run lint
+
+      - run: bun run test:ci
+
+      - run: bun run build
+
+      - id: semver
+        name: Derive semver from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - run: bun run scripts/prepare-npm-publish.ts -- --version "${{ steps.semver.outputs.version }}"
+
+      - run: npm publish ./.npm-publish-pack --access public

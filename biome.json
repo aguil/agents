@@ -6,7 +6,12 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!!**/dist", "!**/embedded-prompts.ts"],
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!!**/.npm-publish-pack",
+      "!**/embedded-prompts.ts"
+    ],
     "ignoreUnknown": false
   },
   "formatter": {

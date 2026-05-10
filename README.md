@@ -23,6 +23,17 @@ bun test
 bun run test:coverage   # optional: LCOV + text under coverage/
 ```
 
+## Install from npm (when released)
+
+Official releases publish [`@aguil/agents`](https://www.npmjs.com/package/@aguil/agents); the launcher still invokes **Bun**, so ensure Bun **`>= 1.3.13`** is installed before grabbing the tarball.
+
+```bash
+npm install -g @aguil/agents
+agents code-review --help
+```
+
+Prefer building from git for day-to-day development of this repo; see **Prebuilt CLI** below and `BUILD.md` for tarball details.
+
 ## Prebuilt CLI
 
 When running reviews from another terminal/host checkout of `aguil/agents`, build once after pulling updates:
