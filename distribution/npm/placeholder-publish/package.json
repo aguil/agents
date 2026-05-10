@@ -1,0 +1,31 @@
+{
+  "name": "@aguil/agents",
+  "version": "0.0.0",
+  "description": "Placeholder only. Real releases are published by CI (see aguil/agents).",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "agents",
+    "cli"
+  ],
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aguil/agents.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aguil/agents/issues"
+  },
+  "homepage": "https://github.com/aguil/agents#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "bin": {
+    "agents": "./index.js"
+  }
+}
