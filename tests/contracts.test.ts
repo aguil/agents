@@ -391,6 +391,34 @@ test("discovers pull request coalesces concurrent gh pr view calls per workspace
   expect(invocationCount).toBe(0);
 });
 
+test("discoverPullRequest does not indefinitely memoize GH PR metadata misses", async () => {
+  const isolationPath = `/agents/pr-transient-${Math.random().toString(36).slice(2)}`;
+  let invocationCount = 0;
+  const transientRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      invocationCount += 1;
+      const n = invocationCount;
+      const payload =
+        n === 1
+          ? undefined
+          : JSON.stringify({
+            number: 8,
+            title: "Merged PR",
+            body: "Body",
+            url: "https://github.com/aguil/agents/pull/8",
+            baseRefName: "main",
+          });
+      return payload;
+    }
+    return undefined;
+  };
+  expect(invocationCount).toBe(0);
+  expect(await discoverPullRequest(isolationPath, transientRunner, 8)).toBeUndefined();
+  expect(invocationCount).toBe(1);
+  expect((await discoverPullRequest(isolationPath, transientRunner, 8))?.number).toBe(8);
+  expect(invocationCount).toBe(2);
+});
+
 test("prefers explicit PR patch diff when review PR is provided", async () => {
   const commands: string[] = [];
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {

@@ -820,7 +820,8 @@ export function parseRemoteHeadBranch(value: string | undefined): string | undef
   return match?.[1];
 }
 
-const discoverPullRequestRequests = new Map<string, Promise<PullRequestMetadata | undefined>>();
+const discoverPullRequestHits = new Map<string, PullRequestMetadata>();
+const discoverPullRequestInFlight = new Map<string, Promise<PullRequestMetadata | undefined>>();
 
 const commandRunnerCacheSlots = new WeakMap<CommandRunner, number>();
 let nextCommandRunnerCacheSlot = 0;
@@ -840,7 +841,8 @@ function pullRequestDiscoverCacheKey(
   pullRequestNumber: number | undefined,
   commandRunner: CommandRunner,
 ): string {
-  return `${resolve(workspacePath)}\0${pullRequestNumber ?? ""}\0${commandRunnerCacheSlot(commandRunner)}`;
+  const prSlot = pullRequestNumber === undefined ? "" : String(pullRequestNumber);
+  return `${resolve(workspacePath)}|${prSlot}|${commandRunnerCacheSlot(commandRunner)}`;
 }
 
 async function fetchPullRequestJson(
@@ -894,12 +896,31 @@ export async function discoverPullRequest(
   pullRequestNumber?: number,
 ): Promise<PullRequestMetadata | undefined> {
   const key = pullRequestDiscoverCacheKey(workspacePath, pullRequestNumber, commandRunner);
-  let pending = discoverPullRequestRequests.get(key);
-  if (pending === undefined) {
-    pending = fetchPullRequestJson(workspacePath, commandRunner, pullRequestNumber);
-    discoverPullRequestRequests.set(key, pending);
+  const hit = discoverPullRequestHits.get(key);
+  if (hit !== undefined) {
+    return hit;
   }
-  return pending;
+
+  let inflight = discoverPullRequestInFlight.get(key);
+  if (inflight !== undefined) {
+    return inflight;
+  }
+
+  inflight = (async (): Promise<PullRequestMetadata | undefined> => {
+    try {
+      const meta = await fetchPullRequestJson(workspacePath, commandRunner, pullRequestNumber);
+      if (meta !== undefined) {
+        discoverPullRequestHits.set(key, meta);
+      }
+      return meta;
+    } finally {
+      discoverPullRequestInFlight.delete(key);
+    }
+  })();
+
+  discoverPullRequestInFlight.set(key, inflight);
+
+  return inflight;
 }
 
 export async function resolvePreferredRemoteScope(
