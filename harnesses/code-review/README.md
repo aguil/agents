@@ -65,6 +65,8 @@ bun run agents code-review --adapter cursor --model sonnet-4
 bun run agents code-review --adapter cursor --model sonnet-4-thinking --cursor-mode plan
 bun run agents code-review --adapter cursor --model gpt-5 --cursor "$(which agent)"
 bun run agents code-review --adapter cursor --cursor-args "--print,--output-format,stream-json,--workspace,{workspace},--trust,--force,{prompt}"
+# When the comma template would begin with bundled CLI-looking tokens (--strict etc.), bind with =:
+bun run agents code-review --adapter cursor --cursor-args="--strict,--trust,--print"
 ```
 
 Common model IDs:
@@ -140,6 +142,7 @@ Optional JSON keys use **camelCase** and mirror stable CLI knobs (omit keys you 
 
 - Strings (**user/config/env/CLI** for **`workspace`**, **`scratchpad`**, **`adapter`**, host paths **`opencode` / `claude` / `cursor`**, and **`claudeArgs` / `cursorArgs`** — **repo `.review-agent` JSON omits those via sanitization**, see preceding paragraph): **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
   - **`claudeArgs`** / **`cursorArgs`**: optional string (**`--claude-args` / `--cursor-args`** use comma-splitting—tokens cannot reliably contain commas) or a JSON **array of strings** (each element is one argv token, including commas inside a token).
+  - Adapter templates that recycle bundled CLI names (**`strict`**, **`dry-run`**, etc.) cannot use **`--cursor-args --strict,...`** spacing—the second token parses as code-review **`--strict`**. Prefer **`--cursor-args=--strict,...`** (same for **`--claude-args=...`**), or put the comma-joined template behind **`=`** so it stays **one argv cell**.
 - Booleans: **`dryRun`**, **`postOnly`**, **`noConfirm`**, **`replacePendingReview`**, **`noDeterministic`**, **`strict`**, **`pendingReview`**, **`pure`**, **`printLogs`**.
 - **`presets`**: an object mapping preset names to nested partial-option objects **without** a nested **`presets`** key. Repo preset entries **overlay** user preset entries for the same name (same rules as top-level merge).
 - Unknown keys (**not** in the camelCase vocabulary above—besides **`presets`**) are **skipped** but produce a **`console.warn` when loading a JSON file**. Set **`AGENTS_CODE_REVIEW_CONFIG_STRICT`** to **`true`**, **`1`**, **`yes`**, or **`on`** before running the CLI to turn unknown keys into a **fatal error** instead.
