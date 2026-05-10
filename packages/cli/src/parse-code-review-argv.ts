@@ -33,14 +33,15 @@ const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   "print-logs": "printLogs",
 };
 
-/** Tokens like `--preset`/`--dry-run`: not values for preceding string options (`--cursor-args --print,...`). */
+/** Tokens like `--preset`/`--dry-run`, including `--preset=value`: not argv values for prior string options (`--cursor-args`). */
 function isBundledCodeReviewCliKey(token: string | undefined): boolean {
   if (token === undefined || !token.startsWith("--")) {
     return false;
   }
-  const optName = token.slice(2);
+  const withoutLeading = token.slice(2);
+  const optSegment = /^[^=]+/.exec(withoutLeading)?.[0] ?? withoutLeading;
   return (
-    optName === "preset" || optName in STRING_OPTION_TO_KEY || optName in FLAG_TO_KEY
+    optSegment === "preset" || optSegment in STRING_OPTION_TO_KEY || optSegment in FLAG_TO_KEY
   );
 }
 

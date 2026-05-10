@@ -161,6 +161,12 @@ test("parseCodeReviewArgv binds string options when values look like flag tokens
   expect(claudeArgsEscaped.options.claudeArgs).toBe("--dangerously-skip-permissions");
 });
 
+test("parseCodeReviewArgv does not swallow equals-form bundled opts as spaced string-option values", () => {
+  const spaced = parseCodeReviewArgv(["--cursor-args", "--adapter=opencode"]);
+  expect(spaced.options.cursorArgs).toBeUndefined();
+  expect(spaced.options.adapter).toBe("opencode");
+});
+
 test("resolveEffectivePostOnly ignores merged postOnly for replay subcommand", () => {
   expect(resolveEffectivePostOnly("replay", true)).toBe(false);
   expect(resolveEffectivePostOnly("replay", false)).toBe(false);
