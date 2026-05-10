@@ -32,7 +32,9 @@ function stripHelpTokens(argv: readonly string[]): readonly string[] {
 /**
  * Decide whether argv is only requesting help text (possibly with subcommand scope).
  */
-export function resolveCodeReviewHelp(argv: readonly string[]): CodeReviewHelpRequest | null {
+export function resolveCodeReviewHelp(
+  argv: readonly string[],
+): CodeReviewHelpRequest | null {
   if (argv.length === 0) {
     return { kind: "overview" };
   }
@@ -56,13 +58,19 @@ export function resolveCodeReviewHelp(argv: readonly string[]): CodeReviewHelpRe
   }
 
   if (rest.length === 0 || rest[0].startsWith("-")) {
-    return legacyRunSpelling === true ? { kind: "run_replay", legacyRunSpelling: true } : { kind: "run_replay" };
+    return legacyRunSpelling === true
+      ? { kind: "run_replay", legacyRunSpelling: true }
+      : { kind: "run_replay" };
   }
   if (rest[0] === "post") {
-    return legacyRunSpelling === true ? { kind: "post", legacyRunSpelling: true } : { kind: "post" };
+    return legacyRunSpelling === true
+      ? { kind: "post", legacyRunSpelling: true }
+      : { kind: "post" };
   }
   if (rest[0] === "replay") {
-    return legacyRunSpelling === true ? { kind: "replay", legacyRunSpelling: true } : { kind: "replay" };
+    return legacyRunSpelling === true
+      ? { kind: "replay", legacyRunSpelling: true }
+      : { kind: "replay" };
   }
 
   const bad = rest[0];
@@ -112,14 +120,19 @@ export function renderCodeReviewHelp(req: CodeReviewHelpRequest): string {
 }
 
 /** stderr lines after stdout help (exit 0). */
-export function codeReviewHelpStderrExtras(req: CodeReviewHelpRequest): readonly string[] {
+export function codeReviewHelpStderrExtras(
+  req: CodeReviewHelpRequest,
+): readonly string[] {
   if (req.kind === "overview" && req.unknownFirstToken !== undefined) {
-    return [`Unknown command: '${req.unknownFirstToken}'.`, "See 'Getting help' in the overview above."];
+    return [
+      `Unknown command: '${req.unknownFirstToken}'.`,
+      "See 'Getting help' in the overview above.",
+    ];
   }
   if (
-    req.kind === "overview"
-    && req.codeReviewBadSubcommand !== undefined
-    && req.codeReviewBadSubcommand !== ""
+    req.kind === "overview" &&
+    req.codeReviewBadSubcommand !== undefined &&
+    req.codeReviewBadSubcommand !== ""
   ) {
     const lines = [
       `Unknown 'code-review' subcommand '${req.codeReviewBadSubcommand}'.`,
@@ -130,13 +143,17 @@ export function codeReviewHelpStderrExtras(req: CodeReviewHelpRequest): readonly
   return [];
 }
 
-function overviewLegacyNote(req: { readonly legacyRunSpelling?: boolean }): string {
+function overviewLegacyNote(req: {
+  readonly legacyRunSpelling?: boolean;
+}): string {
   return req.legacyRunSpelling === true
     ? "Note: 'agents run code-review …' is removed; start with 'agents code-review …'.\n\n"
     : "";
 }
 
-function buildOverviewHelp(req: Extract<CodeReviewHelpRequest, { kind: "overview" }>): string {
+function buildOverviewHelp(
+  req: Extract<CodeReviewHelpRequest, { kind: "overview" }>,
+): string {
   const legacy = overviewLegacyNote(req);
   return `${legacy}Usage: agents <command> [options]
 

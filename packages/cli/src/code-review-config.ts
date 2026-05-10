@@ -1,8 +1,11 @@
-import { codeReviewHarnessPackageCliDefaults } from "@aguil/agents-code-review";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { CliOptions, ParsedCodeReviewArgv } from "./code-review-cli-models";
+import { codeReviewHarnessPackageCliDefaults } from "@aguil/agents-code-review";
+import type {
+  CliOptions,
+  ParsedCodeReviewArgv,
+} from "./code-review-cli-models";
 
 const ENV_PREFIX = "AGENTS_CODE_REVIEW_";
 
@@ -44,10 +47,16 @@ const BOOLEAN_FIELDS: readonly (keyof CliOptions & string)[] = [
 ];
 
 /** camelCase CLI option keys accepted at the root of JSON or inside a preset body. */
-const ALLOWED_JSON_FLAT_KEYS: ReadonlySet<string> = new Set([...STRING_FIELDS, ...BOOLEAN_FIELDS]);
+const ALLOWED_JSON_FLAT_KEYS: ReadonlySet<string> = new Set([
+  ...STRING_FIELDS,
+  ...BOOLEAN_FIELDS,
+]);
 
 /** In JSON configs, comma-separated subprocess arg templates may be arrays of strings instead. */
-const ARGS_TEMPLATE_FIELDS = ["claudeArgs", "cursorArgs"] as const satisfies readonly (keyof CliOptions & string)[];
+const ARGS_TEMPLATE_FIELDS = [
+  "claudeArgs",
+  "cursorArgs",
+] as const satisfies readonly (keyof CliOptions & string)[];
 
 function isStrictUnknownConfigEnv(): boolean {
   return parseBoolEnv(process.env.AGENTS_CODE_REVIEW_CONFIG_STRICT) === true;
@@ -93,7 +102,9 @@ export function normalizeAdapterArgsTemplateField(
 }
 
 function unknownFlatKeys(record: Record<string, unknown>): string[] {
-  return Object.keys(record).filter((key) => !ALLOWED_JSON_FLAT_KEYS.has(key)).sort();
+  return Object.keys(record)
+    .filter((key) => !ALLOWED_JSON_FLAT_KEYS.has(key))
+    .sort();
 }
 
 const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
@@ -129,7 +140,8 @@ const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
 
 export function resolveUserCodeReviewConfigPath(): string {
   const xdg = process.env.XDG_CONFIG_HOME?.trim();
-  const base = xdg !== undefined && xdg.length > 0 ? xdg : join(homedir(), ".config");
+  const base =
+    xdg !== undefined && xdg.length > 0 ? xdg : join(homedir(), ".config");
   return join(base, "agents", "code-review", "config.json");
 }
 
@@ -147,16 +159,26 @@ const REPO_BLOCKED_ADAPTER_LAUNCH_KEYS = [
 ] as const satisfies readonly (keyof CliOptions)[];
 
 /** Where / via which harness wiring to run reviews must not be controlled only via repo `.review-agent` JSON. */
-const REPO_BLOCKED_REVIEW_STEERING_KEYS = ["adapter", "scratchpad", "workspace"] as const satisfies readonly (keyof CliOptions)[];
+const REPO_BLOCKED_REVIEW_STEERING_KEYS = [
+  "adapter",
+  "scratchpad",
+  "workspace",
+] as const satisfies readonly (keyof CliOptions)[];
 
 /** Strip repo-managed steering from workspace `.review-agent` partials before merge (including preset bodies). */
 export function sanitizeRepoAdapterExecutablePartial(
   partial: CodeReviewMergedPartial,
-): { readonly sanitized: CodeReviewMergedPartial; readonly strippedKeys: readonly string[] } {
+): {
+  readonly sanitized: CodeReviewMergedPartial;
+  readonly strippedKeys: readonly string[];
+} {
   const stripped: string[] = [];
   const sanitized: CodeReviewMergedPartial = { ...partial };
   const rec = sanitized as Record<string, unknown>;
-  for (const key of [...REPO_BLOCKED_ADAPTER_LAUNCH_KEYS, ...REPO_BLOCKED_REVIEW_STEERING_KEYS]) {
+  for (const key of [
+    ...REPO_BLOCKED_ADAPTER_LAUNCH_KEYS,
+    ...REPO_BLOCKED_REVIEW_STEERING_KEYS,
+  ]) {
     if (rec[key] !== undefined) {
       stripped.push(key);
       delete rec[key];
@@ -169,7 +191,10 @@ function sanitizeRepoConfigDocument(
   flat: CodeReviewMergedPartial,
   presets: Record<string, CodeReviewMergedPartial>,
   loadedFromPath?: string,
-): { readonly flat: CodeReviewMergedPartial; readonly presets: Record<string, CodeReviewMergedPartial> } {
+): {
+  readonly flat: CodeReviewMergedPartial;
+  readonly presets: Record<string, CodeReviewMergedPartial>;
+} {
   const removed = new Set<string>();
   const top = sanitizeRepoAdapterExecutablePartial(flat);
   const nextFlat = top.sanitized;
@@ -178,8 +203,7 @@ function sanitizeRepoConfigDocument(
   }
 
   const nextPresets: Record<string, CodeReviewMergedPartial> = { ...presets };
-  for (const name of Object.keys(nextPresets)) {
-    const body = nextPresets[name]!;
+  for (const [name, body] of Object.entries(nextPresets)) {
     const inner = sanitizeRepoAdapterExecutablePartial(body);
     nextPresets[name] = inner.sanitized;
     for (const k of inner.strippedKeys) {
@@ -189,24 +213,36 @@ function sanitizeRepoConfigDocument(
 
   if (removed.size > 0 && loadedFromPath !== undefined) {
     console.warn(
-      `${loadedFromPath}: ignoring repo-managed review overrides (${[...removed].sort().join(
-        ", ",
-      )}). Repo JSON cannot steer \`workspace\`, \`scratchpad\`, \`adapter\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
+      `${loadedFromPath}: ignoring repo-managed review overrides (${[...removed]
+        .sort()
+        .join(
+          ", ",
+        )}). Repo JSON cannot steer \`workspace\`, \`scratchpad\`, \`adapter\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
     );
   }
 
   return { flat: nextFlat, presets: nextPresets };
 }
 
-const ARGS_MERGE_FIELDS: ReadonlySet<keyof CliOptions> = new Set(["claudeArgs", "cursorArgs"]);
+const ARGS_MERGE_FIELDS: ReadonlySet<keyof CliOptions> = new Set([
+  "claudeArgs",
+  "cursorArgs",
+]);
 
-export function mergeFlatConfigLayers(base: CodeReviewMergedPartial, overlay: CodeReviewMergedPartial): CodeReviewMergedPartial {
+export function mergeFlatConfigLayers(
+  base: CodeReviewMergedPartial,
+  overlay: CodeReviewMergedPartial,
+): CodeReviewMergedPartial {
   const next: CodeReviewMergedPartial = { ...base };
   for (const key of STRING_FIELDS) {
     const v = overlay[key];
     if (typeof v === "string") {
       (next as Record<string, unknown>)[key as string] = v;
-    } else if (ARGS_MERGE_FIELDS.has(key) && Array.isArray(v) && v.every((part) => typeof part === "string")) {
+    } else if (
+      ARGS_MERGE_FIELDS.has(key) &&
+      Array.isArray(v) &&
+      v.every((part) => typeof part === "string")
+    ) {
       (next as Record<string, unknown>)[key as string] = v as readonly string[];
     }
   }
@@ -223,7 +259,10 @@ export function mergePresetMaps(
   userPresets: Readonly<Record<string, CodeReviewMergedPartial>>,
   repoPresets: Readonly<Record<string, CodeReviewMergedPartial>>,
 ): Record<string, CodeReviewMergedPartial> {
-  const names = new Set([...Object.keys(userPresets), ...Object.keys(repoPresets)]);
+  const names = new Set([
+    ...Object.keys(userPresets),
+    ...Object.keys(repoPresets),
+  ]);
   const out: Record<string, CodeReviewMergedPartial> = {};
   for (const name of names) {
     const u = userPresets[name] ?? {};
@@ -324,16 +363,28 @@ export function extractConfigDocument(raw: unknown):
     return { ok: false, error: "Config root must be a JSON object" };
   }
   const root = raw as Record<string, unknown>;
-  let presetsRaw = root.presets;
-  if (presetsRaw !== undefined && (typeof presetsRaw !== "object" || presetsRaw === null)) {
-    return { ok: false, error: "`presets` must be an object mapping preset names to partial option objects" };
+  const presetsRaw = root.presets;
+  if (
+    presetsRaw !== undefined &&
+    (typeof presetsRaw !== "object" || presetsRaw === null)
+  ) {
+    return {
+      ok: false,
+      error:
+        "`presets` must be an object mapping preset names to partial option objects",
+    };
   }
-  const presetsSource = presetsRaw !== undefined ? (presetsRaw as Record<string, unknown>) : {};
+  const presetsSource =
+    presetsRaw !== undefined ? (presetsRaw as Record<string, unknown>) : {};
 
   const flatSource = { ...root };
   delete flatSource.presets;
 
-  const flatExtracted = extractFlatFields(flatSource, "config (top-level)", strictUnknown);
+  const flatExtracted = extractFlatFields(
+    flatSource,
+    "config (top-level)",
+    strictUnknown,
+  );
   if (!flatExtracted.ok) {
     return flatExtracted;
   }
@@ -348,9 +399,16 @@ export function extractConfigDocument(raw: unknown):
     }
     const nestedPresets = (body as Record<string, unknown>).presets;
     if (nestedPresets !== undefined) {
-      return { ok: false, error: `Preset '${name}' must not declare nested 'presets'` };
+      return {
+        ok: false,
+        error: `Preset '${name}' must not declare nested 'presets'`,
+      };
     }
-    const bodyFlat = extractFlatFields(body as Record<string, unknown>, `preset '${name}'`, strictUnknown);
+    const bodyFlat = extractFlatFields(
+      body as Record<string, unknown>,
+      `preset '${name}'`,
+      strictUnknown,
+    );
     if (!bodyFlat.ok) {
       return bodyFlat;
     }
@@ -364,7 +422,12 @@ export function extractConfigDocument(raw: unknown):
 
 async function loadConfigAt(path: string): Promise<
   | { ok: false; error: string; path: string }
-  | { ok: true; flat: CodeReviewMergedPartial; presets: Record<string, CodeReviewMergedPartial>; path?: string }
+  | {
+      ok: true;
+      flat: CodeReviewMergedPartial;
+      presets: Record<string, CodeReviewMergedPartial>;
+      path?: string;
+    }
 > {
   let rawUtf8: string;
   try {
@@ -394,7 +457,9 @@ async function loadConfigAt(path: string): Promise<
     const message = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
-      error: message.startsWith("[") ? `Invalid JSON (${message.split("\n")[0]})` : message,
+      error: message.startsWith("[")
+        ? `Invalid JSON (${message.split("\n")[0]})`
+        : message,
       path,
     };
   }
@@ -402,7 +467,11 @@ async function loadConfigAt(path: string): Promise<
 
 async function loadUserConfigMerged(): Promise<
   | { ok: false; error: string }
-  | { ok: true; flat: CodeReviewMergedPartial; presets: Record<string, CodeReviewMergedPartial> }
+  | {
+      ok: true;
+      flat: CodeReviewMergedPartial;
+      presets: Record<string, CodeReviewMergedPartial>;
+    }
 > {
   const path = resolveUserCodeReviewConfigPath();
   const result = await loadConfigAt(path);
@@ -450,10 +519,14 @@ export function readEnvironmentCodeReviewConfig(): CodeReviewMergedPartial {
   return out;
 }
 
-function applyExplicitCliOptions(flat: CodeReviewMergedPartial, parsed: ParsedCodeReviewArgv): CliOptions {
+function applyExplicitCliOptions(
+  flat: CodeReviewMergedPartial,
+  parsed: ParsedCodeReviewArgv,
+): CliOptions {
   const ex = parsed.explicitKeys;
   const o = parsed.options;
-  const stringOr = (k: keyof CliOptions): string | undefined => (ex.has(k) ? o[k] as string | undefined : flat[k] as string | undefined);
+  const stringOr = (k: keyof CliOptions): string | undefined =>
+    ex.has(k) ? (o[k] as string | undefined) : (flat[k] as string | undefined);
   const adapterArgsTemplateOr = (
     k: "claudeArgs" | "cursorArgs",
   ): string | readonly string[] | undefined => {
@@ -463,7 +536,8 @@ function applyExplicitCliOptions(flat: CodeReviewMergedPartial, parsed: ParsedCo
     }
     return flat[k] as string | readonly string[] | undefined;
   };
-  const boolOr = (k: keyof CliOptions, def: boolean): boolean => (ex.has(k) ? (o[k] as boolean) : (flat[k] as boolean | undefined) ?? def);
+  const boolOr = (k: keyof CliOptions, def: boolean): boolean =>
+    ex.has(k) ? (o[k] as boolean) : ((flat[k] as boolean | undefined) ?? def);
 
   return {
     workspace: stringOr("workspace"),
@@ -522,10 +596,17 @@ export async function resolveCodeReviewCliOptions(
     return { ok: false, error: `${repo.path}: ${repo.error}` };
   }
 
-  const repoSanitized = sanitizeRepoConfigDocument(repo.flat, repo.presets, repo.path);
+  const repoSanitized = sanitizeRepoConfigDocument(
+    repo.flat,
+    repo.presets,
+    repo.path,
+  );
 
   let merged = mergeFlatConfigLayers(
-    mergeFlatConfigLayers({ ...codeReviewHarnessPackageCliDefaults } as CodeReviewMergedPartial, user.flat),
+    mergeFlatConfigLayers(
+      { ...codeReviewHarnessPackageCliDefaults } as CodeReviewMergedPartial,
+      user.flat,
+    ),
     repoSanitized.flat,
   );
 

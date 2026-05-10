@@ -1,7 +1,7 @@
-import { ensureDirectory } from "@aguil/agents-core";
-import type { AgentEvent } from "@aguil/agents-core";
 import { appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { AgentEvent } from "@aguil/agents-core";
+import { ensureDirectory } from "@aguil/agents-core";
 
 export interface EventSink {
   write(event: AgentEvent): void | Promise<void>;

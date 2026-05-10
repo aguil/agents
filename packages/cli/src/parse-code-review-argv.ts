@@ -1,4 +1,7 @@
-import type { CliOptions, ParsedCodeReviewArgv } from "./code-review-cli-models";
+import type {
+  CliOptions,
+  ParsedCodeReviewArgv,
+} from "./code-review-cli-models";
 
 const STRING_OPTION_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   workspace: "workspace",
@@ -41,14 +44,28 @@ function isBundledCodeReviewCliKey(token: string | undefined): boolean {
   const withoutLeading = token.slice(2);
   const optSegment = /^[^=]+/.exec(withoutLeading)?.[0] ?? withoutLeading;
   return (
-    optSegment === "preset" || optSegment in STRING_OPTION_TO_KEY || optSegment in FLAG_TO_KEY
+    optSegment === "preset" ||
+    optSegment in STRING_OPTION_TO_KEY ||
+    optSegment in FLAG_TO_KEY
   );
 }
 
 export type PeeledCodeReviewArgv =
-  | { readonly ok: true; readonly kind: "run"; readonly optionArgv: readonly string[] }
-  | { readonly ok: true; readonly kind: "post"; readonly optionArgv: readonly string[] }
-  | { readonly ok: true; readonly kind: "replay"; readonly optionArgv: readonly string[] }
+  | {
+      readonly ok: true;
+      readonly kind: "run";
+      readonly optionArgv: readonly string[];
+    }
+  | {
+      readonly ok: true;
+      readonly kind: "post";
+      readonly optionArgv: readonly string[];
+    }
+  | {
+      readonly ok: true;
+      readonly kind: "replay";
+      readonly optionArgv: readonly string[];
+    }
   | { readonly ok: false; readonly error: string };
 
 /**
@@ -58,7 +75,9 @@ export type PeeledCodeReviewArgv =
  * For `replay`, an optional positional context-bundle path becomes `--context-bundle` + path
  * before the remaining flags (`replay ./bundle.json --adapter fake`).
  */
-export function peelCodeReviewSubcommand(argvTail: readonly string[]): PeeledCodeReviewArgv {
+export function peelCodeReviewSubcommand(
+  argvTail: readonly string[],
+): PeeledCodeReviewArgv {
   const head = argvTail[0];
   if (head === undefined || head.startsWith("-")) {
     return { ok: true, kind: "run", optionArgv: argvTail };
@@ -68,30 +87,39 @@ export function peelCodeReviewSubcommand(argvTail: readonly string[]): PeeledCod
   }
   if (head === "replay") {
     const rest = argvTail.slice(1);
-    const bundle = rest[0] !== undefined && !rest[0].startsWith("-") ? rest[0] : undefined;
+    const bundle =
+      rest[0] !== undefined && !rest[0].startsWith("-") ? rest[0] : undefined;
     const tail = bundle !== undefined ? rest.slice(1) : rest;
-    const optionArgv = bundle !== undefined ? ["--context-bundle", bundle, ...tail] : tail;
+    const optionArgv =
+      bundle !== undefined ? ["--context-bundle", bundle, ...tail] : tail;
     return { ok: true, kind: "replay", optionArgv };
   }
   return {
     ok: false,
-    error:
-      `Unknown 'code-review' subcommand '${head}'. Expected 'post', 'replay', or options beginning with '-'.`,
+    error: `Unknown 'code-review' subcommand '${head}'. Expected 'post', 'replay', or options beginning with '-'.`,
   };
 }
 
-export type PeeledCodeReviewKind = Exclude<PeeledCodeReviewArgv, { readonly ok: false }>["kind"];
+export type PeeledCodeReviewKind = Exclude<
+  PeeledCodeReviewArgv,
+  { readonly ok: false }
+>["kind"];
 
 /**
  * Resolved `postOnly` after merges: repo/env may set postOnly, but `replay` must still run the
  * replay path (finding generation from a bundle), not post-from-result plumbing.
  */
-export function resolveEffectivePostOnly(peeledKind: PeeledCodeReviewKind, mergedPostOnly: boolean): boolean {
+export function resolveEffectivePostOnly(
+  peeledKind: PeeledCodeReviewKind,
+  mergedPostOnly: boolean,
+): boolean {
   return peeledKind === "post" || (peeledKind !== "replay" && mergedPostOnly);
 }
 
 /** Parse argv after optional peel (`optionArgv`). */
-export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewArgv {
+export function parseCodeReviewArgv(
+  argv: readonly string[],
+): ParsedCodeReviewArgv {
   const stringOptions: Record<string, string> = {};
   const flags = new Set<string>();
   const explicitKeys = new Set<keyof CliOptions>();
@@ -125,8 +153,8 @@ export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewAr
     const stringOptKey = STRING_OPTION_TO_KEY[optName];
     if (stringOptKey !== undefined) {
       const hasValue =
-        next !== undefined
-        && (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
+        next !== undefined &&
+        (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
       if (hasValue) {
         stringOptions[optName] = next;
         explicitKeys.add(stringOptKey);
@@ -137,7 +165,8 @@ export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewAr
 
     if (optName === "preset") {
       const hasValue =
-        next !== undefined && (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
+        next !== undefined &&
+        (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
       if (hasValue) {
         presetName = next.trim().length === 0 ? undefined : next;
         index += 1;
@@ -154,7 +183,8 @@ export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewAr
 
     flags.add(optName);
     const orphanValueConsumable =
-      next !== undefined && (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
+      next !== undefined &&
+      (!next.startsWith("--") || !isBundledCodeReviewCliKey(next));
     if (orphanValueConsumable) {
       stringOptions[optName] = next;
       index += 1;

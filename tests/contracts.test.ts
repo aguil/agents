@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
-import { resolveGitAwarePath } from "@aguil/agents-core";
-import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,19 +23,20 @@ import {
   classifyDiff,
   collectReviewDiff,
   discoverPullRequest,
-  filterReviewDiff,
   extractReferencedDocumentation,
+  filterReviewDiff,
   PullRequestReferencedDocsProvider,
-  RepositoryDiffProvider,
-  parseRemoteHeadBranch,
   parseGitRemoteUrl,
   parsePullRequestRepoScope,
+  parseRemoteHeadBranch,
+  RepositoryDiffProvider,
   resolvePreferredBaseBranch,
   selectPreferredRemoteName,
   shouldFetchReferencedUrl,
 } from "@aguil/agents-context";
+import type { AgentEvent, Finding } from "@aguil/agents-core";
+import { resolveGitAwarePath } from "@aguil/agents-core";
 import {
-  SubprocessAgentAdapter,
   buildClaudeCodeCommand,
   buildCursorCommand,
   buildCursorPrompt,
@@ -38,6 +44,7 @@ import {
   buildOpenCodePrompt,
   collectAgentRun,
   normalizeAgentOutputLine,
+  SubprocessAgentAdapter,
   validateFinding,
 } from "@aguil/agents-execution";
 import {
@@ -50,17 +57,6 @@ import {
 } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
 import {
-  buildPendingReviewSummaryBody,
-  discoverLatestResultPath,
-  findingHasNonPostablePrLineAnchor,
-  findingUsesFileNotInPrChangedFiles,
-  findingsToPendingReviewComments,
-  formatReviewCoverageSectionLines,
-  loadStoredReviewResult,
-  parseReviewSummaryStyle,
-  parsePrNumber,
-} from "../packages/cli/src/index";
-import {
   extractConfigDocument,
   mergeFlatConfigLayers,
   mergePresetMaps,
@@ -68,8 +64,26 @@ import {
   resolveCodeReviewCliOptions,
   sanitizeRepoAdapterExecutablePartial,
 } from "../packages/cli/src/code-review-config";
-import { parseCodeReviewArgv, peelCodeReviewSubcommand, resolveEffectivePostOnly } from "../packages/cli/src/parse-code-review-argv";
-import { codeReviewHelpStderrExtras, resolveCodeReviewHelp } from "../packages/cli/src/code-review-help";
+import {
+  codeReviewHelpStderrExtras,
+  resolveCodeReviewHelp,
+} from "../packages/cli/src/code-review-help";
+import {
+  buildPendingReviewSummaryBody,
+  discoverLatestResultPath,
+  findingHasNonPostablePrLineAnchor,
+  findingsToPendingReviewComments,
+  findingUsesFileNotInPrChangedFiles,
+  formatReviewCoverageSectionLines,
+  loadStoredReviewResult,
+  parsePrNumber,
+  parseReviewSummaryStyle,
+} from "../packages/cli/src/index";
+import {
+  parseCodeReviewArgv,
+  peelCodeReviewSubcommand,
+  resolveEffectivePostOnly,
+} from "../packages/cli/src/parse-code-review-argv";
 
 test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => {
   expect(peelCodeReviewSubcommand([])).toEqual({
@@ -108,11 +122,13 @@ test("peelCodeReviewSubcommand injects context-bundle for replay positional path
     kind: "replay",
     optionArgv: ["--adapter", "fake"],
   });
-  expect(peelCodeReviewSubcommand(["replay", "./b.json", "--dry-run"])).toEqual({
-    ok: true,
-    kind: "replay",
-    optionArgv: ["--context-bundle", "./b.json", "--dry-run"],
-  });
+  expect(peelCodeReviewSubcommand(["replay", "./b.json", "--dry-run"])).toEqual(
+    {
+      ok: true,
+      kind: "replay",
+      optionArgv: ["--context-bundle", "./b.json", "--dry-run"],
+    },
+  );
 });
 
 test("peelCodeReviewSubcommand rejects unknown leading token", () => {
@@ -138,33 +154,58 @@ test("parseCodeReviewArgv marks boolean flags explicit even when followed by non
 });
 
 test("parseCodeReviewArgv binds string options when values look like flag tokens", () => {
-  const cursorArgsComma = parseCodeReviewArgv(["--cursor-args", "--print,--output-format=stream-json"]);
-  expect(cursorArgsComma.options.cursorArgs).toBe("--print,--output-format=stream-json");
+  const cursorArgsComma = parseCodeReviewArgv([
+    "--cursor-args",
+    "--print,--output-format=stream-json",
+  ]);
+  expect(cursorArgsComma.options.cursorArgs).toBe(
+    "--print,--output-format=stream-json",
+  );
   expect(cursorArgsComma.explicitKeys.has("cursorArgs")).toBe(true);
 
   const claudeArgsComma = parseCodeReviewArgv(["--claude-args", "--foo,--bar"]);
   expect(claudeArgsComma.options.claudeArgs).toBe("--foo,--bar");
 
-  const presetFollowing = parseCodeReviewArgv(["--adapter", "opencode", "--preset", "ci"]);
+  const presetFollowing = parseCodeReviewArgv([
+    "--adapter",
+    "opencode",
+    "--preset",
+    "ci",
+  ]);
   expect(presetFollowing.presetName).toBe("ci");
   expect(presetFollowing.options.adapter).toBe("opencode");
 
-  const presetEquals = parseCodeReviewArgv(["--preset=qa", "--adapter", "fake"]);
+  const presetEquals = parseCodeReviewArgv([
+    "--preset=qa",
+    "--adapter",
+    "fake",
+  ]);
   expect(presetEquals.presetName).toBe("qa");
 
-  const adapterAfterPreset = parseCodeReviewArgv(["--preset", "ci", "--adapter", "fake"]);
+  const adapterAfterPreset = parseCodeReviewArgv([
+    "--preset",
+    "ci",
+    "--adapter",
+    "fake",
+  ]);
   expect(adapterAfterPreset.presetName).toBe("ci");
   expect(adapterAfterPreset.options.adapter).toBe("fake");
 
   const equalsAdapter = parseCodeReviewArgv(["--adapter=opencode"]);
   expect(equalsAdapter.options.adapter).toBe("opencode");
 
-  const cursorArgsEscaped = parseCodeReviewArgv(["--cursor-args=--strict,--trust,--print"]);
+  const cursorArgsEscaped = parseCodeReviewArgv([
+    "--cursor-args=--strict,--trust,--print",
+  ]);
   expect(cursorArgsEscaped.options.cursorArgs).toBe("--strict,--trust,--print");
   expect(cursorArgsEscaped.explicitKeys.has("cursorArgs")).toBe(true);
 
-  const claudeArgsEscaped = parseCodeReviewArgv(["--claude-args=--dangerously-skip-permissions"]);
-  expect(claudeArgsEscaped.options.claudeArgs).toBe("--dangerously-skip-permissions");
+  const claudeArgsEscaped = parseCodeReviewArgv([
+    "--claude-args=--dangerously-skip-permissions",
+  ]);
+  expect(claudeArgsEscaped.options.claudeArgs).toBe(
+    "--dangerously-skip-permissions",
+  );
 });
 
 test("parseCodeReviewArgv does not swallow equals-form bundled opts as spaced string-option values", () => {
@@ -196,7 +237,9 @@ test("parsePrNumber rejects non-canonical Pull Request number strings", () => {
 
 test("resolveCodeReviewHelp skips normal runs lacking help tokens", () => {
   expect(resolveCodeReviewHelp(["code-review"])).toBeNull();
-  expect(resolveCodeReviewHelp(["code-review", "--adapter", "fake"])).toBeNull();
+  expect(
+    resolveCodeReviewHelp(["code-review", "--adapter", "fake"]),
+  ).toBeNull();
 });
 
 test("resolveCodeReviewHelp maps contextual help scopes", () => {
@@ -206,13 +249,23 @@ test("resolveCodeReviewHelp maps contextual help scopes", () => {
   expect(resolveCodeReviewHelp(["--help", "code-review"])).toEqual({
     kind: "run_replay",
   });
-  expect(resolveCodeReviewHelp(["code-review", "--help"])).toEqual({ kind: "run_replay" });
-  expect(resolveCodeReviewHelp(["code-review", "-h"])).toEqual({ kind: "run_replay" });
-  expect(resolveCodeReviewHelp(["code-review", "--adapter", "fake", "-h"])).toEqual({
+  expect(resolveCodeReviewHelp(["code-review", "--help"])).toEqual({
     kind: "run_replay",
   });
-  expect(resolveCodeReviewHelp(["code-review", "post", "--help"])).toEqual({ kind: "post" });
-  expect(resolveCodeReviewHelp(["code-review", "--help", "post"])).toEqual({ kind: "post" });
+  expect(resolveCodeReviewHelp(["code-review", "-h"])).toEqual({
+    kind: "run_replay",
+  });
+  expect(
+    resolveCodeReviewHelp(["code-review", "--adapter", "fake", "-h"]),
+  ).toEqual({
+    kind: "run_replay",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "post", "--help"])).toEqual({
+    kind: "post",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "--help", "post"])).toEqual({
+    kind: "post",
+  });
   expect(resolveCodeReviewHelp(["code-review", "replay", "--help"])).toEqual({
     kind: "replay",
   });
@@ -231,10 +284,16 @@ test("resolveCodeReviewHelp maps contextual help scopes", () => {
 });
 
 test("codeReviewHelpStderrExtras surfaces unknown command hints", () => {
-  const top = resolveCodeReviewHelp(["nope", "-h"])!;
+  const top = resolveCodeReviewHelp(["nope", "-h"]);
+  if (top === undefined) {
+    throw new Error("expected code review help context");
+  }
   expect(codeReviewHelpStderrExtras(top)).toHaveLength(2);
 
-  const badCr = resolveCodeReviewHelp(["code-review", "nope-sub", "--help"])!;
+  const badCr = resolveCodeReviewHelp(["code-review", "nope-sub", "--help"]);
+  if (badCr === undefined) {
+    throw new Error("expected code-review subcommand help context");
+  }
   expect(badCr).toMatchObject({
     kind: "overview",
     codeReviewBadSubcommand: "nope-sub",
@@ -275,7 +334,9 @@ test("keeps only verified findings for actionable reports", () => {
     validation: { status: "verified", details: "looks fine" },
   };
 
-  expect(actionableFindings([verified, unverified, weaklyValidated])).toEqual([verified]);
+  expect(actionableFindings([verified, unverified, weaklyValidated])).toEqual([
+    verified,
+  ]);
 });
 
 test("classifies small diffs as trivial", () => {
@@ -301,12 +362,16 @@ test("parses git remote URLs for host/org scope", () => {
 });
 
 test("parses owner and repo from pull request URLs", () => {
-  expect(parsePullRequestRepoScope("https://github.com/aguil/agents/pull/42")).toEqual({
+  expect(
+    parsePullRequestRepoScope("https://github.com/aguil/agents/pull/42"),
+  ).toEqual({
     host: "github.com",
     owner: "aguil",
     repo: "agents",
   });
-  expect(parsePullRequestRepoScope("https://github.com/aguil/agents/issues/42")).toBeUndefined();
+  expect(
+    parsePullRequestRepoScope("https://github.com/aguil/agents/issues/42"),
+  ).toBeUndefined();
 });
 
 test("prefers tracking remote before origin", () => {
@@ -326,13 +391,17 @@ test("prefers tracking remote before origin", () => {
 
 test("parses remote HEAD branch names", () => {
   expect(parseRemoteHeadBranch("refs/remotes/origin/main\n")).toBe("main");
-  expect(parseRemoteHeadBranch("refs/remotes/origin/release/2026.05\n")).toBe("release/2026.05");
+  expect(parseRemoteHeadBranch("refs/remotes/origin/release/2026.05\n")).toBe(
+    "release/2026.05",
+  );
   expect(parseRemoteHeadBranch(undefined)).toBeUndefined();
 });
 
 test("resolves preferred base branch from remote HEAD first", async () => {
   const commands: string[] = [];
-  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
     if (cmd[0] === "git" && cmd[1] === "symbolic-ref") {
       return "refs/remotes/origin/main\n";
@@ -340,13 +409,17 @@ test("resolves preferred base branch from remote HEAD first", async () => {
     return undefined;
   };
 
-  expect(await resolvePreferredBaseBranch("/repo", commandRunner, "origin")).toBe("main");
+  expect(
+    await resolvePreferredBaseBranch("/repo", commandRunner, "origin"),
+  ).toBe("main");
   expect(commands.at(0)).toContain("refs/remotes/origin/HEAD");
 });
 
 test("discovers pull request by explicit number", async () => {
   const commands: string[] = [];
-  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
     if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
       return "beefbeefbeefbeefbeefbeefbeefbeefbeefbeef\n";
@@ -367,7 +440,9 @@ test("discovers pull request by explicit number", async () => {
 
 test("discovers pull request coalesces concurrent gh pr view calls per workspace and number", async () => {
   let invocationCount = 0;
-  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
     if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
       return "coalesce-workspace-head-pin\n";
     }
@@ -407,7 +482,9 @@ test("discoverPullRequest refetches GH metadata when workspace HEAD changes", as
   const path = "/agents/pr-cache-head-shift";
   let head = "1111111111111111111111111111111111111111";
   let ghCalls = 0;
-  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
     if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
       return `${head}\n`;
     }
@@ -425,26 +502,39 @@ test("discoverPullRequest refetches GH metadata when workspace HEAD changes", as
     return undefined;
   };
 
-  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("First");
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe(
+    "First",
+  );
   expect(ghCalls).toBe(1);
-  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("First");
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe(
+    "First",
+  );
   expect(ghCalls).toBe(1);
 
   head = "2222222222222222222222222222222222222222";
-  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("Second");
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe(
+    "Second",
+  );
   expect(ghCalls).toBe(2);
 });
 
 test("discoverPullRequest refetches implicit branch PR when symbolic HEAD ref changes", async () => {
   const path = "/agents/pr-implicit-branch-pin";
-  let head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   let symbolicHead = "refs/heads/feature-a";
   let ghCalls = 0;
-  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
     if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
       return `${head}\n`;
     }
-    if (cmd[0] === "git" && cmd[1] === "symbolic-ref" && cmd[2] === "-q" && cmd[3] === "HEAD") {
+    if (
+      cmd[0] === "git" &&
+      cmd[1] === "symbolic-ref" &&
+      cmd[2] === "-q" &&
+      cmd[3] === "HEAD"
+    ) {
       return `${symbolicHead}\n`;
     }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
@@ -474,7 +564,9 @@ test("discoverPullRequest refetches implicit branch PR when symbolic HEAD ref ch
 test("discoverPullRequest does not indefinitely memoize GH PR metadata misses", async () => {
   const isolationPath = `/agents/pr-transient-${Math.random().toString(36).slice(2)}`;
   let invocationCount = 0;
-  const transientRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+  const transientRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       invocationCount += 1;
       const n = invocationCount;
@@ -482,26 +574,32 @@ test("discoverPullRequest does not indefinitely memoize GH PR metadata misses", 
         n === 1
           ? undefined
           : JSON.stringify({
-            number: 8,
-            title: "Merged PR",
-            body: "Body",
-            url: "https://github.com/aguil/agents/pull/8",
-            baseRefName: "main",
-          });
+              number: 8,
+              title: "Merged PR",
+              body: "Body",
+              url: "https://github.com/aguil/agents/pull/8",
+              baseRefName: "main",
+            });
       return payload;
     }
     return undefined;
   };
   expect(invocationCount).toBe(0);
-  expect(await discoverPullRequest(isolationPath, transientRunner, 8)).toBeUndefined();
+  expect(
+    await discoverPullRequest(isolationPath, transientRunner, 8),
+  ).toBeUndefined();
   expect(invocationCount).toBe(1);
-  expect((await discoverPullRequest(isolationPath, transientRunner, 8))?.number).toBe(8);
+  expect(
+    (await discoverPullRequest(isolationPath, transientRunner, 8))?.number,
+  ).toBe(8);
   expect(invocationCount).toBe(2);
 });
 
 test("prefers explicit PR patch diff when review PR is provided", async () => {
   const commands: string[] = [];
-  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
     if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
       return "explicit-pr-patch-workspace-head\n";
@@ -545,7 +643,9 @@ diff --git a/src/main.ts b/src/main.ts
 
 test("falls back to base diff when explicit PR patch is unavailable", async () => {
   const commands: string[] = [];
-  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
     if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
       return "fallback-pr-patch-head\n";
@@ -563,7 +663,11 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
     if (cmd[0] === "git" && cmd[1] === "cat-file") {
       return "";
     }
-    if (cmd[0] === "git" && cmd[1] === "diff" && cmd[3] === "main...deadbeefcafebabe") {
+    if (
+      cmd[0] === "git" &&
+      cmd[1] === "diff" &&
+      cmd[3] === "main...deadbeefcafebabe"
+    ) {
       return "diff --git a/src/a.ts b/src/a.ts\n+new";
     }
     if (cmd[0] === "gh" && cmd[1] === "api") {
@@ -608,7 +712,9 @@ test("includes explicit PR metadata in diff strategy artifact", async () => {
     scratchpadPath: "/repo/.review-agent/runs/1",
     pullRequestNumber: 42,
   });
-  const strategy = artifacts.find((artifact) => artifact.id === "diff-strategy")?.content ?? "";
+  const strategy =
+    artifacts.find((artifact) => artifact.id === "diff-strategy")?.content ??
+    "";
   expect(strategy).toContain("Strategy: explicit_pr_patch");
   expect(strategy).toContain("PR Number: 42");
   expect(strategy).toContain("PR Head SHA: 0123456789abcdef");
@@ -647,7 +753,10 @@ And [external](https://example.com/docs)
     { kind: "local-path", value: "README.md" },
     { kind: "local-path", value: "docs/architecture.md" },
     { kind: "url", value: "https://example.com/docs" },
-    { kind: "url", value: "https://github.com/aguil/another-repo/blob/main/docs/guide.md" },
+    {
+      kind: "url",
+      value: "https://github.com/aguil/another-repo/blob/main/docs/guide.md",
+    },
   ]);
 });
 
@@ -659,12 +768,16 @@ test("fetch gating allows only same remote org links", () => {
     repo: "agents",
   };
   expect(
-    shouldFetchReferencedUrl("https://github.com/aguil/other-repo/blob/main/README.md", remoteScope)
-      .allowed,
+    shouldFetchReferencedUrl(
+      "https://github.com/aguil/other-repo/blob/main/README.md",
+      remoteScope,
+    ).allowed,
   ).toBe(true);
   expect(
-    shouldFetchReferencedUrl("https://github.com/other-org/repo/blob/main/README.md", remoteScope)
-      .allowed,
+    shouldFetchReferencedUrl(
+      "https://github.com/other-org/repo/blob/main/README.md",
+      remoteScope,
+    ).allowed,
   ).toBe(false);
 });
 
@@ -694,7 +807,11 @@ test("rejects PR-referenced local docs that escape workspace via symlink", async
       scratchpadPath: workspace,
     });
 
-    expect(artifacts.some((artifact) => artifact.title.startsWith("PR Referenced Local Doc:"))).toBe(false);
+    expect(
+      artifacts.some((artifact) =>
+        artifact.title.startsWith("PR Referenced Local Doc:"),
+      ),
+    ).toBe(false);
   } finally {
     await rm(workspace, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
@@ -725,8 +842,10 @@ test("keeps rephrased findings distinct when semantic fingerprint differs", () =
     id: "finding-1",
     severity: "warning",
     title: "Event sink does directory checks on every emitted event",
-    description: "Event sink runs ensureDirectory on every write and orchestration awaits each call.",
-    evidence: "JsonlFileEventSink.write calls ensureDirectory(dirname(path)) before appendFile.",
+    description:
+      "Event sink runs ensureDirectory on every write and orchestration awaits each call.",
+    evidence:
+      "JsonlFileEventSink.write calls ensureDirectory(dirname(path)) before appendFile.",
     sourceRole: "performance",
     file: "packages/telemetry/src/index.ts",
     line: 18,
@@ -736,8 +855,10 @@ test("keeps rephrased findings distinct when semantic fingerprint differs", () =
     ...base,
     id: "finding-2",
     title: "Per-event ensureDirectory adds avoidable filesystem overhead",
-    description: "Each telemetry event performs a directory check and the orchestrator waits on it.",
-    evidence: "The event sink performs ensureDirectory before appending JSONL for each event.",
+    description:
+      "Each telemetry event performs a directory check and the orchestrator waits on it.",
+    evidence:
+      "The event sink performs ensureDirectory before appending JSONL for each event.",
   };
 
   expect(findingFingerprint(base).split("|")[0]).toBe("performance");
@@ -749,19 +870,26 @@ test("does not merge distinct findings that share one location", () => {
     id: "finding-1",
     severity: "warning",
     title: "Missing authorization check on write path",
-    description: "Mutation endpoint updates state without verifying caller permissions.",
-    evidence: "writeConfig() is called before any authorize() guard in the handler.",
+    description:
+      "Mutation endpoint updates state without verifying caller permissions.",
+    evidence:
+      "writeConfig() is called before any authorize() guard in the handler.",
     sourceRole: "security",
     file: "src/handler.ts",
     line: 42,
-    validation: { status: "verified", details: "Inspected call path around handler implementation." },
+    validation: {
+      status: "verified",
+      details: "Inspected call path around handler implementation.",
+    },
   };
   const right: Finding = {
     ...left,
     id: "finding-2",
     title: "Expensive JSON parse in hot request path",
-    description: "Handler reparses unchanged payload and doubles CPU work for each request.",
-    evidence: "JSON.parse runs twice in the same handler branch without transformation.",
+    description:
+      "Handler reparses unchanged payload and doubles CPU work for each request.",
+    evidence:
+      "JSON.parse runs twice in the same handler branch without transformation.",
     sourceRole: "security",
   };
 
@@ -795,14 +923,25 @@ test("coerces empty and null file or line before validating findings", () => {
   const emptyFile = validateFinding({ ...base, file: "" });
   expect(emptyFile.valid).toBe(true);
 
-  const nullFile = validateFinding({ ...base, file: null as unknown as string });
+  const nullFile = validateFinding({
+    ...base,
+    file: null as unknown as string,
+  });
   expect(nullFile.valid).toBe(true);
 
-  const nullLine = validateFinding({ ...base, file: "a.ts", line: null as unknown as number });
+  const nullLine = validateFinding({
+    ...base,
+    file: "a.ts",
+    line: null as unknown as number,
+  });
   expect(nullLine.valid).toBe(true);
   expect(nullLine.errors).toHaveLength(0);
 
-  const stringLine = validateFinding({ ...base, file: "a.ts", line: "42" as unknown as number });
+  const stringLine = validateFinding({
+    ...base,
+    file: "a.ts",
+    line: "42" as unknown as number,
+  });
   expect(stringLine.valid).toBe(true);
 });
 
@@ -943,8 +1082,12 @@ test("discovers latest run result path", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "agents-post-only-discover-"));
   try {
     const runsRoot = join(workspace, ".review-agent", "runs");
-    await mkdir(join(runsRoot, "code-review-20260501120000-aaaa"), { recursive: true });
-    await mkdir(join(runsRoot, "code-review-20260502120000-bbbb"), { recursive: true });
+    await mkdir(join(runsRoot, "code-review-20260501120000-aaaa"), {
+      recursive: true,
+    });
+    await mkdir(join(runsRoot, "code-review-20260502120000-bbbb"), {
+      recursive: true,
+    });
     await writeFile(
       join(runsRoot, "code-review-20260501120000-aaaa", "result.json"),
       "{}\n",
@@ -957,7 +1100,9 @@ test("discovers latest run result path", async () => {
     );
 
     const discovered = await discoverLatestResultPath(workspace);
-    expect(discovered).toBe(join(runsRoot, "code-review-20260502120000-bbbb", "result.json"));
+    expect(discovered).toBe(
+      join(runsRoot, "code-review-20260502120000-bbbb", "result.json"),
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -1065,10 +1210,14 @@ test("detects file:line anchors outside the PR diff map", () => {
   const empty = new Map<string, ReadonlyMap<number, number>>();
   expect(findingHasNonPostablePrLineAnchor(finding, empty)).toBe(true);
 
-  const wrongLine = new Map<string, ReadonlyMap<number, number>>([["a.ts", new Map([[10, 1]])]]);
+  const wrongLine = new Map<string, ReadonlyMap<number, number>>([
+    ["a.ts", new Map([[10, 1]])],
+  ]);
   expect(findingHasNonPostablePrLineAnchor(finding, wrongLine)).toBe(true);
 
-  const match = new Map<string, ReadonlyMap<number, number>>([["a.ts", new Map([[5, 1]])]]);
+  const match = new Map<string, ReadonlyMap<number, number>>([
+    ["a.ts", new Map([[5, 1]])],
+  ]);
   expect(findingHasNonPostablePrLineAnchor(finding, match)).toBe(false);
 
   const noLine: Finding = { ...finding, line: undefined };
@@ -1087,9 +1236,13 @@ test("detects file path not in PR changed-files list", () => {
     line: 1,
     validation: { status: "verified", details: "ok" },
   };
-  const ctx = new Map<string, ReadonlyMap<number, number>>([["src/app.ts", new Map([[1, 1]])]]);
+  const ctx = new Map<string, ReadonlyMap<number, number>>([
+    ["src/app.ts", new Map([[1, 1]])],
+  ]);
   expect(findingUsesFileNotInPrChangedFiles(finding, ctx)).toBe(true);
-  expect(findingUsesFileNotInPrChangedFiles({ ...finding, file: "src/app.ts" }, ctx)).toBe(false);
+  expect(
+    findingUsesFileNotInPrChangedFiles({ ...finding, file: "src/app.ts" }, ctx),
+  ).toBe(false);
 });
 
 test("impact summary annotates findings that are not inline-postable when PR diff context is provided", () => {
@@ -1405,7 +1558,14 @@ test("builds claude command behind the adapter boundary", () => {
     {
       executable: "claude-test",
       model: "claude-sonnet",
-      argsTemplate: ["-p", "{prompt}", "--cwd", "{workspace}", "--context", "{context_bundle}"],
+      argsTemplate: [
+        "-p",
+        "{prompt}",
+        "--cwd",
+        "{workspace}",
+        "--context",
+        "{context_bundle}",
+      ],
     },
   );
 
@@ -1542,9 +1702,9 @@ test("CLI review coverage matches harness scheduled roles for each triage tier",
     });
     for (const roleId of CODE_REVIEW_ROLE_IDS) {
       const label = roleReviewSectionLabel(roleId);
-      const skipLine = lines.find((line) =>
-        line.includes(`**${label}:**`) &&
-        line.includes("not scheduled"),
+      const skipLine = lines.find(
+        (line) =>
+          line.includes(`**${label}:**`) && line.includes("not scheduled"),
       );
       if (scheduled.has(roleId)) {
         expect(skipLine).toBeUndefined();
@@ -1567,19 +1727,26 @@ test("collects fake agent findings through the adapter contract", async () => {
   };
   const tempDir = await mkdtemp(join(tmpdir(), "agents-execution-"));
   try {
-    const run = await collectAgentRun(createFakeCodeReviewAdapter({ quality: [finding] }), {
-      runId: "run-1",
-      roleId: "quality",
-      prompt: "Review this change.",
-      workspacePath: tempDir,
-      contextBundlePath: join(tempDir, "context.json"),
-      scratchpadPath: tempDir,
-      timeoutMs: 1_000,
-      allowedCommands: [],
-    });
+    const run = await collectAgentRun(
+      createFakeCodeReviewAdapter({ quality: [finding] }),
+      {
+        runId: "run-1",
+        roleId: "quality",
+        prompt: "Review this change.",
+        workspacePath: tempDir,
+        contextBundlePath: join(tempDir, "context.json"),
+        scratchpadPath: tempDir,
+        timeoutMs: 1_000,
+        allowedCommands: [],
+      },
+    );
 
     expect(run.result.findings).toEqual([finding]);
-    expect(run.events.map((event) => event.type)).toEqual(["started", "finding", "completed"]);
+    expect(run.events.map((event) => event.type)).toEqual([
+      "started",
+      "finding",
+      "completed",
+    ]);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -1598,7 +1765,11 @@ test("marks subprocess agents as timed out", async () => {
         cancellation: true,
       },
       buildCommand: () => ({
-        cmd: [process.execPath, "--eval", "await new Promise((resolve) => setTimeout(resolve, 500));"],
+        cmd: [
+          process.execPath,
+          "--eval",
+          "await new Promise((resolve) => setTimeout(resolve, 500));",
+        ],
         cwd: tempDir,
       }),
     });
@@ -1655,14 +1826,22 @@ test("captures subprocess stdout/stderr artifacts for debugging", async () => {
       allowedCommands: [],
     });
 
-    expect(run.events.some((event) => event.type === "stdout" && event.message === "stream-stdout")).toBe(
-      true,
+    expect(
+      run.events.some(
+        (event) => event.type === "stdout" && event.message === "stream-stdout",
+      ),
+    ).toBe(true);
+    expect(
+      run.events.some(
+        (event) => event.type === "stderr" && event.message === "stream-stderr",
+      ),
+    ).toBe(true);
+    expect(await readFile(join(tempDir, "stdout.log"), "utf8")).toContain(
+      "stream-stdout",
     );
-    expect(run.events.some((event) => event.type === "stderr" && event.message === "stream-stderr")).toBe(
-      true,
+    expect(await readFile(join(tempDir, "stderr.log"), "utf8")).toContain(
+      "stream-stderr",
     );
-    expect(await readFile(join(tempDir, "stdout.log"), "utf8")).toContain("stream-stdout");
-    expect(await readFile(join(tempDir, "stderr.log"), "utf8")).toContain("stream-stderr");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -1697,18 +1876,20 @@ test("emits command events before and after subprocess execution", async () => {
       allowedCommands: [],
     });
 
-    const beforeEvent = run.events.find((event) =>
-      event.type === "tool" &&
-      typeof event.data === "object" &&
-      event.data !== null &&
-      (event.data as { readonly kind?: string }).kind === "command" &&
-      (event.data as { readonly phase?: string }).phase === "before"
+    const beforeEvent = run.events.find(
+      (event) =>
+        event.type === "tool" &&
+        typeof event.data === "object" &&
+        event.data !== null &&
+        (event.data as { readonly kind?: string }).kind === "command" &&
+        (event.data as { readonly phase?: string }).phase === "before",
     );
-    const completionEvent = run.events.find((event) =>
-      event.type === "completed" &&
-      typeof event.data === "object" &&
-      event.data !== null &&
-      Array.isArray((event.data as { readonly command?: unknown }).command)
+    const completionEvent = run.events.find(
+      (event) =>
+        event.type === "completed" &&
+        typeof event.data === "object" &&
+        event.data !== null &&
+        Array.isArray((event.data as { readonly command?: unknown }).command),
     );
 
     expect(beforeEvent).toBeDefined();
@@ -1775,7 +1956,9 @@ test("runs the code-review harness with a fake adapter", async () => {
 
     expect(result.status).toBe("warnings");
     expect(result.findings).toEqual([finding]);
-    expect(await readFile(result.reportPath, "utf8")).toContain("Verified harness issue");
+    expect(await readFile(result.reportPath, "utf8")).toContain(
+      "Verified harness issue",
+    );
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -1871,7 +2054,9 @@ test("treats timed out roles as warnings with partial coverage metadata", async 
     expect(result.metadata?.strict_mode).toBe("false");
     expect(result.metadata?.timed_out_roles).toBe("quality");
     expect(result.metadata?.failed_roles).toBe("");
-    expect(await readFile(result.reportPath, "utf8")).toContain("Execution Notes");
+    expect(await readFile(result.reportPath, "utf8")).toContain(
+      "Execution Notes",
+    );
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -1887,7 +2072,11 @@ test("replays a run from a provided context bundle", async () => {
         id: "replay-context",
         artifacts: [
           { id: "triage", title: "Risk Triage", content: "trivial" },
-          { id: "workspace-diff", title: "Workspace Diff", content: "diff --git a/a b/a" },
+          {
+            id: "workspace-diff",
+            title: "Workspace Diff",
+            content: "diff --git a/a b/a",
+          },
         ],
       }),
     );
@@ -1909,7 +2098,9 @@ test("replays a run from a provided context bundle", async () => {
 });
 
 test("keeps only recurring findings when consensus mode is enabled", async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-consensus-"));
+  const tempDir = await mkdtemp(
+    join(tmpdir(), "agents-code-review-consensus-"),
+  );
   try {
     const shared: Finding = {
       id: "shared-finding",
@@ -1920,7 +2111,10 @@ test("keeps only recurring findings when consensus mode is enabled", async () =>
       sourceRole: "quality",
       file: "src/app.ts",
       line: 42,
-      validation: { status: "verified", details: "Verified by code-path inspection." },
+      validation: {
+        status: "verified",
+        details: "Verified by code-path inspection.",
+      },
     };
 
     const result = await runCodeReview({
@@ -1944,7 +2138,9 @@ test("keeps only recurring findings when consensus mode is enabled", async () =>
           const passSpecific: Finding = {
             ...shared,
             id: request.runId.endsWith("pass1") ? "pass1-only" : "pass2-only",
-            title: request.runId.endsWith("pass1") ? "Only pass 1" : "Only pass 2",
+            title: request.runId.endsWith("pass1")
+              ? "Only pass 1"
+              : "Only pass 2",
             line: request.runId.endsWith("pass1") ? 100 : 101,
           };
           yield {
@@ -1978,7 +2174,9 @@ test("keeps only recurring findings when consensus mode is enabled", async () =>
 });
 
 test("consensus run with no recurring findings reports passed and drops findings", async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-consensus-none-"));
+  const tempDir = await mkdtemp(
+    join(tmpdir(), "agents-code-review-consensus-none-"),
+  );
   try {
     const result = await runCodeReview({
       workspacePath: tempDir,
@@ -2001,13 +2199,18 @@ test("consensus run with no recurring findings reports passed and drops findings
           const finding: Finding = {
             id: request.runId.endsWith("pass1") ? "p1" : "p2",
             severity: "warning",
-            title: request.runId.endsWith("pass1") ? "Only pass 1" : "Only pass 2",
+            title: request.runId.endsWith("pass1")
+              ? "Only pass 1"
+              : "Only pass 2",
             description: "Pass-specific finding",
             evidence: "Only appears in one pass",
             sourceRole: "quality",
             file: "src/app.ts",
             line: request.runId.endsWith("pass1") ? 10 : 11,
-            validation: { status: "verified", details: "Verified by code inspection path trace." },
+            validation: {
+              status: "verified",
+              details: "Verified by code inspection path trace.",
+            },
           };
           yield {
             timestamp: "2026-05-02T00:00:00.000Z",
@@ -2040,7 +2243,9 @@ test("rejects non-positive consensusRuns from API options", async () => {
 });
 
 test("strict mode fails run on timed out roles", async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-timeout-strict-"));
+  const tempDir = await mkdtemp(
+    join(tmpdir(), "agents-code-review-timeout-strict-"),
+  );
   try {
     const result = await runCodeReview({
       workspacePath: tempDir,
@@ -2078,7 +2283,9 @@ test("strict mode fails run on timed out roles", async () => {
 });
 
 test("resolveGitAwarePath keeps colocated repo paths", async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-colocated-"));
+  const tempDir = await mkdtemp(
+    join(tmpdir(), "agents-core-git-aware-colocated-"),
+  );
   try {
     await mkdir(join(tempDir, ".git"), { recursive: true });
     const result = await resolveGitAwarePath(tempDir);
@@ -2092,9 +2299,15 @@ test("resolveGitAwarePath keeps colocated repo paths", async () => {
 });
 
 test("resolveGitAwarePath treats git worktree .git files as git-aware", async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-worktree-"));
+  const tempDir = await mkdtemp(
+    join(tmpdir(), "agents-core-git-aware-worktree-"),
+  );
   try {
-    await writeFile(join(tempDir, ".git"), "gitdir: /tmp/worktree/.git\n", "utf8");
+    await writeFile(
+      join(tempDir, ".git"),
+      "gitdir: /tmp/worktree/.git\n",
+      "utf8",
+    );
     const result = await resolveGitAwarePath(tempDir);
     expect(result.gitAwarePath).toBe(tempDir);
     expect(result.isJjWorkspace).toBe(false);
@@ -2143,7 +2356,9 @@ test("resolveGitAwarePath warns and falls back when jj pointer is empty", async 
 });
 
 test("resolveGitAwarePath warns and falls back when canonical .git is missing", async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "agents-core-git-aware-missing-git-"));
+  const tempDir = await mkdtemp(
+    join(tmpdir(), "agents-core-git-aware-missing-git-"),
+  );
   try {
     const canonicalRepo = join(tempDir, "repos", "github.com", "acme", "demo");
     const workspace = join(tempDir, "projects", "feat", "task", "demo");
@@ -2177,7 +2392,10 @@ test("mergeFlatConfigLayers overlays strings and booleans onto base partials", (
 
 test("mergePresetMaps merges each named preset user then repo (repo wins on overlap)", () => {
   expect(
-    mergePresetMaps({ ci: { dryRun: false, model: "m0" } }, { ci: { dryRun: true, adapter: "fake" } }),
+    mergePresetMaps(
+      { ci: { dryRun: false, model: "m0" } },
+      { ci: { dryRun: true, adapter: "fake" } },
+    ),
   ).toEqual({
     ci: { dryRun: true, model: "m0", adapter: "fake" },
   });
@@ -2211,14 +2429,25 @@ test("extractConfigDocument parses top-level flat options and presets", () => {
 });
 
 test("normalizeAdapterArgsTemplateField preserves JSON array tokens (including embedded commas)", () => {
-  expect(normalizeAdapterArgsTemplateField("cursorArgs", undefined)).toEqual({ ok: true });
-  const normalized = normalizeAdapterArgsTemplateField("cursorArgs", ["--print", "a,b", "  spaced  "]);
-  expect(normalized).toEqual({ ok: true, normalized: ["--print", "a,b", "spaced"] });
+  expect(normalizeAdapterArgsTemplateField("cursorArgs", undefined)).toEqual({
+    ok: true,
+  });
+  const normalized = normalizeAdapterArgsTemplateField("cursorArgs", [
+    "--print",
+    "a,b",
+    "  spaced  ",
+  ]);
+  expect(normalized).toEqual({
+    ok: true,
+    normalized: ["--print", "a,b", "spaced"],
+  });
 });
 
 test("normalizeAdapterArgsTemplateField rejects mixed-type arrays", () => {
   const badFixture: unknown[] = ["--ok", false];
-  expect(normalizeAdapterArgsTemplateField("claudeArgs", badFixture).ok).toBe(false);
+  expect(normalizeAdapterArgsTemplateField("claudeArgs", badFixture).ok).toBe(
+    false,
+  );
 });
 
 test("extractConfigDocument accepts adapter arg templates as JSON string arrays", () => {
@@ -2270,7 +2499,9 @@ test("extractConfigDocument rejects unknown keys when AGENTS_CODE_REVIEW_CONFIG_
 });
 
 test("extractConfigDocument rejects invalid cursorArgs array shapes", () => {
-  expect(extractConfigDocument({ cursorArgs: [1 as unknown as string] }).ok).toBe(false);
+  expect(
+    extractConfigDocument({ cursorArgs: [1 as unknown as string] }).ok,
+  ).toBe(false);
 });
 
 test("resolveCodeReviewCliOptions merges configs and applies preset and CLI precedence", async () => {
@@ -2303,12 +2534,20 @@ test("resolveCodeReviewCliOptions merges configs and applies preset and CLI prec
     if (!r1.ok) {
       return;
     }
-    expect(r1.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
+    expect(r1.options.adapter).toBe(
+      CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
+    );
     expect(r1.options.model).toBe("from-user");
     expect(r1.options.consensus).toBe("2");
     expect(r1.options.dryRun).toBe(true);
 
-    const parsedCliWins = parseCodeReviewArgv(["--preset", "ci", "--adapter", "fake", "--dry-run"]);
+    const parsedCliWins = parseCodeReviewArgv([
+      "--preset",
+      "ci",
+      "--adapter",
+      "fake",
+      "--dry-run",
+    ]);
     const r2 = await resolveCodeReviewCliOptions(ws, parsedCliWins);
     expect(r2.ok).toBe(true);
     if (!r2.ok) {
@@ -2431,7 +2670,9 @@ test("resolveCodeReviewCliOptions drops repo-supplied executable paths and keeps
     }
     expect(r.options.cursor).toBe("/user/agent");
     expect(r.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
-    expect(warns.some((line) => line.includes("repo-managed review overrides"))).toBe(true);
+    expect(
+      warns.some((line) => line.includes("repo-managed review overrides")),
+    ).toBe(true);
   } finally {
     console.warn = origWarn;
     await rm(tempRoot, { recursive: true, force: true });
@@ -2456,7 +2697,9 @@ test("resolveCodeReviewCliOptions uses harness packaged adapter below empty conf
     const r = await resolveCodeReviewCliOptions(ws, parseCodeReviewArgv([]));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
+      expect(r.options.adapter).toBe(
+        CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
+      );
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true });

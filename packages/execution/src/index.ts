@@ -1,7 +1,11 @@
-import { createAgentEvent, ensureDirectory, writeJsonFile } from "@aguil/agents-core";
-import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { AgentEvent, Finding } from "@aguil/agents-core";
+import {
+  createAgentEvent,
+  ensureDirectory,
+  writeJsonFile,
+} from "@aguil/agents-core";
 
 export interface AdapterCapabilities {
   readonly streaming: boolean;
@@ -100,7 +104,10 @@ export function validateFinding(value: unknown): FindingValidationResult {
     errors.push("line must be a positive integer when present");
   }
 
-  if (typeof candidate.validation !== "object" || candidate.validation === null) {
+  if (
+    typeof candidate.validation !== "object" ||
+    candidate.validation === null
+  ) {
     errors.push("validation must be an object");
   } else {
     const validation = candidate.validation as Partial<Finding["validation"]>;
@@ -109,7 +116,9 @@ export function validateFinding(value: unknown): FindingValidationResult {
       validation.status !== "not_reproduced" &&
       validation.status !== "not_run"
     ) {
-      errors.push("validation.status must be verified, not_reproduced, or not_run");
+      errors.push(
+        "validation.status must be verified, not_reproduced, or not_run",
+      );
     }
     requireString(validation.details, "validation.details", errors);
   }
@@ -127,7 +136,9 @@ export class FakeAgentAdapter implements AgentAdapter {
   readonly name = "fake";
 
   constructor(
-    private readonly findingsByRole: Readonly<Record<string, readonly Finding[]>> = {},
+    private readonly findingsByRole: Readonly<
+      Record<string, readonly Finding[]>
+    > = {},
   ) {}
 
   capabilities(): AdapterCapabilities {
@@ -194,7 +205,10 @@ export class SubprocessAgentAdapter implements AgentAdapter {
 
   async *run(request: AgentRunRequest): AsyncIterable<AgentEvent> {
     await ensureDirectory(request.scratchpadPath);
-    const requestPath = join(request.scratchpadPath, `${request.roleId}.request.json`);
+    const requestPath = join(
+      request.scratchpadPath,
+      `${request.roleId}.request.json`,
+    );
     const stdoutLogPath = join(request.scratchpadPath, "stdout.log");
     const stderrLogPath = join(request.scratchpadPath, "stderr.log");
     await writeJsonFile(requestPath, request);
@@ -259,21 +273,24 @@ export class SubprocessAgentAdapter implements AgentAdapter {
     const stderrTail = createTailBuffer(25);
     const startedAtMs = Date.now();
 
-    const timeoutTimer = request.timeoutMs > 0
-      ? setTimeout(() => {
-          timedOut = true;
-          proc.kill("SIGTERM");
-          hardKillTimer = setTimeout(() => proc.kill("SIGKILL"), 1_000);
-        }, request.timeoutMs)
-      : undefined;
+    const timeoutTimer =
+      request.timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            proc.kill("SIGTERM");
+            hardKillTimer = setTimeout(() => proc.kill("SIGKILL"), 1_000);
+          }, request.timeoutMs)
+        : undefined;
 
     const heartbeatInterval = this.options.heartbeatIntervalMs ?? 15_000;
-    const idleWarningThresholdMs = this.options.idleWarningThresholdMs ?? 90_000;
+    const idleWarningThresholdMs =
+      this.options.idleWarningThresholdMs ?? 90_000;
     const heartbeatTimer = setInterval(() => {
       const elapsedMs = Date.now() - startedAtMs;
-      const lastOutputMs = lastOutputTimestamp === undefined
-        ? startedAtMs
-        : Date.parse(lastOutputTimestamp);
+      const lastOutputMs =
+        lastOutputTimestamp === undefined
+          ? startedAtMs
+          : Date.parse(lastOutputTimestamp);
       const idleDurationMs = Date.now() - lastOutputMs;
       const isIdle = idleDurationMs >= idleWarningThresholdMs;
       queue.push(
@@ -326,7 +343,11 @@ export class SubprocessAgentAdapter implements AgentAdapter {
 
     let exitCode = 0;
     try {
-      [exitCode] = await Promise.all([proc.exited, stdoutDrainer, stderrDrainer]);
+      [exitCode] = await Promise.all([
+        proc.exited,
+        stdoutDrainer,
+        stderrDrainer,
+      ]);
     } finally {
       if (timeoutTimer !== undefined) {
         clearTimeout(timeoutTimer);
@@ -335,20 +356,78 @@ export class SubprocessAgentAdapter implements AgentAdapter {
         clearTimeout(hardKillTimer);
       }
       clearInterval(heartbeatTimer);
-      await Promise.all([stdoutWriter.flushAndClose(), stderrWriter.flushAndClose()]);
+      await Promise.all([
+        stdoutWriter.flushAndClose(),
+        stderrWriter.flushAndClose(),
+      ]);
     }
 
     if (timedOut) {
-      queue.push(createAgentEvent({
+      queue.push(
+        createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "error",
+          message: `${this.name} timed out after ${request.timeoutMs}ms`,
+          data: {
+            reason: "timed_out",
+            timeoutMs: request.timeoutMs,
+            elapsedMs: Date.now() - startedAtMs,
+            exitCode,
+            command: command.cmd,
+            cwd: command.cwd ?? request.workspacePath,
+            stdoutBytes,
+            stderrBytes,
+            lastOutputTimestamp,
+            stdoutTail: stdoutTail.values(),
+            stderrTail: stderrTail.values(),
+            stdoutLogPath,
+            stderrLogPath,
+          },
+        }),
+      );
+      queue.close();
+      for await (const event of queue) {
+        yield event;
+      }
+      return;
+    }
+
+    if (exitCode === 0) {
+      queue.push(
+        createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "completed",
+          message: `${this.name} completed ${request.roleId}`,
+          data: {
+            elapsedMs: Date.now() - startedAtMs,
+            exitCode,
+            command: command.cmd,
+            cwd: command.cwd ?? request.workspacePath,
+            stdoutBytes,
+            stderrBytes,
+            stdoutLogPath,
+            stderrLogPath,
+          },
+        }),
+      );
+      queue.close();
+      for await (const event of queue) {
+        yield event;
+      }
+      return;
+    }
+
+    queue.push(
+      createAgentEvent({
         runId: request.runId,
         roleId: request.roleId,
         type: "error",
-        message: `${this.name} timed out after ${request.timeoutMs}ms`,
+        message: `${this.name} exited with code ${exitCode}`,
         data: {
-          reason: "timed_out",
-          timeoutMs: request.timeoutMs,
-          elapsedMs: Date.now() - startedAtMs,
           exitCode,
+          elapsedMs: Date.now() - startedAtMs,
           command: command.cmd,
           cwd: command.cwd ?? request.workspacePath,
           stdoutBytes,
@@ -359,57 +438,8 @@ export class SubprocessAgentAdapter implements AgentAdapter {
           stdoutLogPath,
           stderrLogPath,
         },
-      }));
-      queue.close();
-      for await (const event of queue) {
-        yield event;
-      }
-      return;
-    }
-
-    if (exitCode === 0) {
-      queue.push(createAgentEvent({
-        runId: request.runId,
-        roleId: request.roleId,
-        type: "completed",
-        message: `${this.name} completed ${request.roleId}`,
-        data: {
-          elapsedMs: Date.now() - startedAtMs,
-          exitCode,
-          command: command.cmd,
-          cwd: command.cwd ?? request.workspacePath,
-          stdoutBytes,
-          stderrBytes,
-          stdoutLogPath,
-          stderrLogPath,
-        },
-      }));
-      queue.close();
-      for await (const event of queue) {
-        yield event;
-      }
-      return;
-    }
-
-    queue.push(createAgentEvent({
-      runId: request.runId,
-      roleId: request.roleId,
-      type: "error",
-      message: `${this.name} exited with code ${exitCode}`,
-      data: {
-        exitCode,
-        elapsedMs: Date.now() - startedAtMs,
-        command: command.cmd,
-        cwd: command.cwd ?? request.workspacePath,
-        stdoutBytes,
-        stderrBytes,
-        lastOutputTimestamp,
-        stdoutTail: stdoutTail.values(),
-        stderrTail: stderrTail.values(),
-        stdoutLogPath,
-        stderrLogPath,
-      },
-    }));
+      }),
+    );
     queue.close();
     for await (const event of queue) {
       yield event;
@@ -465,26 +495,33 @@ export function normalizeAgentOutputLine(
             roleId: request.roleId,
             type: "error",
             message: "invalid finding envelope",
-            data: { errors: findingEnvelope.validation.errors, finding: findingEnvelope.value },
+            data: {
+              errors: findingEnvelope.validation.errors,
+              finding: findingEnvelope.value,
+            },
           }),
         ];
       }
-      return [createAgentEvent({
-        runId: request.runId,
-        roleId: request.roleId,
-        type: "finding",
-        message: findingEnvelope.value.title,
-        data: findingEnvelope.value,
-      })];
+      return [
+        createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "finding",
+          message: findingEnvelope.value.title,
+          data: findingEnvelope.value,
+        }),
+      ];
     }
     if (isAgentEventEnvelope(parsed)) {
-      return [createAgentEvent({
-        runId: parsed.runId ?? request.runId,
-        roleId: parsed.roleId ?? request.roleId,
-        type: parsed.type,
-        message: parsed.message,
-        data: parsed.data,
-      })];
+      return [
+        createAgentEvent({
+          runId: parsed.runId ?? request.runId,
+          roleId: parsed.roleId ?? request.roleId,
+          type: parsed.type,
+          message: parsed.message,
+          data: parsed.data,
+        }),
+      ];
     }
 
     const nestedFindings = extractFindingEnvelopes(parsed).map((envelope) => {
@@ -509,20 +546,24 @@ export function normalizeAgentOutputLine(
       return nestedFindings;
     }
 
-    return [createAgentEvent({
-      runId: request.runId,
-      roleId: request.roleId,
-      type: "stdout",
-      message: line,
-      data: parsed,
-    })];
+    return [
+      createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "stdout",
+        message: line,
+        data: parsed,
+      }),
+    ];
   } catch {
-    return [createAgentEvent({
-      runId: request.runId,
-      roleId: request.roleId,
-      type: "stdout",
-      message: line,
-    })];
+    return [
+      createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "stdout",
+        message: line,
+      }),
+    ];
   }
 }
 
@@ -531,7 +572,9 @@ interface ParsedFindingEnvelope {
   readonly validation: FindingValidationResult;
 }
 
-function readFindingEnvelope(value: unknown): ParsedFindingEnvelope | undefined {
+function readFindingEnvelope(
+  value: unknown,
+): ParsedFindingEnvelope | undefined {
   if (typeof value !== "object" || value === null || !("finding" in value)) {
     return undefined;
   }
@@ -544,7 +587,9 @@ function readFindingEnvelope(value: unknown): ParsedFindingEnvelope | undefined 
   return { value: coerced as Finding, validation };
 }
 
-function extractFindingEnvelopes(value: unknown): readonly ParsedFindingEnvelope[] {
+function extractFindingEnvelopes(
+  value: unknown,
+): readonly ParsedFindingEnvelope[] {
   const envelopes: ParsedFindingEnvelope[] = [];
   const texts = extractTextCandidates(value);
   for (const text of texts) {
@@ -735,11 +780,12 @@ export function buildOpenCodeCommand(
 
 export function buildOpenCodePrompt(request: AgentRunRequest): string {
   const vcsMode = request.metadata?.vcs_mode;
-  const vcsGuidance = vcsMode === "jj"
-    ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
-    : vcsMode === "git"
-    ? "- This workspace uses git. Prefer `git diff`/`git log`."
-    : "";
+  const vcsGuidance =
+    vcsMode === "jj"
+      ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
+      : vcsMode === "git"
+        ? "- This workspace uses git. Prefer `git diff`/`git log`."
+        : "";
 
   return `${request.prompt}
 
@@ -804,11 +850,12 @@ export function buildClaudeCodePrompt(
   requestPath: string,
 ): string {
   const vcsMode = request.metadata?.vcs_mode;
-  const vcsGuidance = vcsMode === "jj"
-    ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
-    : vcsMode === "git"
-    ? "- This workspace uses git. Prefer `git diff`/`git log`."
-    : "";
+  const vcsGuidance =
+    vcsMode === "jj"
+      ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
+      : vcsMode === "git"
+        ? "- This workspace uses git. Prefer `git diff`/`git log`."
+        : "";
 
   return `${request.prompt}
 
@@ -824,7 +871,7 @@ Rules:
 ${vcsGuidance}
 - Report only critical or warning findings with concrete evidence.
 - Ignore style-only feedback and speculative nitpicks.
-- Emit each finding as a single JSON line with a top-level \"finding\" object.
+- Emit each finding as a single JSON line with a top-level "finding" object.
 
 - Formatting guidelines for findings:
 - Break description into readable paragraphs when covering multiple aspects (use \n between sentences).
@@ -861,7 +908,9 @@ export function buildCursorCommand(
     "{workspace}",
     "--trust",
     ...(options.force === false ? [] : ["--force"]),
-    ...(options.mode !== undefined && options.mode !== "agent" ? ["--mode", options.mode] : []),
+    ...(options.mode !== undefined && options.mode !== "agent"
+      ? ["--mode", options.mode]
+      : []),
     ...(options.sandbox !== undefined ? ["--sandbox", options.sandbox] : []),
     ...(options.model !== undefined ? ["--model", "{model}"] : []),
     "{prompt}",
@@ -889,7 +938,10 @@ function substituteTemplateArg(
   arg: string,
   substitutions: Readonly<Record<string, string>>,
 ): string {
-  return arg.replaceAll(/\{([a-z_]+)\}/g, (full, key: string) => substitutions[key] ?? full);
+  return arg.replaceAll(
+    /\{([a-z_]+)\}/g,
+    (full, key: string) => substitutions[key] ?? full,
+  );
 }
 
 function createTailBuffer(limit: number): {
@@ -1003,13 +1055,12 @@ class BatchedLogWriter {
     }
     const chunk = this.buffer;
     this.buffer = "";
-    this.flushPromise = appendFile(this.path, chunk, "utf8")
-      .finally(() => {
-        this.flushPromise = undefined;
-        if (this.buffer.length > 0) {
-          this.flushSoon();
-        }
-      });
+    this.flushPromise = appendFile(this.path, chunk, "utf8").finally(() => {
+      this.flushPromise = undefined;
+      if (this.buffer.length > 0) {
+        this.flushSoon();
+      }
+    });
   }
 }
 

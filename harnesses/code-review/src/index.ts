@@ -1,12 +1,21 @@
+import { createHash } from "node:crypto";
+import { access, readFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   AgentsInstructionsProvider,
   type ContextBundle,
+  collectContextBundle,
   PullRequestMetadataProvider,
   PullRequestReferencedDocsProvider,
   RepositoryDiffProvider,
-  collectContextBundle,
   writeContextBundle,
 } from "@aguil/agents-context";
+import type {
+  Finding,
+  HarnessRunResult,
+  ReviewTriageTier,
+} from "@aguil/agents-core";
 import {
   type AgentEvent,
   createRunId,
@@ -14,16 +23,20 @@ import {
   writeJsonFile,
   writeTextFile,
 } from "@aguil/agents-core";
-import type { Finding, HarnessRunResult, ReviewTriageTier } from "@aguil/agents-core";
-import { ClaudeCodeAdapter, CursorAdapter, FakeAgentAdapter, OpenCodeAdapter } from "@aguil/agents-execution";
 import type {
   AgentAdapter,
   ClaudeCodeAdapterOptions,
   CursorAdapterOptions,
   OpenCodeAdapterOptions,
 } from "@aguil/agents-execution";
-import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
+import {
+  ClaudeCodeAdapter,
+  CursorAdapter,
+  FakeAgentAdapter,
+  OpenCodeAdapter,
+} from "@aguil/agents-execution";
 import type { HarnessDefinition } from "@aguil/agents-orchestration";
+import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 import {
   actionableFindings,
   dedupeFindings,
@@ -33,11 +46,11 @@ import {
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import { EMBEDDED_PROMPTS } from "./embedded-prompts";
-import { expectedRolesForTriageTier, parseMetadataRolesList, type CodeReviewRoleId } from "./review-contract";
-import { createHash } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  type CodeReviewRoleId,
+  expectedRolesForTriageTier,
+  parseMetadataRolesList,
+} from "./review-contract";
 
 const sourceDir = dirname(fileURLToPath(import.meta.url));
 const promptDir = resolve(sourceDir, "../prompts");
@@ -70,7 +83,14 @@ export interface CodeReviewRunResult extends HarnessRunResult {
 
 export const codeReviewHarnessDefinition: HarnessDefinition = {
   id: "code-review",
-  defaultAllowedCommands: ["rg", "grep", "bun test", "npm test", "jj diff", "git diff"],
+  defaultAllowedCommands: [
+    "rg",
+    "grep",
+    "bun test",
+    "npm test",
+    "jj diff",
+    "git diff",
+  ],
   roles: [
     {
       id: "security",
@@ -81,21 +101,24 @@ export const codeReviewHarnessDefinition: HarnessDefinition = {
     },
     {
       id: "performance",
-      description: "Find meaningful performance regressions introduced by the change.",
+      description:
+        "Find meaningful performance regressions introduced by the change.",
       promptPath: join(promptDir, "performance.md"),
       requiredCapabilities: ["readOnlyMode", "structuredOutput"],
       timeoutMs: 1_200_000,
     },
     {
       id: "quality",
-      description: "Find correctness and maintainability issues with clear behavioral impact.",
+      description:
+        "Find correctness and maintainability issues with clear behavioral impact.",
       promptPath: join(promptDir, "quality.md"),
       requiredCapabilities: ["readOnlyMode", "structuredOutput"],
       timeoutMs: 1_200_000,
     },
     {
       id: "compliance",
-      description: "Check project conventions, RFCs, and AGENTS.md requirements.",
+      description:
+        "Check project conventions, RFCs, and AGENTS.md requirements.",
       promptPath: join(promptDir, "compliance.md"),
       requiredCapabilities: ["readOnlyMode", "structuredOutput"],
       timeoutMs: 1_200_000,
@@ -115,24 +138,30 @@ export async function runCodeReview(
   await ensureDirectory(scratchpadPath);
   const consensusRuns = normalizeConsensusRuns(options.consensusRuns);
 
-  const context = options.contextBundlePath === undefined
-    ? await collectContextBundle(
-      `${runId}-context`,
-      { workspacePath, scratchpadPath, pullRequestNumber: options.reviewPrNumber },
-      [
-        new PullRequestMetadataProvider(),
-        new PullRequestReferencedDocsProvider(),
-        new RepositoryDiffProvider(),
-        new AgentsInstructionsProvider(),
-      ],
-    )
-    : await loadContextBundleFromPath(options.contextBundlePath);
+  const context =
+    options.contextBundlePath === undefined
+      ? await collectContextBundle(
+          `${runId}-context`,
+          {
+            workspacePath,
+            scratchpadPath,
+            pullRequestNumber: options.reviewPrNumber,
+          },
+          [
+            new PullRequestMetadataProvider(),
+            new PullRequestReferencedDocsProvider(),
+            new RepositoryDiffProvider(),
+            new AgentsInstructionsProvider(),
+          ],
+        )
+      : await loadContextBundleFromPath(options.contextBundlePath);
   const writtenContext = await writeContextBundle(context, scratchpadPath);
   const triage = parseTriageTier(
     context.artifacts.find((artifact) => artifact.id === "triage")?.content,
   );
   const reviewPrMetadata = parseReviewPrMetadataFromContext(
-    context.artifacts.find((artifact) => artifact.id === "diff-strategy")?.content,
+    context.artifacts.find((artifact) => artifact.id === "diff-strategy")
+      ?.content,
   );
   const vcsMode = await detectWorkspaceVcsMode(workspacePath);
   const defaultAllowedCommands = defaultCommandsForVcsMode(vcsMode);
@@ -164,24 +193,32 @@ export async function runCodeReview(
 
   for (let index = 0; index < consensusRuns; index += 1) {
     const passNumber = index + 1;
-    const passScratchpadPath = consensusRuns === 1
-      ? scratchpadPath
-      : join(scratchpadPath, "passes", `pass-${passNumber}`);
+    const passScratchpadPath =
+      consensusRuns === 1
+        ? scratchpadPath
+        : join(scratchpadPath, "passes", `pass-${passNumber}`);
     await ensureDirectory(passScratchpadPath);
-    const passRunId = consensusRuns === 1 ? runId : `${runId}-pass${passNumber}`;
+    const passRunId =
+      consensusRuns === 1 ? runId : `${runId}-pass${passNumber}`;
 
-    const fileEventSink = new JsonlFileEventSink(join(passScratchpadPath, "events.jsonl"));
+    const fileEventSink = new JsonlFileEventSink(
+      join(passScratchpadPath, "events.jsonl"),
+    );
     const orchestrator = new NativeBunOrchestrator({
-      definition: definitionForTriageWithCommands(triage, defaultAllowedCommands),
+      definition: definitionForTriageWithCommands(
+        triage,
+        defaultAllowedCommands,
+      ),
       adapter,
-      eventSink: options.onEvent === undefined
-        ? fileEventSink
-        : {
-            async write(event) {
-              await fileEventSink.write(event);
-              await options.onEvent?.(event);
+      eventSink:
+        options.onEvent === undefined
+          ? fileEventSink
+          : {
+              async write(event) {
+                await fileEventSink.write(event);
+                await options.onEvent?.(event);
+              },
             },
-          },
       contextBundlePath: writtenContext.jsonPath,
       embeddedPrompts: EMBEDDED_PROMPTS,
     });
@@ -200,14 +237,20 @@ export async function runCodeReview(
       },
     });
     perPassResults.push(rawResult);
-    passFindingSets.push(dedupeFindings(actionableFindings(rawResult.findings)));
+    passFindingSets.push(
+      dedupeFindings(actionableFindings(rawResult.findings)),
+    );
   }
 
   const rawResult = combinePassResults(runId, perPassResults, baseMetadata);
-  const findings = consensusRuns > 1
-    ? intersectFindingsByFingerprint(passFindingSets)
-    : passFindingSets[0] ?? [];
-  const consensusDropped = countConsensusDroppedFindings(passFindingSets, findings);
+  const findings =
+    consensusRuns > 1
+      ? intersectFindingsByFingerprint(passFindingSets)
+      : (passFindingSets[0] ?? []);
+  const consensusDropped = countConsensusDroppedFindings(
+    passFindingSets,
+    findings,
+  );
 
   const rawMetadata = {
     ...(rawResult.metadata ?? {}),
@@ -222,7 +265,11 @@ export async function runCodeReview(
     status: combineStatuses(rawResult.status, findingStatus),
     findings,
     metadata: rawMetadata,
-    artifacts: [...rawResult.artifacts, writtenContext.jsonPath, writtenContext.markdownPath],
+    artifacts: [
+      ...rawResult.artifacts,
+      writtenContext.jsonPath,
+      writtenContext.markdownPath,
+    ],
   };
 
   const reportPath = await writeTextFile(
@@ -252,14 +299,26 @@ function combinePassResults(
   const artifacts = passResults.flatMap((result) => result.artifacts);
   const hasError = passResults.some((result) => result.status === "error");
   const hasFailed = passResults.some((result) => result.status === "failed");
-  const timedOutRoles = joinUniqueMetadataRoleList(passResults, "timed_out_roles");
+  const timedOutRoles = joinUniqueMetadataRoleList(
+    passResults,
+    "timed_out_roles",
+  );
   const failedRoles = joinUniqueMetadataRoleList(passResults, "failed_roles");
-  const completedRoles = joinUniqueMetadataRoleList(passResults, "completed_roles");
+  const completedRoles = joinUniqueMetadataRoleList(
+    passResults,
+    "completed_roles",
+  );
   const hasTimedOut = timedOutRoles.length > 0;
 
   return {
     runId,
-    status: hasError ? "error" : hasFailed ? "failed" : hasTimedOut ? "warnings" : "passed",
+    status: hasError
+      ? "error"
+      : hasFailed
+        ? "failed"
+        : hasTimedOut
+          ? "warnings"
+          : "passed",
     findings,
     artifacts,
     metadata: {
@@ -285,7 +344,9 @@ function joinUniqueMetadataRoleList(
   return [...values].join(",");
 }
 
-function intersectFindingsByFingerprint(perPassFindings: readonly (readonly Finding[])[]): readonly Finding[] {
+function intersectFindingsByFingerprint(
+  perPassFindings: readonly (readonly Finding[])[],
+): readonly Finding[] {
   if (perPassFindings.length === 0) {
     return [];
   }
@@ -325,7 +386,9 @@ function countConsensusDroppedFindings(
     }
   }
 
-  const kept = new Set(keptFindings.map((finding) => findingFingerprint(finding)));
+  const kept = new Set(
+    keptFindings.map((finding) => findingFingerprint(finding)),
+  );
   return [...observed].filter((fingerprint) => !kept.has(fingerprint)).length;
 }
 
@@ -351,8 +414,13 @@ export function createCodeReviewAdapter(
   return new FakeAgentAdapter();
 }
 
-export function definitionForTriage(triage: ReviewTriageTier): HarnessDefinition {
-  return definitionForTriageWithCommands(triage, codeReviewHarnessDefinition.defaultAllowedCommands ?? []);
+export function definitionForTriage(
+  triage: ReviewTriageTier,
+): HarnessDefinition {
+  return definitionForTriageWithCommands(
+    triage,
+    codeReviewHarnessDefinition.defaultAllowedCommands ?? [],
+  );
 }
 
 function definitionForTriageWithCommands(
@@ -363,7 +431,9 @@ function definitionForTriageWithCommands(
   return {
     ...codeReviewHarnessDefinition,
     defaultAllowedCommands,
-    roles: codeReviewHarnessDefinition.roles.filter((role) => roleIds.has(role.id as CodeReviewRoleId)),
+    roles: codeReviewHarnessDefinition.roles.filter((role) =>
+      roleIds.has(role.id as CodeReviewRoleId),
+    ),
   };
 }
 
@@ -374,11 +444,13 @@ function parseTriageTier(value: string | undefined): ReviewTriageTier {
   return "lite";
 }
 
-function parseReviewPrMetadataFromContext(value: string | undefined): {
-  readonly number: number;
-  readonly headSha?: string;
-  readonly reviewedAt: string;
-} | undefined {
+function parseReviewPrMetadataFromContext(value: string | undefined):
+  | {
+      readonly number: number;
+      readonly headSha?: string;
+      readonly reviewedAt: string;
+    }
+  | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -392,9 +464,12 @@ function parseReviewPrMetadataFromContext(value: string | undefined): {
     return undefined;
   }
   const headShaValue = extractTaggedValue(value, "PR Head SHA:");
-  const headSha = headShaValue === undefined || headShaValue === "(unavailable)" || headShaValue.length === 0
-    ? undefined
-    : headShaValue;
+  const headSha =
+    headShaValue === undefined ||
+    headShaValue === "(unavailable)" ||
+    headShaValue.length === 0
+      ? undefined
+      : headShaValue;
   return {
     number: parsedNumber,
     headSha,
@@ -435,7 +510,9 @@ async function loadContextBundleFromPath(path: string): Promise<ContextBundle> {
   return parsed as ContextBundle;
 }
 
-async function detectWorkspaceVcsMode(workspacePath: string): Promise<"jj" | "git" | "unknown"> {
+async function detectWorkspaceVcsMode(
+  workspacePath: string,
+): Promise<"jj" | "git" | "unknown"> {
   const hasJj = await pathExists(join(workspacePath, ".jj"));
   const hasGit = await pathExists(join(workspacePath, ".git"));
   if (hasJj) {
@@ -447,7 +524,9 @@ async function detectWorkspaceVcsMode(workspacePath: string): Promise<"jj" | "gi
   return "unknown";
 }
 
-function defaultCommandsForVcsMode(vcsMode: "jj" | "git" | "unknown"): readonly string[] {
+function defaultCommandsForVcsMode(
+  vcsMode: "jj" | "git" | "unknown",
+): readonly string[] {
   if (vcsMode === "jj") {
     return ["rg", "grep", "bun test", "npm test", "jj diff", "jj log"];
   }
@@ -471,12 +550,22 @@ function normalizeConsensusRuns(value: number | undefined): number {
     return 1;
   }
   if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`Invalid consensusRuns value: ${value}. Expected a positive integer.`);
+    throw new Error(
+      `Invalid consensusRuns value: ${value}. Expected a positive integer.`,
+    );
   }
   return value;
 }
 
-export type { CodeReviewRoleId, CodeReviewRunMetadata, RunMetadataSchema } from "./review-contract";
+export {
+  CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
+  codeReviewHarnessPackageCliDefaults,
+} from "./harness-package-defaults";
+export type {
+  CodeReviewRoleId,
+  CodeReviewRunMetadata,
+  RunMetadataSchema,
+} from "./review-contract";
 export {
   CODE_REVIEW_ROLE_IDS,
   CODE_REVIEW_RUN_METADATA_KEYS,
@@ -486,7 +575,3 @@ export {
   parseTriageTierFromRunMetadata,
   roleReviewSectionLabel,
 } from "./review-contract";
-export {
-  CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
-  codeReviewHarnessPackageCliDefaults,
-} from "./harness-package-defaults";

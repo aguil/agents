@@ -9,7 +9,12 @@ export const CODE_REVIEW_RUN_METADATA_KEYS = {
 } as const;
 
 /** Canonical full role order for scheduling and review-coverage summaries. */
-export const CODE_REVIEW_ROLE_IDS = ["security", "performance", "quality", "compliance"] as const;
+export const CODE_REVIEW_ROLE_IDS = [
+  "security",
+  "performance",
+  "quality",
+  "compliance",
+] as const;
 
 export type CodeReviewRoleId = (typeof CODE_REVIEW_ROLE_IDS)[number];
 
@@ -25,14 +30,21 @@ export interface CodeReviewRunMetadata {
 /** Same type as {@link CodeReviewRunMetadata}; named for tooling / schema references. */
 export type RunMetadataSchema = CodeReviewRunMetadata;
 
-export function parseMetadataRolesList(raw: string | undefined): readonly string[] {
+export function parseMetadataRolesList(
+  raw: string | undefined,
+): readonly string[] {
   if (raw === undefined || raw.trim().length === 0) {
     return [];
   }
-  return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
-export function parseTriageTierFromRunMetadata(raw: string | undefined): ReviewTriageTier | undefined {
+export function parseTriageTierFromRunMetadata(
+  raw: string | undefined,
+): ReviewTriageTier | undefined {
   if (raw === "trivial" || raw === "lite" || raw === "full") {
     return raw;
   }
@@ -51,19 +63,28 @@ export function parseCodeReviewRunMetadata(
       failedRoles: [],
     };
   }
-  const trimmedTriage = record[CODE_REVIEW_RUN_METADATA_KEYS.triage]?.trim() ?? "";
+  const trimmedTriage =
+    record[CODE_REVIEW_RUN_METADATA_KEYS.triage]?.trim() ?? "";
   const triageRaw = trimmedTriage.length === 0 ? undefined : trimmedTriage;
   return {
     triageTier: parseTriageTierFromRunMetadata(triageRaw),
     triageRaw,
-    completedRoles: parseMetadataRolesList(record[CODE_REVIEW_RUN_METADATA_KEYS.completedRoles]),
-    timedOutRoles: parseMetadataRolesList(record[CODE_REVIEW_RUN_METADATA_KEYS.timedOutRoles]),
-    failedRoles: parseMetadataRolesList(record[CODE_REVIEW_RUN_METADATA_KEYS.failedRoles]),
+    completedRoles: parseMetadataRolesList(
+      record[CODE_REVIEW_RUN_METADATA_KEYS.completedRoles],
+    ),
+    timedOutRoles: parseMetadataRolesList(
+      record[CODE_REVIEW_RUN_METADATA_KEYS.timedOutRoles],
+    ),
+    failedRoles: parseMetadataRolesList(
+      record[CODE_REVIEW_RUN_METADATA_KEYS.failedRoles],
+    ),
   };
 }
 
 /** Roles scheduled for each triage tier (single source for harness + CLI). */
-export function expectedRolesForTriageTier(tier: ReviewTriageTier): readonly CodeReviewRoleId[] {
+export function expectedRolesForTriageTier(
+  tier: ReviewTriageTier,
+): readonly CodeReviewRoleId[] {
   if (tier === "trivial") {
     return ["quality"];
   }

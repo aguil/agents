@@ -18,8 +18,9 @@ agents/
 ```bash
 bun install
 bun run build
-bun run typecheck
+bun run check    # typecheck + Biome lint/format
 bun test
+bun run test:coverage   # optional: LCOV + text under coverage/
 ```
 
 ## Prebuilt CLI

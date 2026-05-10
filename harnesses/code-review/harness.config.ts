@@ -1,5 +1,5 @@
-import { codeReviewHarnessDefinition } from "./src/index";
 import { CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT } from "./src/harness-package-defaults";
+import { codeReviewHarnessDefinition } from "./src/index";
 
 export default {
   harness: codeReviewHarnessDefinition.id,
