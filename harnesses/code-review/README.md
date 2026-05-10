@@ -134,26 +134,23 @@ Merge order (**later wins**): **harness packaged defaults** (currently **`adapte
 - **User file:** `$XDG_CONFIG_HOME/agents/code-review/config.json` (when `XDG_CONFIG_HOME` is set), otherwise `~/.config/agents/code-review/config.json`. Omit the file when unused.
 - **Repo file:** `<workspace>/.review-agent/config.json`. The **`workspace`** used to locate this file is `resolve(process.cwd)` or **`--workspace`** **before** any `workspace` value from config is applied (configure one path explicitly if you rely on repo-scoped defaults while running from elsewhere).
 
-  Repo JSON is intentionally **unable to inject executable paths (`cursor`, `claude`, `opencode`) or argv templates (`cursorArgs`, `claudeArgs`)**. Those keys (including inside **`presets`**) are stripped with a **`console.warn`** when present; configure binaries and subprocess argv templates only via the **user** config file above, **`AGENTS_CODE_REVIEW_*`**, or **CLI**.
+  Repo JSON **cannot steer where / how reviewers run**. Keys **`workspace`**, **`scratchpad`**, **`adapter`**, adapter host-binary paths (**`cursor`**, **`claude`**, **`opencode`**), and argv templates (**`cursorArgs`**, **`claudeArgs`**) — including inside **`presets`** — are stripped with a **`console.warn`** when present; set paths, adapters, and subprocess argv templates only via the **user** config file above, **`AGENTS_CODE_REVIEW_*`**, or **CLI**.
 
 Optional JSON keys use **camelCase** and mirror stable CLI knobs (omit keys you don’t care about):
 
-- Strings: **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
-  - Repo JSON **`workspace`**, **`scratchpad`**, and **`adapter`** apply normally alongside other safe keys; only host paths and **`claudeArgs`** / **`cursorArgs`** are constrained as above (see preceding paragraph).
+- Strings (**user/config/env/CLI** for **`workspace`**, **`scratchpad`**, **`adapter`**, host paths **`opencode` / `claude` / `cursor`**, and **`claudeArgs` / `cursorArgs`** — **repo `.review-agent` JSON omits those via sanitization**, see preceding paragraph): **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
   - **`claudeArgs`** / **`cursorArgs`**: optional string (**`--claude-args` / `--cursor-args`** use comma-splitting—tokens cannot reliably contain commas) or a JSON **array of strings** (each element is one argv token, including commas inside a token).
 - Booleans: **`dryRun`**, **`postOnly`**, **`noConfirm`**, **`replacePendingReview`**, **`noDeterministic`**, **`strict`**, **`pendingReview`**, **`pure`**, **`printLogs`**.
 - **`presets`**: an object mapping preset names to nested partial-option objects **without** a nested **`presets`** key. Repo preset entries **overlay** user preset entries for the same name (same rules as top-level merge).
 - Unknown keys (**not** in the camelCase vocabulary above—besides **`presets`**) are **skipped** but produce a **`console.warn` when loading a JSON file**. Set **`AGENTS_CODE_REVIEW_CONFIG_STRICT`** to **`true`**, **`1`**, **`yes`**, or **`on`** before running the CLI to turn unknown keys into a **fatal error** instead.
 
-Example **`.review-agent/config.json`** (configure **`cursorArgs`** / **`claudeArgs`** in the **user** file when you customize subprocess templates):
+Example **`.review-agent/config.json`** (set **`workspace`**, **`scratchpad`**, **`adapter`**, host binaries, and **`cursorArgs`** / **`claudeArgs`** in **user** config or CLI; repo JSON carries only **`model`**, presets, booleans, and similarly safe knobs):
 
 ```json
 {
-  "adapter": "opencode",
   "model": "opencode/gpt-5.3-codex",
   "presets": {
     "ci": {
-      "adapter": "fake",
       "dryRun": true,
       "log": "commands"
     }

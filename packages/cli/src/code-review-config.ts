@@ -146,14 +146,17 @@ const REPO_BLOCKED_ADAPTER_LAUNCH_KEYS = [
   "opencode",
 ] as const satisfies readonly (keyof CliOptions)[];
 
-/** Strip launcher-related overrides from workspace repo-config partials before merge. */
+/** Where / via which harness wiring to run reviews must not be controlled only via repo `.review-agent` JSON. */
+const REPO_BLOCKED_REVIEW_STEERING_KEYS = ["adapter", "scratchpad", "workspace"] as const satisfies readonly (keyof CliOptions)[];
+
+/** Strip repo-managed steering from workspace `.review-agent` partials before merge (including preset bodies). */
 export function sanitizeRepoAdapterExecutablePartial(
   partial: CodeReviewMergedPartial,
 ): { readonly sanitized: CodeReviewMergedPartial; readonly strippedKeys: readonly string[] } {
   const stripped: string[] = [];
   const sanitized: CodeReviewMergedPartial = { ...partial };
   const rec = sanitized as Record<string, unknown>;
-  for (const key of REPO_BLOCKED_ADAPTER_LAUNCH_KEYS) {
+  for (const key of [...REPO_BLOCKED_ADAPTER_LAUNCH_KEYS, ...REPO_BLOCKED_REVIEW_STEERING_KEYS]) {
     if (rec[key] !== undefined) {
       stripped.push(key);
       delete rec[key];
@@ -186,9 +189,9 @@ function sanitizeRepoConfigDocument(
 
   if (removed.size > 0 && loadedFromPath !== undefined) {
     console.warn(
-      `${loadedFromPath}: ignoring repo-managed adapter launch overrides (${[...removed].sort().join(
+      `${loadedFromPath}: ignoring repo-managed review overrides (${[...removed].sort().join(
         ", ",
-      )}). Executable paths (\`cursor\`, \`claude\`, \`opencode\`) and argv templates (\`cursorArgs\`, \`claudeArgs\`) must come only from user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
+      )}). Repo JSON cannot steer \`workspace\`, \`scratchpad\`, \`adapter\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
     );
   }
 

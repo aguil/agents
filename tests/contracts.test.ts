@@ -2167,7 +2167,7 @@ test("resolveCodeReviewCliOptions merges configs and applies preset and CLI prec
     if (!r1.ok) {
       return;
     }
-    expect(r1.options.adapter).toBe("cursor");
+    expect(r1.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
     expect(r1.options.model).toBe("from-user");
     expect(r1.options.consensus).toBe("2");
     expect(r1.options.dryRun).toBe(true);
@@ -2226,7 +2226,7 @@ test("resolveCodeReviewCliOptions preserves comma-containing tokens in JSON curs
   }
 });
 
-test("sanitizeRepoAdapterExecutablePartial keeps steering knobs but strips binaries and argv templates", () => {
+test("sanitizeRepoAdapterExecutablePartial strips repo-managed steering knobs", () => {
   const { sanitized, strippedKeys } = sanitizeRepoAdapterExecutablePartial({
     adapter: "cursor",
     workspace: "/evil/ws",
@@ -2238,10 +2238,19 @@ test("sanitizeRepoAdapterExecutablePartial keeps steering knobs but strips binar
     scratchpad: "/evil/sp",
     cursorArgs: ["--trust"],
   });
-  expect(strippedKeys.sort()).toEqual(["claude", "claudeArgs", "cursor", "cursorArgs", "opencode"]);
-  expect(sanitized.adapter).toBe("cursor");
-  expect(sanitized.workspace).toBe("/evil/ws");
-  expect(sanitized.scratchpad).toBe("/evil/sp");
+  expect(strippedKeys.sort()).toEqual([
+    "adapter",
+    "claude",
+    "claudeArgs",
+    "cursor",
+    "cursorArgs",
+    "opencode",
+    "scratchpad",
+    "workspace",
+  ]);
+  expect(sanitized.adapter).toBeUndefined();
+  expect(sanitized.workspace).toBeUndefined();
+  expect(sanitized.scratchpad).toBeUndefined();
   expect(sanitized.cursor).toBeUndefined();
   expect(sanitized.opencode).toBeUndefined();
   expect(sanitized.claude).toBeUndefined();
@@ -2285,8 +2294,8 @@ test("resolveCodeReviewCliOptions drops repo-supplied executable paths and keeps
       return;
     }
     expect(r.options.cursor).toBe("/user/agent");
-    expect(r.options.adapter).toBe("cursor");
-    expect(warns.some((line) => line.includes("repo-managed adapter launch overrides"))).toBe(true);
+    expect(r.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
+    expect(warns.some((line) => line.includes("repo-managed review overrides"))).toBe(true);
   } finally {
     console.warn = origWarn;
     await rm(tempRoot, { recursive: true, force: true });
