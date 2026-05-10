@@ -2,6 +2,7 @@ node_modules/
 dist/
 harnesses/code-review/src/embedded-prompts.ts
 distribution/npm/**/*.tgz
+distribution/npm/release-tag-message.local
 coverage/
 .npm-publish-pack/
 .review-agent/

@@ -1,0 +1,6 @@
+# Maintainer: copy to distribution/npm/release-tag-message.local (gitignored).
+# Keep VERSION exactly once in the Release line below.
+
+Release @aguil/agents VERSION: One-line summary of this tag (replace this sentence).
+
+Optional paragraphs for audience-facing notes go here. This .example file is committed as a format contract only; your real annotation text lives in release-tag-message.local (gitignored) or another path you pass with --message-file.
