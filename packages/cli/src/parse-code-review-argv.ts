@@ -146,14 +146,9 @@ export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewAr
     }
 
     const boolKey = FLAG_TO_KEY[optName];
-    const boolStandalone = next === undefined || isBundledCodeReviewCliKey(next);
     if (boolKey !== undefined) {
-      if (boolStandalone) {
-        flags.add(optName);
-        explicitKeys.add(boolKey);
-      } else {
-        flags.add(optName);
-      }
+      flags.add(optName);
+      explicitKeys.add(boolKey);
       continue;
     }
 

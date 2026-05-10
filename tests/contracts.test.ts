@@ -131,6 +131,12 @@ test("parseCodeReviewArgv never enables postOnly from CLI flags", () => {
   expect(parseCodeReviewArgv(["--dry-run"]).options.postOnly).toBe(false);
 });
 
+test("parseCodeReviewArgv marks boolean flags explicit even when followed by non-bundled tokens", () => {
+  const parsed = parseCodeReviewArgv(["--dry-run", "--unknown-flag=1"]);
+  expect(parsed.options.dryRun).toBe(true);
+  expect(parsed.explicitKeys.has("dryRun")).toBe(true);
+});
+
 test("parseCodeReviewArgv binds string options when values look like flag tokens", () => {
   const cursorArgsComma = parseCodeReviewArgv(["--cursor-args", "--print,--output-format=stream-json"]);
   expect(cursorArgsComma.options.cursorArgs).toBe("--print,--output-format=stream-json");
