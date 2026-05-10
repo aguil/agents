@@ -846,14 +846,28 @@ async function workspaceDiscoverRevisionForCacheKey(
   return oid !== undefined && oid.length > 0 ? oid : "";
 }
 
+/** Needed for implicit `gh pr view` caches: branch selection is keyed by HEAD, not commit oid alone. */
+async function workspaceSymbolicHeadRefForCacheKey(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): Promise<string> {
+  const sym = (
+    await commandRunner(["git", "symbolic-ref", "-q", "HEAD"], workspacePath, {
+      gitAware: true,
+    })
+  )?.trim();
+  return sym !== undefined && sym.length > 0 ? sym : "";
+}
+
 function pullRequestDiscoverCacheKey(
   workspacePath: string,
   pullRequestNumber: number | undefined,
   commandRunner: CommandRunner,
   workspaceRevisionForCacheKey: string,
+  implicitBranchRefToken: string,
 ): string {
   const prSlot = pullRequestNumber === undefined ? "" : String(pullRequestNumber);
-  return `${resolve(workspacePath)}|${prSlot}|${commandRunnerCacheSlot(commandRunner)}|${workspaceRevisionForCacheKey}`;
+  return `${resolve(workspacePath)}|${prSlot}|${commandRunnerCacheSlot(commandRunner)}|${workspaceRevisionForCacheKey}|${implicitBranchRefToken}`;
 }
 
 async function fetchPullRequestJson(
@@ -907,7 +921,17 @@ export async function discoverPullRequest(
   pullRequestNumber?: number,
 ): Promise<PullRequestMetadata | undefined> {
   const revision = await workspaceDiscoverRevisionForCacheKey(workspacePath, commandRunner);
-  const key = pullRequestDiscoverCacheKey(workspacePath, pullRequestNumber, commandRunner, revision);
+  const implicitBranchRefToken =
+    pullRequestNumber === undefined
+      ? await workspaceSymbolicHeadRefForCacheKey(workspacePath, commandRunner)
+      : "";
+  const key = pullRequestDiscoverCacheKey(
+    workspacePath,
+    pullRequestNumber,
+    commandRunner,
+    revision,
+    implicitBranchRefToken,
+  );
   const hit = discoverPullRequestHits.get(key);
   if (hit !== undefined) {
     return hit;

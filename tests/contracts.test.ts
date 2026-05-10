@@ -435,6 +435,42 @@ test("discoverPullRequest refetches GH metadata when workspace HEAD changes", as
   expect(ghCalls).toBe(2);
 });
 
+test("discoverPullRequest refetches implicit branch PR when symbolic HEAD ref changes", async () => {
+  const path = "/agents/pr-implicit-branch-pin";
+  let head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  let symbolicHead = "refs/heads/feature-a";
+  let ghCalls = 0;
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return `${head}\n`;
+    }
+    if (cmd[0] === "git" && cmd[1] === "symbolic-ref" && cmd[2] === "-q" && cmd[3] === "HEAD") {
+      return `${symbolicHead}\n`;
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      ghCalls += 1;
+      const n = ghCalls;
+      return JSON.stringify({
+        number: n,
+        title: `PR ${n}`,
+        body: "Body",
+        url: `https://github.com/aguil/agents/pull/${n}`,
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(1);
+  expect(ghCalls).toBe(1);
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(1);
+  expect(ghCalls).toBe(1);
+
+  symbolicHead = "refs/heads/feature-b";
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(2);
+  expect(ghCalls).toBe(2);
+});
+
 test("discoverPullRequest does not indefinitely memoize GH PR metadata misses", async () => {
   const isolationPath = `/agents/pr-transient-${Math.random().toString(36).slice(2)}`;
   let invocationCount = 0;
