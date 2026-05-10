@@ -836,13 +836,24 @@ function commandRunnerCacheSlot(commandRunner: CommandRunner): number {
   return slot;
 }
 
+async function workspaceDiscoverRevisionForCacheKey(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): Promise<string> {
+  const oid = (
+    await commandRunner(["git", "rev-parse", "HEAD"], workspacePath, { gitAware: true })
+  )?.trim();
+  return oid !== undefined && oid.length > 0 ? oid : "";
+}
+
 function pullRequestDiscoverCacheKey(
   workspacePath: string,
   pullRequestNumber: number | undefined,
   commandRunner: CommandRunner,
+  workspaceRevisionForCacheKey: string,
 ): string {
   const prSlot = pullRequestNumber === undefined ? "" : String(pullRequestNumber);
-  return `${resolve(workspacePath)}|${prSlot}|${commandRunnerCacheSlot(commandRunner)}`;
+  return `${resolve(workspacePath)}|${prSlot}|${commandRunnerCacheSlot(commandRunner)}|${workspaceRevisionForCacheKey}`;
 }
 
 async function fetchPullRequestJson(
@@ -895,7 +906,8 @@ export async function discoverPullRequest(
   commandRunner: CommandRunner = runCommand,
   pullRequestNumber?: number,
 ): Promise<PullRequestMetadata | undefined> {
-  const key = pullRequestDiscoverCacheKey(workspacePath, pullRequestNumber, commandRunner);
+  const revision = await workspaceDiscoverRevisionForCacheKey(workspacePath, commandRunner);
+  const key = pullRequestDiscoverCacheKey(workspacePath, pullRequestNumber, commandRunner, revision);
   const hit = discoverPullRequestHits.get(key);
   if (hit !== undefined) {
     return hit;

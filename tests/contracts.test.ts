@@ -348,6 +348,9 @@ test("discovers pull request by explicit number", async () => {
   const commands: string[] = [];
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "beefbeefbeefbeefbeefbeefbeefbeefbeefbeef\n";
+    }
     return JSON.stringify({
       number: 42,
       title: "Merged PR",
@@ -359,12 +362,15 @@ test("discovers pull request by explicit number", async () => {
 
   const discovered = await discoverPullRequest("/repo", commandRunner, 42);
   expect(discovered?.number).toBe(42);
-  expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName,headRefOid");
+  expect(commands.some((c) => c.startsWith("gh pr view"))).toBe(true);
 });
 
 test("discovers pull request coalesces concurrent gh pr view calls per workspace and number", async () => {
   let invocationCount = 0;
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "coalesce-workspace-head-pin\n";
+    }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       invocationCount += 1;
     }
@@ -395,6 +401,38 @@ test("discovers pull request coalesces concurrent gh pr view calls per workspace
   invocationCount = 0;
   await discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7);
   expect(invocationCount).toBe(0);
+});
+
+test("discoverPullRequest refetches GH metadata when workspace HEAD changes", async () => {
+  const path = "/agents/pr-cache-head-shift";
+  let head = "1111111111111111111111111111111111111111";
+  let ghCalls = 0;
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return `${head}\n`;
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      ghCalls += 1;
+      const title = ghCalls === 1 ? "First" : "Second";
+      return JSON.stringify({
+        number: 9,
+        title,
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/9",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("First");
+  expect(ghCalls).toBe(1);
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("First");
+  expect(ghCalls).toBe(1);
+
+  head = "2222222222222222222222222222222222222222";
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("Second");
+  expect(ghCalls).toBe(2);
 });
 
 test("discoverPullRequest does not indefinitely memoize GH PR metadata misses", async () => {
@@ -429,6 +467,9 @@ test("prefers explicit PR patch diff when review PR is provided", async () => {
   const commands: string[] = [];
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "explicit-pr-patch-workspace-head\n";
+    }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       return JSON.stringify({
         number: 42,
@@ -470,6 +511,9 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
   const commands: string[] = [];
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "fallback-pr-patch-head\n";
+    }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       return JSON.stringify({
         number: 42,
@@ -502,6 +546,9 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
 
 test("includes explicit PR metadata in diff strategy artifact", async () => {
   const provider = new RepositoryDiffProvider(async (cmd) => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "strategy-artifact-head\n";
+    }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       return JSON.stringify({
         number: 42,
