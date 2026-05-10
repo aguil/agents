@@ -1,5 +1,7 @@
 # Architecture Decision Records
 
+Number files as `NNNN-short-title.md` (four digits, zero-padded) in creation order.
+
 Record durable technical decisions here once they affect multiple harnesses or shared package boundaries.
 
-- [ts7-track-baseurl-paths.md](ts7-track-baseurl-paths.md) — tracking item: remove deprecated `baseUrl` / align `paths` before TypeScript 7.
+- [0001-ts7-baseurl-paths.md](0001-ts7-baseurl-paths.md) — ADR 0001: remove deprecated `baseUrl` / align `paths` before TypeScript 7 (tracking).
