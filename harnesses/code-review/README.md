@@ -131,6 +131,8 @@ bun run agents code-review --adapter fake --dry-run --log summary
 
 ## Configuration files and presets
 
+**Breaking change:** older releases allowed **`.review-agent/config.json`** inside the repo to set **`workspace`**, **`scratchpad`**, **`adapter`**, adapter host-binary paths, and **`cursorArgs`** / **`claudeArgs`** (including inside **`presets`**). Current releases **ignore those keys when they come from repo-managed JSON** — use the **user** config file (**`~/.config/...`**), **`AGENTS_CODE_REVIEW_*`**, or **CLI** instead. See the next paragraph for the exact strip list.
+
 Merge order (**later wins**): **harness packaged defaults** (currently **`adapter: fake`** from `@aguil/agents-code-review`) → merged JSON (**user → repo**) → selected **`presets`** entry when you pass **`--preset`** → **`AGENTS_CODE_REVIEW_*`** environment variables → **explicit CLI flags**.
 
 - **User file:** `$XDG_CONFIG_HOME/agents/code-review/config.json` (when `XDG_CONFIG_HOME` is set), otherwise `~/.config/agents/code-review/config.json`. Omit the file when unused.
