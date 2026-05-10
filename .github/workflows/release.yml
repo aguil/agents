@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+*"
+      # Glob patterns (not regex). Match SemVer release tags like v0.1.0, v10.2.3, v1.0.0-alpha.1.
+      - "v*.*.*"
 
 # Trusted publishing (OIDC): https://docs.npmjs.com/trusted-publishers
 permissions:
