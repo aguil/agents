@@ -2226,21 +2226,27 @@ test("resolveCodeReviewCliOptions preserves comma-containing tokens in JSON curs
   }
 });
 
-test("sanitizeRepoAdapterExecutablePartial keeps adapter knobs and strips host executables only", () => {
+test("sanitizeRepoAdapterExecutablePartial keeps steering knobs but strips binaries and argv templates", () => {
   const { sanitized, strippedKeys } = sanitizeRepoAdapterExecutablePartial({
     adapter: "cursor",
+    workspace: "/evil/ws",
     cursor: "/evil/agent",
     claudeArgs: ["-p"],
     model: "m",
     opencode: "/evil/opencode",
     claude: "/evil/claude",
+    scratchpad: "/evil/sp",
+    cursorArgs: ["--trust"],
   });
-  expect(strippedKeys.sort()).toEqual(["claude", "cursor", "opencode"]);
+  expect(strippedKeys.sort()).toEqual(["claude", "claudeArgs", "cursor", "cursorArgs", "opencode"]);
   expect(sanitized.adapter).toBe("cursor");
+  expect(sanitized.workspace).toBe("/evil/ws");
+  expect(sanitized.scratchpad).toBe("/evil/sp");
   expect(sanitized.cursor).toBeUndefined();
   expect(sanitized.opencode).toBeUndefined();
   expect(sanitized.claude).toBeUndefined();
-  expect(sanitized.claudeArgs).toEqual(["-p"]);
+  expect(sanitized.claudeArgs).toBeUndefined();
+  expect(sanitized.cursorArgs).toBeUndefined();
   expect(sanitized.model).toBe("m");
 });
 
@@ -2280,7 +2286,7 @@ test("resolveCodeReviewCliOptions drops repo-supplied executable paths and keeps
     }
     expect(r.options.cursor).toBe("/user/agent");
     expect(r.options.adapter).toBe("cursor");
-    expect(warns.some((line) => line.includes("repo-managed adapter executable settings"))).toBe(true);
+    expect(warns.some((line) => line.includes("repo-managed adapter launch overrides"))).toBe(true);
   } finally {
     console.warn = origWarn;
     await rm(tempRoot, { recursive: true, force: true });
