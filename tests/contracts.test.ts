@@ -131,6 +131,48 @@ test("parseCodeReviewArgv never enables postOnly from CLI flags", () => {
   expect(parseCodeReviewArgv(["--dry-run"]).options.postOnly).toBe(false);
 });
 
+test("parseCodeReviewArgv marks boolean flags explicit even when followed by non-bundled tokens", () => {
+  const parsed = parseCodeReviewArgv(["--dry-run", "--unknown-flag=1"]);
+  expect(parsed.options.dryRun).toBe(true);
+  expect(parsed.explicitKeys.has("dryRun")).toBe(true);
+});
+
+test("parseCodeReviewArgv binds string options when values look like flag tokens", () => {
+  const cursorArgsComma = parseCodeReviewArgv(["--cursor-args", "--print,--output-format=stream-json"]);
+  expect(cursorArgsComma.options.cursorArgs).toBe("--print,--output-format=stream-json");
+  expect(cursorArgsComma.explicitKeys.has("cursorArgs")).toBe(true);
+
+  const claudeArgsComma = parseCodeReviewArgv(["--claude-args", "--foo,--bar"]);
+  expect(claudeArgsComma.options.claudeArgs).toBe("--foo,--bar");
+
+  const presetFollowing = parseCodeReviewArgv(["--adapter", "opencode", "--preset", "ci"]);
+  expect(presetFollowing.presetName).toBe("ci");
+  expect(presetFollowing.options.adapter).toBe("opencode");
+
+  const presetEquals = parseCodeReviewArgv(["--preset=qa", "--adapter", "fake"]);
+  expect(presetEquals.presetName).toBe("qa");
+
+  const adapterAfterPreset = parseCodeReviewArgv(["--preset", "ci", "--adapter", "fake"]);
+  expect(adapterAfterPreset.presetName).toBe("ci");
+  expect(adapterAfterPreset.options.adapter).toBe("fake");
+
+  const equalsAdapter = parseCodeReviewArgv(["--adapter=opencode"]);
+  expect(equalsAdapter.options.adapter).toBe("opencode");
+
+  const cursorArgsEscaped = parseCodeReviewArgv(["--cursor-args=--strict,--trust,--print"]);
+  expect(cursorArgsEscaped.options.cursorArgs).toBe("--strict,--trust,--print");
+  expect(cursorArgsEscaped.explicitKeys.has("cursorArgs")).toBe(true);
+
+  const claudeArgsEscaped = parseCodeReviewArgv(["--claude-args=--dangerously-skip-permissions"]);
+  expect(claudeArgsEscaped.options.claudeArgs).toBe("--dangerously-skip-permissions");
+});
+
+test("parseCodeReviewArgv does not swallow equals-form bundled opts as spaced string-option values", () => {
+  const spaced = parseCodeReviewArgv(["--cursor-args", "--adapter=opencode"]);
+  expect(spaced.options.cursorArgs).toBeUndefined();
+  expect(spaced.options.adapter).toBe("opencode");
+});
+
 test("resolveEffectivePostOnly ignores merged postOnly for replay subcommand", () => {
   expect(resolveEffectivePostOnly("replay", true)).toBe(false);
   expect(resolveEffectivePostOnly("replay", false)).toBe(false);
@@ -306,6 +348,9 @@ test("discovers pull request by explicit number", async () => {
   const commands: string[] = [];
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "beefbeefbeefbeefbeefbeefbeefbeefbeefbeef\n";
+    }
     return JSON.stringify({
       number: 42,
       title: "Merged PR",
@@ -317,13 +362,150 @@ test("discovers pull request by explicit number", async () => {
 
   const discovered = await discoverPullRequest("/repo", commandRunner, 42);
   expect(discovered?.number).toBe(42);
-  expect(commands.at(0)).toBe("gh pr view 42 --json number,title,body,url,baseRefName,headRefOid");
+  expect(commands.some((c) => c.startsWith("gh pr view"))).toBe(true);
+});
+
+test("discovers pull request coalesces concurrent gh pr view calls per workspace and number", async () => {
+  let invocationCount = 0;
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "coalesce-workspace-head-pin\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      invocationCount += 1;
+    }
+    return JSON.stringify({
+      number: 7,
+      title: "T",
+      body: "B",
+      url: "https://github.com/aguil/agents/pull/7",
+      baseRefName: "main",
+      headRefOid: "aaa",
+    });
+  };
+
+  await Promise.all([
+    discoverPullRequest("/agents/pr-scope-a", commandRunner, 7),
+    discoverPullRequest("/agents/pr-scope-b", commandRunner, 7),
+  ]);
+  expect(invocationCount).toBe(2);
+
+  invocationCount = 0;
+  await Promise.all([
+    discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7),
+    discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7),
+    discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7),
+  ]);
+  expect(invocationCount).toBe(1);
+
+  invocationCount = 0;
+  await discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7);
+  expect(invocationCount).toBe(0);
+});
+
+test("discoverPullRequest refetches GH metadata when workspace HEAD changes", async () => {
+  const path = "/agents/pr-cache-head-shift";
+  let head = "1111111111111111111111111111111111111111";
+  let ghCalls = 0;
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return `${head}\n`;
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      ghCalls += 1;
+      const title = ghCalls === 1 ? "First" : "Second";
+      return JSON.stringify({
+        number: 9,
+        title,
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/9",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("First");
+  expect(ghCalls).toBe(1);
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("First");
+  expect(ghCalls).toBe(1);
+
+  head = "2222222222222222222222222222222222222222";
+  expect((await discoverPullRequest(path, commandRunner, 9))?.title).toBe("Second");
+  expect(ghCalls).toBe(2);
+});
+
+test("discoverPullRequest refetches implicit branch PR when symbolic HEAD ref changes", async () => {
+  const path = "/agents/pr-implicit-branch-pin";
+  let head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  let symbolicHead = "refs/heads/feature-a";
+  let ghCalls = 0;
+  const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return `${head}\n`;
+    }
+    if (cmd[0] === "git" && cmd[1] === "symbolic-ref" && cmd[2] === "-q" && cmd[3] === "HEAD") {
+      return `${symbolicHead}\n`;
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      ghCalls += 1;
+      const n = ghCalls;
+      return JSON.stringify({
+        number: n,
+        title: `PR ${n}`,
+        body: "Body",
+        url: `https://github.com/aguil/agents/pull/${n}`,
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(1);
+  expect(ghCalls).toBe(1);
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(1);
+  expect(ghCalls).toBe(1);
+
+  symbolicHead = "refs/heads/feature-b";
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(2);
+  expect(ghCalls).toBe(2);
+});
+
+test("discoverPullRequest does not indefinitely memoize GH PR metadata misses", async () => {
+  const isolationPath = `/agents/pr-transient-${Math.random().toString(36).slice(2)}`;
+  let invocationCount = 0;
+  const transientRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      invocationCount += 1;
+      const n = invocationCount;
+      const payload =
+        n === 1
+          ? undefined
+          : JSON.stringify({
+            number: 8,
+            title: "Merged PR",
+            body: "Body",
+            url: "https://github.com/aguil/agents/pull/8",
+            baseRefName: "main",
+          });
+      return payload;
+    }
+    return undefined;
+  };
+  expect(invocationCount).toBe(0);
+  expect(await discoverPullRequest(isolationPath, transientRunner, 8)).toBeUndefined();
+  expect(invocationCount).toBe(1);
+  expect((await discoverPullRequest(isolationPath, transientRunner, 8))?.number).toBe(8);
+  expect(invocationCount).toBe(2);
 });
 
 test("prefers explicit PR patch diff when review PR is provided", async () => {
   const commands: string[] = [];
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "explicit-pr-patch-workspace-head\n";
+    }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       return JSON.stringify({
         number: 42,
@@ -365,6 +547,9 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
   const commands: string[] = [];
   const commandRunner = async (cmd: readonly string[]): Promise<string | undefined> => {
     commands.push(cmd.join(" "));
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "fallback-pr-patch-head\n";
+    }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       return JSON.stringify({
         number: 42,
@@ -397,6 +582,9 @@ test("falls back to base diff when explicit PR patch is unavailable", async () =
 
 test("includes explicit PR metadata in diff strategy artifact", async () => {
   const provider = new RepositoryDiffProvider(async (cmd) => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "strategy-artifact-head\n";
+    }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       return JSON.stringify({
         number: 42,
@@ -2115,7 +2303,7 @@ test("resolveCodeReviewCliOptions merges configs and applies preset and CLI prec
     if (!r1.ok) {
       return;
     }
-    expect(r1.options.adapter).toBe("cursor");
+    expect(r1.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
     expect(r1.options.model).toBe("from-user");
     expect(r1.options.consensus).toBe("2");
     expect(r1.options.dryRun).toBe(true);
@@ -2174,21 +2362,36 @@ test("resolveCodeReviewCliOptions preserves comma-containing tokens in JSON curs
   }
 });
 
-test("sanitizeRepoAdapterExecutablePartial keeps adapter knobs and strips host executables only", () => {
+test("sanitizeRepoAdapterExecutablePartial strips repo-managed steering knobs", () => {
   const { sanitized, strippedKeys } = sanitizeRepoAdapterExecutablePartial({
     adapter: "cursor",
+    workspace: "/evil/ws",
     cursor: "/evil/agent",
     claudeArgs: ["-p"],
     model: "m",
     opencode: "/evil/opencode",
     claude: "/evil/claude",
+    scratchpad: "/evil/sp",
+    cursorArgs: ["--trust"],
   });
-  expect(strippedKeys.sort()).toEqual(["claude", "cursor", "opencode"]);
-  expect(sanitized.adapter).toBe("cursor");
+  expect(strippedKeys.sort()).toEqual([
+    "adapter",
+    "claude",
+    "claudeArgs",
+    "cursor",
+    "cursorArgs",
+    "opencode",
+    "scratchpad",
+    "workspace",
+  ]);
+  expect(sanitized.adapter).toBeUndefined();
+  expect(sanitized.workspace).toBeUndefined();
+  expect(sanitized.scratchpad).toBeUndefined();
   expect(sanitized.cursor).toBeUndefined();
   expect(sanitized.opencode).toBeUndefined();
   expect(sanitized.claude).toBeUndefined();
-  expect(sanitized.claudeArgs).toEqual(["-p"]);
+  expect(sanitized.claudeArgs).toBeUndefined();
+  expect(sanitized.cursorArgs).toBeUndefined();
   expect(sanitized.model).toBe("m");
 });
 
@@ -2227,8 +2430,8 @@ test("resolveCodeReviewCliOptions drops repo-supplied executable paths and keeps
       return;
     }
     expect(r.options.cursor).toBe("/user/agent");
-    expect(r.options.adapter).toBe("cursor");
-    expect(warns.some((line) => line.includes("repo-managed adapter executable settings"))).toBe(true);
+    expect(r.options.adapter).toBe(CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT);
+    expect(warns.some((line) => line.includes("repo-managed review overrides"))).toBe(true);
   } finally {
     console.warn = origWarn;
     await rm(tempRoot, { recursive: true, force: true });

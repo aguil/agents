@@ -820,9 +820,59 @@ export function parseRemoteHeadBranch(value: string | undefined): string | undef
   return match?.[1];
 }
 
-export async function discoverPullRequest(
+const discoverPullRequestHits = new Map<string, PullRequestMetadata>();
+const discoverPullRequestInFlight = new Map<string, Promise<PullRequestMetadata | undefined>>();
+
+const commandRunnerCacheSlots = new WeakMap<CommandRunner, number>();
+let nextCommandRunnerCacheSlot = 0;
+
+/** Same CommandRunner receives a stable slot (default runCommand shares one slot for process-wide hits). */
+function commandRunnerCacheSlot(commandRunner: CommandRunner): number {
+  let slot = commandRunnerCacheSlots.get(commandRunner);
+  if (slot === undefined) {
+    slot = nextCommandRunnerCacheSlot++;
+    commandRunnerCacheSlots.set(commandRunner, slot);
+  }
+  return slot;
+}
+
+async function workspaceDiscoverRevisionForCacheKey(
   workspacePath: string,
-  commandRunner: CommandRunner = runCommand,
+  commandRunner: CommandRunner,
+): Promise<string> {
+  const oid = (
+    await commandRunner(["git", "rev-parse", "HEAD"], workspacePath, { gitAware: true })
+  )?.trim();
+  return oid !== undefined && oid.length > 0 ? oid : "";
+}
+
+/** Needed for implicit `gh pr view` caches: branch selection is keyed by HEAD, not commit oid alone. */
+async function workspaceSymbolicHeadRefForCacheKey(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): Promise<string> {
+  const sym = (
+    await commandRunner(["git", "symbolic-ref", "-q", "HEAD"], workspacePath, {
+      gitAware: true,
+    })
+  )?.trim();
+  return sym !== undefined && sym.length > 0 ? sym : "";
+}
+
+function pullRequestDiscoverCacheKey(
+  workspacePath: string,
+  pullRequestNumber: number | undefined,
+  commandRunner: CommandRunner,
+  workspaceRevisionForCacheKey: string,
+  implicitBranchRefToken: string,
+): string {
+  const prSlot = pullRequestNumber === undefined ? "" : String(pullRequestNumber);
+  return `${resolve(workspacePath)}|${prSlot}|${commandRunnerCacheSlot(commandRunner)}|${workspaceRevisionForCacheKey}|${implicitBranchRefToken}`;
+}
+
+async function fetchPullRequestJson(
+  workspacePath: string,
+  commandRunner: CommandRunner,
   pullRequestNumber?: number,
 ): Promise<PullRequestMetadata | undefined> {
   const json = await commandRunner(
@@ -854,15 +904,59 @@ export async function discoverPullRequest(
 
     return {
       number: parsed.number,
-        title: parsed.title,
-        body: parsed.body,
-        url: parsed.url,
-        baseRefName: typeof parsed.baseRefName === "string" ? parsed.baseRefName : undefined,
-        headRefOid: typeof parsed.headRefOid === "string" ? parsed.headRefOid : undefined,
-      };
+      title: parsed.title,
+      body: parsed.body,
+      url: parsed.url,
+      baseRefName: typeof parsed.baseRefName === "string" ? parsed.baseRefName : undefined,
+      headRefOid: typeof parsed.headRefOid === "string" ? parsed.headRefOid : undefined,
+    };
   } catch {
     return undefined;
   }
+}
+
+export async function discoverPullRequest(
+  workspacePath: string,
+  commandRunner: CommandRunner = runCommand,
+  pullRequestNumber?: number,
+): Promise<PullRequestMetadata | undefined> {
+  const revision = await workspaceDiscoverRevisionForCacheKey(workspacePath, commandRunner);
+  const implicitBranchRefToken =
+    pullRequestNumber === undefined
+      ? await workspaceSymbolicHeadRefForCacheKey(workspacePath, commandRunner)
+      : "";
+  const key = pullRequestDiscoverCacheKey(
+    workspacePath,
+    pullRequestNumber,
+    commandRunner,
+    revision,
+    implicitBranchRefToken,
+  );
+  const hit = discoverPullRequestHits.get(key);
+  if (hit !== undefined) {
+    return hit;
+  }
+
+  let inflight = discoverPullRequestInFlight.get(key);
+  if (inflight !== undefined) {
+    return inflight;
+  }
+
+  inflight = (async (): Promise<PullRequestMetadata | undefined> => {
+    try {
+      const meta = await fetchPullRequestJson(workspacePath, commandRunner, pullRequestNumber);
+      if (meta !== undefined) {
+        discoverPullRequestHits.set(key, meta);
+      }
+      return meta;
+    } finally {
+      discoverPullRequestInFlight.delete(key);
+    }
+  })();
+
+  discoverPullRequestInFlight.set(key, inflight);
+
+  return inflight;
 }
 
 export async function resolvePreferredRemoteScope(

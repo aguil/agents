@@ -65,6 +65,8 @@ bun run agents code-review --adapter cursor --model sonnet-4
 bun run agents code-review --adapter cursor --model sonnet-4-thinking --cursor-mode plan
 bun run agents code-review --adapter cursor --model gpt-5 --cursor "$(which agent)"
 bun run agents code-review --adapter cursor --cursor-args "--print,--output-format,stream-json,--workspace,{workspace},--trust,--force,{prompt}"
+# When the comma template would begin with bundled CLI-looking tokens (--strict etc.), bind with =:
+bun run agents code-review --adapter cursor --cursor-args="--strict,--trust,--print"
 ```
 
 Common model IDs:
@@ -129,31 +131,31 @@ bun run agents code-review --adapter fake --dry-run --log summary
 
 ## Configuration files and presets
 
+**Breaking change:** older releases allowed **`.review-agent/config.json`** inside the repo to set **`workspace`**, **`scratchpad`**, **`adapter`**, adapter host-binary paths, and **`cursorArgs`** / **`claudeArgs`** (including inside **`presets`**). Current releases **ignore those keys when they come from repo-managed JSON** — use the **user** config file (**`~/.config/...`**), **`AGENTS_CODE_REVIEW_*`**, or **CLI** instead. See the next paragraph for the exact strip list.
+
 Merge order (**later wins**): **harness packaged defaults** (currently **`adapter: fake`** from `@aguil/agents-code-review`) → merged JSON (**user → repo**) → selected **`presets`** entry when you pass **`--preset`** → **`AGENTS_CODE_REVIEW_*`** environment variables → **explicit CLI flags**.
 
 - **User file:** `$XDG_CONFIG_HOME/agents/code-review/config.json` (when `XDG_CONFIG_HOME` is set), otherwise `~/.config/agents/code-review/config.json`. Omit the file when unused.
 - **Repo file:** `<workspace>/.review-agent/config.json`. The **`workspace`** used to locate this file is `resolve(process.cwd)` or **`--workspace`** **before** any `workspace` value from config is applied (configure one path explicitly if you rely on repo-scoped defaults while running from elsewhere).
 
-  Repo JSON is intentionally **unable to inject adapter host-binary paths**. Keys **`cursor`**, **`claude`**, and **`opencode`** (including inside **`presets`**) are stripped with a **`console.warn`** when present; configure those binaries only via the **user** config file above, **`AGENTS_CODE_REVIEW_*`**, or **CLI**.
+  Repo JSON **cannot steer where / how reviewers run**. Keys **`workspace`**, **`scratchpad`**, **`adapter`**, adapter host-binary paths (**`cursor`**, **`claude`**, **`opencode`**), and argv templates (**`cursorArgs`**, **`claudeArgs`**) — including inside **`presets`** — are stripped with a **`console.warn`** when present; set paths, adapters, and subprocess argv templates only via the **user** config file above, **`AGENTS_CODE_REVIEW_*`**, or **CLI**.
 
 Optional JSON keys use **camelCase** and mirror stable CLI knobs (omit keys you don’t care about):
 
-- Strings: **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
+- Strings (**user/config/env/CLI** for **`workspace`**, **`scratchpad`**, **`adapter`**, host paths **`opencode` / `claude` / `cursor`**, and **`claudeArgs` / `cursorArgs`** — **repo `.review-agent` JSON omits those via sanitization**, see preceding paragraph): **`workspace`**, **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
   - **`claudeArgs`** / **`cursorArgs`**: optional string (**`--claude-args` / `--cursor-args`** use comma-splitting—tokens cannot reliably contain commas) or a JSON **array of strings** (each element is one argv token, including commas inside a token).
+  - Adapter templates that recycle bundled CLI names (**`strict`**, **`dry-run`**, etc.) cannot use **`--cursor-args --strict,...`** spacing—the second token parses as code-review **`--strict`**. Prefer **`--cursor-args=--strict,...`** (same for **`--claude-args=...`**), or put the comma-joined template behind **`=`** so it stays **one argv cell**.
 - Booleans: **`dryRun`**, **`postOnly`**, **`noConfirm`**, **`replacePendingReview`**, **`noDeterministic`**, **`strict`**, **`pendingReview`**, **`pure`**, **`printLogs`**.
 - **`presets`**: an object mapping preset names to nested partial-option objects **without** a nested **`presets`** key. Repo preset entries **overlay** user preset entries for the same name (same rules as top-level merge).
 - Unknown keys (**not** in the camelCase vocabulary above—besides **`presets`**) are **skipped** but produce a **`console.warn` when loading a JSON file**. Set **`AGENTS_CODE_REVIEW_CONFIG_STRICT`** to **`true`**, **`1`**, **`yes`**, or **`on`** before running the CLI to turn unknown keys into a **fatal error** instead.
 
-Example **`.review-agent/config.json`**:
+Example **`.review-agent/config.json`** (set **`workspace`**, **`scratchpad`**, **`adapter`**, host binaries, and **`cursorArgs`** / **`claudeArgs`** in **user** config or CLI; repo JSON carries only **`model`**, presets, booleans, and similarly safe knobs):
 
 ```json
 {
-  "adapter": "opencode",
   "model": "opencode/gpt-5.3-codex",
-  "cursorArgs": ["--print", "--output-format", "stream-json", "--trust", "--force", "{prompt}"],
   "presets": {
     "ci": {
-      "adapter": "fake",
       "dryRun": true,
       "log": "commands"
     }

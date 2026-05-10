@@ -137,18 +137,26 @@ export function resolveRepoCodeReviewConfigPath(workspacePath: string): string {
   return join(workspacePath, ".review-agent", "config.json");
 }
 
-/** Adapter host binaries (`cursor` / `claude` / `opencode`) must not originate from `.review-agent` JSON. */
-const REPO_BLOCKED_ADAPTER_EXECUTABLE_KEYS =
-  ["cursor", "claude", "opencode"] as const satisfies readonly (keyof CliOptions)[];
+/** Host-binary paths plus argv templates must not originate from `.review-agent` JSON alone. */
+const REPO_BLOCKED_ADAPTER_LAUNCH_KEYS = [
+  "claude",
+  "claudeArgs",
+  "cursor",
+  "cursorArgs",
+  "opencode",
+] as const satisfies readonly (keyof CliOptions)[];
 
-/** Strip executable overrides from workspace repo-config partials before merge. */
+/** Where / via which harness wiring to run reviews must not be controlled only via repo `.review-agent` JSON. */
+const REPO_BLOCKED_REVIEW_STEERING_KEYS = ["adapter", "scratchpad", "workspace"] as const satisfies readonly (keyof CliOptions)[];
+
+/** Strip repo-managed steering from workspace `.review-agent` partials before merge (including preset bodies). */
 export function sanitizeRepoAdapterExecutablePartial(
   partial: CodeReviewMergedPartial,
 ): { readonly sanitized: CodeReviewMergedPartial; readonly strippedKeys: readonly string[] } {
   const stripped: string[] = [];
   const sanitized: CodeReviewMergedPartial = { ...partial };
   const rec = sanitized as Record<string, unknown>;
-  for (const key of REPO_BLOCKED_ADAPTER_EXECUTABLE_KEYS) {
+  for (const key of [...REPO_BLOCKED_ADAPTER_LAUNCH_KEYS, ...REPO_BLOCKED_REVIEW_STEERING_KEYS]) {
     if (rec[key] !== undefined) {
       stripped.push(key);
       delete rec[key];
@@ -181,9 +189,9 @@ function sanitizeRepoConfigDocument(
 
   if (removed.size > 0 && loadedFromPath !== undefined) {
     console.warn(
-      `${loadedFromPath}: ignoring repo-managed adapter executable settings (${[...removed].sort().join(
+      `${loadedFromPath}: ignoring repo-managed review overrides (${[...removed].sort().join(
         ", ",
-      )}). Configure opencode, claude, and cursor paths via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_* environment variables, or CLI flags.`,
+      )}). Repo JSON cannot steer \`workspace\`, \`scratchpad\`, \`adapter\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
     );
   }
 
