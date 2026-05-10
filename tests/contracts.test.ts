@@ -369,7 +369,7 @@ test("discovers pull request coalesces concurrent gh pr view calls per workspace
 
   invocationCount = 0;
   await discoverPullRequest("/agents/pr-coalesce-pin", commandRunner, 7);
-  expect(invocationCount).toBe(1);
+  expect(invocationCount).toBe(0);
 });
 
 test("prefers explicit PR patch diff when review PR is provided", async () => {

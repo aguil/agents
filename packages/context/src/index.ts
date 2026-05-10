@@ -820,10 +820,27 @@ export function parseRemoteHeadBranch(value: string | undefined): string | undef
   return match?.[1];
 }
 
-const discoverPullRequestInFlight = new Map<string, Promise<PullRequestMetadata | undefined>>();
+const discoverPullRequestRequests = new Map<string, Promise<PullRequestMetadata | undefined>>();
 
-function pullRequestDiscoverCacheKey(workspacePath: string, pullRequestNumber?: number): string {
-  return `${resolve(workspacePath)}\0${pullRequestNumber ?? ""}`;
+const commandRunnerCacheSlots = new WeakMap<CommandRunner, number>();
+let nextCommandRunnerCacheSlot = 0;
+
+/** Same CommandRunner receives a stable slot (default runCommand shares one slot for process-wide hits). */
+function commandRunnerCacheSlot(commandRunner: CommandRunner): number {
+  let slot = commandRunnerCacheSlots.get(commandRunner);
+  if (slot === undefined) {
+    slot = nextCommandRunnerCacheSlot++;
+    commandRunnerCacheSlots.set(commandRunner, slot);
+  }
+  return slot;
+}
+
+function pullRequestDiscoverCacheKey(
+  workspacePath: string,
+  pullRequestNumber: number | undefined,
+  commandRunner: CommandRunner,
+): string {
+  return `${resolve(workspacePath)}\0${pullRequestNumber ?? ""}\0${commandRunnerCacheSlot(commandRunner)}`;
 }
 
 async function fetchPullRequestJson(
@@ -876,14 +893,11 @@ export async function discoverPullRequest(
   commandRunner: CommandRunner = runCommand,
   pullRequestNumber?: number,
 ): Promise<PullRequestMetadata | undefined> {
-  const key = pullRequestDiscoverCacheKey(workspacePath, pullRequestNumber);
-  let pending = discoverPullRequestInFlight.get(key);
+  const key = pullRequestDiscoverCacheKey(workspacePath, pullRequestNumber, commandRunner);
+  let pending = discoverPullRequestRequests.get(key);
   if (pending === undefined) {
     pending = fetchPullRequestJson(workspacePath, commandRunner, pullRequestNumber);
-    discoverPullRequestInFlight.set(key, pending);
-    void pending.finally(() => {
-      discoverPullRequestInFlight.delete(key);
-    });
+    discoverPullRequestRequests.set(key, pending);
   }
   return pending;
 }
