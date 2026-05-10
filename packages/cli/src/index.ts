@@ -1,14 +1,27 @@
 import {
-  CODE_REVIEW_ROLE_IDS,
+  access,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
+  CODE_REVIEW_ROLE_IDS,
+  type CodeReviewAdapterName,
+  type CodeReviewRoleId,
   createCodeReviewAdapter,
   expectedRolesForTriageTier,
   parseCodeReviewRunMetadata,
   roleReviewSectionLabel,
   runCodeReview,
-  type CodeReviewAdapterName,
-  type CodeReviewRoleId,
 } from "@aguil/agents-code-review";
+import type { AgentEvent, Finding } from "@aguil/agents-core";
+import { resolveGitAwarePath } from "@aguil/agents-core";
+import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
 import type { CliOptions } from "./code-review-cli-models";
 import { resolveCodeReviewCliOptions } from "./code-review-config";
 import {
@@ -16,15 +29,15 @@ import {
   renderCodeReviewHelp,
   resolveCodeReviewHelp,
 } from "./code-review-help";
-import { parseCodeReviewArgv, peelCodeReviewSubcommand, resolveEffectivePostOnly } from "./parse-code-review-argv";
-import { resolveGitAwarePath } from "@aguil/agents-core";
-import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
-import { access, readFile, rm, writeFile, readdir, mkdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import {
+  parseCodeReviewArgv,
+  peelCodeReviewSubcommand,
+  resolveEffectivePostOnly,
+} from "./parse-code-review-argv";
 
-export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
+export async function main(
+  argv: readonly string[] = Bun.argv.slice(2),
+): Promise<number> {
   const helpReq = resolveCodeReviewHelp(argv);
   if (helpReq !== null) {
     console.log(renderCodeReviewHelp(helpReq));
@@ -41,15 +54,23 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       return 1;
     }
     const parsed = parseCodeReviewArgv(peeled.optionArgv);
-    const workspaceForConfig = resolve(parsed.options.workspace ?? process.cwd());
-    const resolvedCli = await resolveCodeReviewCliOptions(workspaceForConfig, parsed);
+    const workspaceForConfig = resolve(
+      parsed.options.workspace ?? process.cwd(),
+    );
+    const resolvedCli = await resolveCodeReviewCliOptions(
+      workspaceForConfig,
+      parsed,
+    );
     if (!resolvedCli.ok) {
       console.error(resolvedCli.error);
       return 1;
     }
     const options: CliOptions = {
       ...resolvedCli.options,
-      postOnly: resolveEffectivePostOnly(peeled.kind, resolvedCli.options.postOnly),
+      postOnly: resolveEffectivePostOnly(
+        peeled.kind,
+        resolvedCli.options.postOnly,
+      ),
     };
 
     const logLevelResolved = parseCliLogLevel(options.log ?? "none");
@@ -66,7 +87,9 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     if (peeled.kind === "replay") {
       const bundle = options.contextBundle?.trim();
       if (bundle === undefined || bundle.length === 0) {
-        console.error("replay requires a context bundle (--context-bundle <path> or positional path after `replay`).");
+        console.error(
+          "replay requires a context bundle (--context-bundle <path> or positional path after `replay`).",
+        );
         return 1;
       }
     }
@@ -82,7 +105,11 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       return 1;
     }
     const deterministicEnabled = !options.noDeterministic;
-    const effectiveAdapter = resolveEffectiveAdapterOptions(options, adapterName, deterministicEnabled);
+    const effectiveAdapter = resolveEffectiveAdapterOptions(
+      options,
+      adapterName,
+      deterministicEnabled,
+    );
     const adapter = createCodeReviewAdapter(adapterName, {
       opencode: {
         executable: options.opencode,
@@ -107,13 +134,17 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     });
 
     const requestedConsensusRuns = parseConsensusRuns(options.consensus);
-    if (options.consensus !== undefined && requestedConsensusRuns === undefined) {
+    if (
+      options.consensus !== undefined &&
+      requestedConsensusRuns === undefined
+    ) {
       console.error(`Invalid --consensus value: ${options.consensus}`);
       console.error("Expected a positive integer greater than 0.");
       return 1;
     }
     const pendingReviewEnabled = options.pendingReview && !options.dryRun;
-    const consensusRuns = requestedConsensusRuns ?? (pendingReviewEnabled ? 1 : undefined);
+    const consensusRuns =
+      requestedConsensusRuns ?? (pendingReviewEnabled ? 1 : undefined);
     const reviewPrNumber = parsePrNumber(options.pr);
     if (options.pr !== undefined && reviewPrNumber === undefined) {
       console.error(`Invalid --pr value: ${options.pr}`);
@@ -123,7 +154,9 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     if (logShowsSummary(logLevel)) {
       console.log(`Starting code review with adapter '${adapterName}'.`);
       if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
-        console.log("Using default consensus=1 for --pending-review (override with --consensus <n>).");
+        console.log(
+          "Using default consensus=1 for --pending-review (override with --consensus <n>).",
+        );
       }
     }
 
@@ -134,15 +167,23 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       reviewPrNumber,
       consensusRuns,
       strict: options.strict,
-      metadata: await buildDeterminismMetadata(adapterName, effectiveAdapter, options, deterministicEnabled),
+      metadata: await buildDeterminismMetadata(
+        adapterName,
+        effectiveAdapter,
+        options,
+        deterministicEnabled,
+      ),
       adapter,
       onEvent: createRunEventLogger(logLevel),
     });
     let verbosePrDiffContext: PullRequestDiffContext | undefined;
     if (logShowsSummary(logLevel)) {
       printVerboseFindingSummary(result.findings);
-      const summaryStyle = parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
-      const rawCommentCandidates = findingsToPendingReviewComments(result.findings);
+      const summaryStyle =
+        parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
+      const rawCommentCandidates = findingsToPendingReviewComments(
+        result.findings,
+      );
       let prDiffContext: PullRequestDiffContext | undefined;
       let postedInlineCount = rawCommentCandidates.length;
       let skippedUnanchorable = 0;
@@ -150,12 +191,17 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
         try {
           const workspacePath = resolve(options.workspace ?? process.cwd());
           const repo = await getRepoNameWithOwner(workspacePath);
-          const loadedDiff = await loadPullRequestDiffContext(repo, reviewPrNumber, workspacePath);
+          const loadedDiff = await loadPullRequestDiffContext(
+            repo,
+            reviewPrNumber,
+            workspacePath,
+          );
           prDiffContext = loadedDiff;
           verbosePrDiffContext = loadedDiff;
           warnPrAnchorIssues(result.findings, loadedDiff);
           postedInlineCount = rawCommentCandidates.filter(
-            (candidate) => candidateToComment(candidate, loadedDiff) !== undefined,
+            (candidate) =>
+              candidateToComment(candidate, loadedDiff) !== undefined,
           ).length;
           skippedUnanchorable = rawCommentCandidates.length - postedInlineCount;
         } catch {
@@ -164,17 +210,20 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
           skippedUnanchorable = 0;
         }
       } else {
-        skippedUnanchorable = result.findings.length - rawCommentCandidates.length;
+        skippedUnanchorable =
+          result.findings.length - rawCommentCandidates.length;
       }
       console.log("");
-      console.log(buildPendingReviewSummaryBody({
-        style: summaryStyle,
-        findings: result.findings,
-        postedCommentCount: postedInlineCount,
-        skippedUnanchorable,
-        prDiffContext,
-        runMetadata: result.metadata,
-      }));
+      console.log(
+        buildPendingReviewSummaryBody({
+          style: summaryStyle,
+          findings: result.findings,
+          postedCommentCount: postedInlineCount,
+          skippedUnanchorable,
+          prDiffContext,
+          runMetadata: result.metadata,
+        }),
+      );
       console.log("");
       console.log(`Code review ${result.status}.`);
       console.log(`Report: ${result.reportPath}`);
@@ -185,7 +234,10 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     }
 
     try {
-      const staleCheck = await checkReviewPullRequestDivergence(result.metadata, options.workspace);
+      const staleCheck = await checkReviewPullRequestDivergence(
+        result.metadata,
+        options.workspace,
+      );
       if (staleCheck.status === "diverged") {
         console.warn(
           `Warning: reviewed PR #${staleCheck.prNumber} is stale (${staleCheck.reviewedHeadSha.slice(0, 12)} -> ${staleCheck.currentHeadSha.slice(0, 12)}).`,
@@ -196,14 +248,23 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     }
 
     if (pendingReviewEnabled) {
-      if (options.postPr !== undefined && parsePrNumber(options.postPr) === undefined) {
+      if (
+        options.postPr !== undefined &&
+        parsePrNumber(options.postPr) === undefined
+      ) {
         console.error(`Invalid --post-pr value: ${options.postPr}`);
         return 1;
       }
-      const postingPrNumber = parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
+      const postingPrNumber =
+        parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
       const reviewSummaryStyle = parseReviewSummaryStyle(options.reviewSummary);
-      if (options.reviewSummary !== undefined && reviewSummaryStyle === undefined) {
-        console.error(`Invalid --review-summary value: ${options.reviewSummary}`);
+      if (
+        options.reviewSummary !== undefined &&
+        reviewSummaryStyle === undefined
+      ) {
+        console.error(
+          `Invalid --review-summary value: ${options.reviewSummary}`,
+        );
         console.error("Expected one of: triage, impact, evidence.");
         return 1;
       }
@@ -217,10 +278,10 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
         replacePendingReview: options.replacePendingReview,
         workspacePath: options.workspace,
         preloadedPrDiffContext:
-          (logShowsSummary(logLevel)
-            && reviewPrNumber !== undefined
-            && postingPrNumber !== undefined
-            && postingPrNumber === reviewPrNumber)
+          logShowsSummary(logLevel) &&
+          reviewPrNumber !== undefined &&
+          postingPrNumber !== undefined &&
+          postingPrNumber === reviewPrNumber
             ? verbosePrDiffContext
             : undefined,
         runMetadata: result.metadata,
@@ -252,7 +313,6 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
   console.error(`Unknown command: ${argv[0]}`);
   return 1;
 }
-
 
 export type { CliOptions } from "./code-review-cli-models";
 export type ReviewSummaryStyle = "triage" | "impact" | "evidence";
@@ -337,12 +397,15 @@ function printVerboseFindingSummary(findings: readonly Finding[]): void {
   const limit = 10;
   const shown = findings.slice(0, limit);
   for (const finding of shown) {
-    const location = finding.file === undefined
-      ? "(no file)"
-      : finding.line === undefined
-      ? finding.file
-      : `${finding.file}:${finding.line}`;
-    console.log(`- ${severityEmoji(finding.severity)} ${location} - ${summarizeFindingMessage(finding.title)}`);
+    const location =
+      finding.file === undefined
+        ? "(no file)"
+        : finding.line === undefined
+          ? finding.file
+          : `${finding.file}:${finding.line}`;
+    console.log(
+      `- ${severityEmoji(finding.severity)} ${location} - ${summarizeFindingMessage(finding.title)}`,
+    );
   }
   if (findings.length > shown.length) {
     console.log(`- ... ${findings.length - shown.length} more`);
@@ -351,10 +414,14 @@ function printVerboseFindingSummary(findings: readonly Finding[]): void {
 
 function summarizeFindingMessage(message: string): string {
   const firstSentence = message.split(/[.!?]\s/, 1)[0]?.trim();
-  return firstSentence && firstSentence.length > 0 ? firstSentence : message.trim();
+  return firstSentence && firstSentence.length > 0
+    ? firstSentence
+    : message.trim();
 }
 
-function createRunEventLogger(logLevel: CliLogLevel): ((event: AgentEvent) => void) | undefined {
+function createRunEventLogger(
+  logLevel: CliLogLevel,
+): ((event: AgentEvent) => void) | undefined {
   if (!logShowsSummary(logLevel) && !logShowsCommands(logLevel)) {
     return undefined;
   }
@@ -363,20 +430,29 @@ function createRunEventLogger(logLevel: CliLogLevel): ((event: AgentEvent) => vo
     if (logShowsCommands(logLevel) && event.type === "tool") {
       const commandData = parseCommandEventData(event.data);
       if (commandData?.phase === "before") {
-        console.log(`[${event.roleId}] command (before): ${formatCommand(commandData.cmd)}`);
+        console.log(
+          `[${event.roleId}] command (before): ${formatCommand(commandData.cmd)}`,
+        );
       }
     }
 
-    if (logShowsCommands(logLevel) && (event.type === "completed" || event.type === "error")) {
+    if (
+      logShowsCommands(logLevel) &&
+      (event.type === "completed" || event.type === "error")
+    ) {
       const completionData = parseCommandCompletionData(event.data);
       if (completionData !== undefined) {
-        const durationLabel = completionData.elapsedMs === undefined
-          ? "duration=unknown"
-          : `duration=${Math.round(completionData.elapsedMs)}ms`;
-        const exitLabel = completionData.exitCode === undefined
-          ? "exit=unknown"
-          : `exit=${completionData.exitCode}`;
-        console.log(`[${event.roleId}] command (after): ${formatCommand(completionData.command)} (${exitLabel}, ${durationLabel})`);
+        const durationLabel =
+          completionData.elapsedMs === undefined
+            ? "duration=unknown"
+            : `duration=${Math.round(completionData.elapsedMs)}ms`;
+        const exitLabel =
+          completionData.exitCode === undefined
+            ? "exit=unknown"
+            : `exit=${completionData.exitCode}`;
+        console.log(
+          `[${event.roleId}] command (after): ${formatCommand(completionData.command)} (${exitLabel}, ${durationLabel})`,
+        );
       }
     }
 
@@ -390,39 +466,54 @@ function createRunEventLogger(logLevel: CliLogLevel): ((event: AgentEvent) => vo
       console.log(`[${event.roleId}] completed`);
     }
     if (event.type === "error") {
-      console.log(`[${event.roleId}] error: ${event.message ?? "unknown error"}`);
+      console.log(
+        `[${event.roleId}] error: ${event.message ?? "unknown error"}`,
+      );
     }
   };
 }
 
-function parseCommandEventData(data: unknown): { readonly phase: string; readonly cmd: readonly string[] } | undefined {
+function parseCommandEventData(
+  data: unknown,
+): { readonly phase: string; readonly cmd: readonly string[] } | undefined {
   if (typeof data !== "object" || data === null) {
     return undefined;
   }
   const phase = (data as { readonly phase?: unknown }).phase;
   const cmd = (data as { readonly cmd?: unknown }).cmd;
-  if (typeof phase !== "string" || !Array.isArray(cmd) || !cmd.every((part) => typeof part === "string")) {
+  if (
+    typeof phase !== "string" ||
+    !Array.isArray(cmd) ||
+    !cmd.every((part) => typeof part === "string")
+  ) {
     return undefined;
   }
   return { phase, cmd };
 }
 
-function parseCommandCompletionData(data: unknown): {
-  readonly command: readonly string[];
-  readonly exitCode?: number;
-  readonly elapsedMs?: number;
-} | undefined {
+function parseCommandCompletionData(data: unknown):
+  | {
+      readonly command: readonly string[];
+      readonly exitCode?: number;
+      readonly elapsedMs?: number;
+    }
+  | undefined {
   if (typeof data !== "object" || data === null) {
     return undefined;
   }
   const command = (data as { readonly command?: unknown }).command;
-  if (!Array.isArray(command) || !command.every((part) => typeof part === "string")) {
+  if (
+    !Array.isArray(command) ||
+    !command.every((part) => typeof part === "string")
+  ) {
     return undefined;
   }
   const exitCodeValue = (data as { readonly exitCode?: unknown }).exitCode;
   const elapsedMsValue = (data as { readonly elapsedMs?: unknown }).elapsedMs;
-  const exitCode = typeof exitCodeValue === "number" ? exitCodeValue : undefined;
-  const elapsedMs = typeof elapsedMsValue === "number" ? elapsedMsValue : undefined;
+  const exitCode =
+    typeof exitCodeValue === "number" ? exitCodeValue : undefined;
+  const elapsedMs =
+    typeof elapsedMsValue === "number" ? elapsedMsValue : undefined;
   return { command, exitCode, elapsedMs };
 }
 
@@ -448,14 +539,24 @@ function parseConsensusRuns(value: string | undefined): number | undefined {
   return parsed;
 }
 
-function parseAdapterName(value: string | undefined): CodeReviewAdapterName | undefined {
-  if (value === undefined || value === "fake" || value === "opencode" || value === "claude" || value === "cursor") {
+function parseAdapterName(
+  value: string | undefined,
+): CodeReviewAdapterName | undefined {
+  if (
+    value === undefined ||
+    value === "fake" ||
+    value === "opencode" ||
+    value === "claude" ||
+    value === "cursor"
+  ) {
     return value ?? CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT;
   }
   return undefined;
 }
 
-function parseCursorMode(value: string | undefined): "agent" | "plan" | "ask" | undefined {
+function parseCursorMode(
+  value: string | undefined,
+): "agent" | "plan" | "ask" | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -465,7 +566,9 @@ function parseCursorMode(value: string | undefined): "agent" | "plan" | "ask" | 
   return undefined;
 }
 
-function parseCommaSeparated(value: string | undefined): readonly string[] | undefined {
+function parseCommaSeparated(
+  value: string | undefined,
+): readonly string[] | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -477,12 +580,16 @@ function parseCommaSeparated(value: string | undefined): readonly string[] | und
 }
 
 /** Config may store JSON string arrays verbatim; CLI and env supply comma-split strings. */
-function coerceAdapterArgsTemplate(value: string | readonly string[] | undefined): readonly string[] | undefined {
+function coerceAdapterArgsTemplate(
+  value: string | readonly string[] | undefined,
+): readonly string[] | undefined {
   if (value === undefined) {
     return undefined;
   }
   if (Array.isArray(value)) {
-    const trimmed = value.map((part) => part.trim()).filter((part) => part.length > 0);
+    const trimmed = value
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
     return trimmed.length > 0 ? trimmed : undefined;
   }
   return parseCommaSeparated(value as string);
@@ -498,7 +605,8 @@ function resolveEffectiveAdapterOptions(
       model: options.model,
       variant: options.variant,
       agent: options.agent,
-      pure: options.pure || (deterministicEnabled && adapterName === "opencode"),
+      pure:
+        options.pure || (deterministicEnabled && adapterName === "opencode"),
     },
     claude: {
       model: options.model,
@@ -528,27 +636,35 @@ async function buildDeterminismMetadata(
     metadata.opencode_variant = effective.opencode.variant ?? "";
     metadata.opencode_agent = effective.opencode.agent ?? "";
     metadata.opencode_pure = effective.opencode.pure ? "true" : "false";
-    metadata.opencode_version = await detectExecutableVersion(options.opencode ?? "opencode");
+    metadata.opencode_version = await detectExecutableVersion(
+      options.opencode ?? "opencode",
+    );
   }
 
   if (adapterName === "claude") {
     metadata.claude_model = effective.claude.model ?? "";
     metadata.claude_args_template =
-      effective.claude.argsTemplate === undefined || effective.claude.argsTemplate.length === 0
+      effective.claude.argsTemplate === undefined ||
+      effective.claude.argsTemplate.length === 0
         ? ""
         : JSON.stringify([...effective.claude.argsTemplate]);
-    metadata.claude_version = await detectExecutableVersion(options.claude ?? "claude");
+    metadata.claude_version = await detectExecutableVersion(
+      options.claude ?? "claude",
+    );
   }
 
   if (adapterName === "cursor") {
     metadata.cursor_model = effective.cursor.model ?? "";
     metadata.cursor_args_template =
-      effective.cursor.argsTemplate === undefined || effective.cursor.argsTemplate.length === 0
+      effective.cursor.argsTemplate === undefined ||
+      effective.cursor.argsTemplate.length === 0
         ? ""
         : JSON.stringify([...effective.cursor.argsTemplate]);
     metadata.cursor_mode = effective.cursor.mode ?? "";
     metadata.cursor_force = effective.cursor.force ? "true" : "false";
-    metadata.cursor_version = await detectExecutableVersion(options.cursor ?? "agent");
+    metadata.cursor_version = await detectExecutableVersion(
+      options.cursor ?? "agent",
+    );
   }
 
   return metadata;
@@ -556,7 +672,10 @@ async function buildDeterminismMetadata(
 
 async function detectExecutableVersion(executable: string): Promise<string> {
   const output = await runCommand([executable, "--version"]);
-  const line = output?.trim().split(/\r?\n/).find((entry) => entry.trim().length > 0);
+  const line = output
+    ?.trim()
+    .split(/\r?\n/)
+    .find((entry) => entry.trim().length > 0);
   return line ?? "";
 }
 
@@ -581,7 +700,12 @@ function parseCliLogLevel(value: string | undefined): CliLogLevel | undefined {
   if (value === undefined) {
     return undefined;
   }
-  if (value === "none" || value === "summary" || value === "commands" || value === "all") {
+  if (
+    value === "none" ||
+    value === "summary" ||
+    value === "commands" ||
+    value === "all"
+  ) {
     return value;
   }
   return undefined;
@@ -602,9 +726,14 @@ interface StoredReviewResult {
 
 async function runPostOnly(options: CliOptions): Promise<number> {
   if (options.pendingReview) {
-    console.warn("Ignoring --pending-review because code-review post already publishes a pending review.");
+    console.warn(
+      "Ignoring --pending-review because code-review post already publishes a pending review.",
+    );
   }
-  if (options.postPr !== undefined && parsePrNumber(options.postPr) === undefined) {
+  if (
+    options.postPr !== undefined &&
+    parsePrNumber(options.postPr) === undefined
+  ) {
     console.error(`Invalid --post-pr value: ${options.postPr}`);
     return 1;
   }
@@ -612,7 +741,8 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     console.error(`Invalid --pr value: ${options.pr}`);
     return 1;
   }
-  const explicitPrNumber = parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
+  const explicitPrNumber =
+    parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
 
   const reviewSummaryStyle = parseReviewSummaryStyle(options.reviewSummary);
   if (options.reviewSummary !== undefined && reviewSummaryStyle === undefined) {
@@ -622,11 +752,14 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   }
 
   const workspacePath = resolve(options.workspace ?? process.cwd());
-  const resultPath = options.result === undefined
-    ? await discoverLatestResultPath(workspacePath)
-    : resolve(options.result);
+  const resultPath =
+    options.result === undefined
+      ? await discoverLatestResultPath(workspacePath)
+      : resolve(options.result);
   if (resultPath === undefined) {
-    console.error("Could not auto-discover a prior run result. Pass --result <path>.");
+    console.error(
+      "Could not auto-discover a prior run result. Pass --result <path>.",
+    );
     return 1;
   }
   console.log(`Using stored review result: ${resultPath}`);
@@ -642,9 +775,17 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   const metadata = loaded.metadata ?? {};
   const metadataPrNumber = parsePrNumber(metadata.pr_number);
   const reviewedHeadSha = metadata.pr_reviewed_head_sha?.trim();
-  if (metadataPrNumber === undefined || reviewedHeadSha === undefined || reviewedHeadSha.length === 0) {
-    console.error("Selected result is missing PR metadata required for stale checks.");
-    console.error("Re-run with --pr to capture pr_number and pr_reviewed_head_sha.");
+  if (
+    metadataPrNumber === undefined ||
+    reviewedHeadSha === undefined ||
+    reviewedHeadSha.length === 0
+  ) {
+    console.error(
+      "Selected result is missing PR metadata required for stale checks.",
+    );
+    console.error(
+      "Re-run with --pr to capture pr_number and pr_reviewed_head_sha.",
+    );
     return 1;
   }
   const prNumber = explicitPrNumber ?? metadataPrNumber;
@@ -677,7 +818,9 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   return 0;
 }
 
-export async function discoverLatestResultPath(workspacePath: string): Promise<string | undefined> {
+export async function discoverLatestResultPath(
+  workspacePath: string,
+): Promise<string | undefined> {
   const runsRoot = join(workspacePath, ".review-agent", "runs");
   let entries: readonly (string | Uint8Array)[];
   try {
@@ -686,7 +829,9 @@ export async function discoverLatestResultPath(workspacePath: string): Promise<s
     return undefined;
   }
   const runDirectories = entries
-    .map((entry) => typeof entry === "string" ? entry : Buffer.from(entry).toString("utf8"))
+    .map((entry) =>
+      typeof entry === "string" ? entry : Buffer.from(entry).toString("utf8"),
+    )
     .filter((entry) => entry.startsWith("code-review-"))
     .sort()
     .reverse();
@@ -695,33 +840,38 @@ export async function discoverLatestResultPath(workspacePath: string): Promise<s
     try {
       await access(candidate);
       return candidate;
-    } catch {
-      continue;
-    }
+    } catch {}
   }
   return undefined;
 }
 
-export async function loadStoredReviewResult(resultPath: string): Promise<StoredReviewResult> {
+export async function loadStoredReviewResult(
+  resultPath: string,
+): Promise<StoredReviewResult> {
   const raw = await readFile(resultPath, "utf8");
   const parsed = JSON.parse(raw) as {
     readonly findings?: unknown;
     readonly metadata?: unknown;
   };
   if (!Array.isArray(parsed.findings)) {
-    throw new Error(`Invalid result JSON at ${resultPath}: missing findings array.`);
+    throw new Error(
+      `Invalid result JSON at ${resultPath}: missing findings array.`,
+    );
   }
   const findings = parsed.findings as Finding[];
-  const metadata = typeof parsed.metadata === "object" && parsed.metadata !== null
-    ? parsed.metadata as Record<string, string>
-    : undefined;
+  const metadata =
+    typeof parsed.metadata === "object" && parsed.metadata !== null
+      ? (parsed.metadata as Record<string, string>)
+      : undefined;
   return {
     findings,
     metadata,
   };
 }
 
-export function parseReviewSummaryStyle(value: string | undefined): ReviewSummaryStyle | undefined {
+export function parseReviewSummaryStyle(
+  value: string | undefined,
+): ReviewSummaryStyle | undefined {
   if (value === undefined) {
     return "impact";
   }
@@ -731,9 +881,13 @@ export function parseReviewSummaryStyle(value: string | undefined): ReviewSummar
   return undefined;
 }
 
-export function findingsToPendingReviewComments(findings: readonly Finding[]): readonly PendingReviewComment[] {
+export function findingsToPendingReviewComments(
+  findings: readonly Finding[],
+): readonly PendingReviewComment[] {
   return findings
-    .filter((finding) => finding.file !== undefined && finding.line !== undefined)
+    .filter(
+      (finding) => finding.file !== undefined && finding.line !== undefined,
+    )
     .map((finding) => ({
       path: finding.file as string,
       line: finding.line as number,
@@ -743,7 +897,10 @@ export function findingsToPendingReviewComments(findings: readonly Finding[]): r
 }
 
 /** Maps PR-changed file paths to right-side line -> pull request review `position`. */
-export type PullRequestDiffContext = ReadonlyMap<string, ReadonlyMap<number, number>>;
+export type PullRequestDiffContext = ReadonlyMap<
+  string,
+  ReadonlyMap<number, number>
+>;
 
 export function resolveReviewDiffPosition(
   path: string,
@@ -784,7 +941,11 @@ export function findingUsesFileNotInPrChangedFiles(
   finding: Finding,
   context: PullRequestDiffContext,
 ): boolean {
-  return finding.file !== undefined && finding.file !== "" && !context.has(finding.file);
+  return (
+    finding.file !== undefined &&
+    finding.file !== "" &&
+    !context.has(finding.file)
+  );
 }
 
 /** True when the finding has file+line but that anchor cannot map to a PR review diff position. */
@@ -795,13 +956,23 @@ export function findingHasNonPostablePrLineAnchor(
   if (finding.file === undefined || finding.line === undefined) {
     return false;
   }
-  return resolveReviewDiffPosition(finding.file, finding.line, context) === undefined;
+  return (
+    resolveReviewDiffPosition(finding.file, finding.line, context) === undefined
+  );
 }
 
-function warnPrAnchorIssues(findings: readonly Finding[], context: PullRequestDiffContext): void {
-  const wrongFile = findings.filter((finding) => findingUsesFileNotInPrChangedFiles(finding, context));
+function warnPrAnchorIssues(
+  findings: readonly Finding[],
+  context: PullRequestDiffContext,
+): void {
+  const wrongFile = findings.filter((finding) =>
+    findingUsesFileNotInPrChangedFiles(finding, context),
+  );
   if (wrongFile.length > 0) {
-    const sample = wrongFile.slice(0, 3).map((f) => `"${f.title}" (file: ${f.file})`).join("; ");
+    const sample = wrongFile
+      .slice(0, 3)
+      .map((f) => `"${f.title}" (file: ${f.file})`)
+      .join("; ");
     const more = wrongFile.length > 3 ? ` (+${wrongFile.length - 3} more)` : "";
     console.warn(
       `${wrongFile.length} finding(s) use \`file\` not in this PR's changed-files list. ${sample}${more}`,
@@ -809,15 +980,23 @@ function warnPrAnchorIssues(findings: readonly Finding[], context: PullRequestDi
   }
   const wrongHunk = findings.filter((finding) => {
     if (
-      finding.file === undefined || finding.line === undefined || finding.file === ""
-      || !context.has(finding.file)
+      finding.file === undefined ||
+      finding.line === undefined ||
+      finding.file === "" ||
+      !context.has(finding.file)
     ) {
       return false;
     }
-    return resolveReviewDiffPosition(finding.file, finding.line, context) === undefined;
+    return (
+      resolveReviewDiffPosition(finding.file, finding.line, context) ===
+      undefined
+    );
   });
   if (wrongHunk.length > 0) {
-    const sample = wrongHunk.slice(0, 3).map((f) => `"${f.title}" (${f.file}:${f.line})`).join("; ");
+    const sample = wrongHunk
+      .slice(0, 3)
+      .map((f) => `"${f.title}" (${f.file}:${f.line})`)
+      .join("; ");
     const more = wrongHunk.length > 3 ? ` (+${wrongHunk.length - 3} more)` : "";
     console.warn(
       `${wrongHunk.length} finding(s) cite file:line not on a PR diff hunk (no inline review thread). ${sample}${more}`,
@@ -853,12 +1032,19 @@ async function replacePendingPullRequestReview(input: {
   const workspacePath = resolveWorkspaceCwd(input.workspacePath);
   const repo = await getRepoNameWithOwner(workspacePath);
   const login = await getViewerLogin(workspacePath);
-  const prNumber = input.prNumber ?? await getCurrentPullRequestNumber(repo, workspacePath);
+  const prNumber =
+    input.prNumber ?? (await getCurrentPullRequestNumber(repo, workspacePath));
   const reviewedHeadSha = input.reviewedHeadSha?.trim();
-  const currentHeadSha = await fetchPullRequestHeadSha(repo, prNumber, workspacePath);
-  const headDiverged = reviewedHeadSha !== undefined && reviewedHeadSha.length > 0
-    && currentHeadSha !== undefined
-    && reviewedHeadSha !== currentHeadSha;
+  const currentHeadSha = await fetchPullRequestHeadSha(
+    repo,
+    prNumber,
+    workspacePath,
+  );
+  const headDiverged =
+    reviewedHeadSha !== undefined &&
+    reviewedHeadSha.length > 0 &&
+    currentHeadSha !== undefined &&
+    reviewedHeadSha !== currentHeadSha;
 
   if (headDiverged) {
     console.warn(
@@ -901,7 +1087,9 @@ async function replacePendingPullRequestReview(input: {
     undefined,
     workspacePath,
   );
-  const pendingMine = reviews.filter((review) => review.state === "PENDING" && review.user.login === login);
+  const pendingMine = reviews.filter(
+    (review) => review.state === "PENDING" && review.user.login === login,
+  );
 
   // Only pay the resolved-thread scan cost when we're actually replacing an
   // existing pending review. First-time pending review publishing should stay
@@ -924,7 +1112,9 @@ async function replacePendingPullRequestReview(input: {
       }
     }
 
-    const candidateFingerprints = new Set(findings.map((finding) => findingFingerprint(finding)));
+    const candidateFingerprints = new Set(
+      findings.map((finding) => findingFingerprint(finding)),
+    );
     if (candidateFingerprints.size > 0) {
       const allowedAuthors = new Set([login]);
       const suppressedFromCache = await suppressFingerprintsFromLocalCache({
@@ -935,7 +1125,11 @@ async function replacePendingPullRequestReview(input: {
       });
 
       let suppressedFingerprints = suppressedFromCache;
-      const remaining = new Set([...candidateFingerprints].filter((fp) => !suppressedFingerprints.has(fp)));
+      const remaining = new Set(
+        [...candidateFingerprints].filter(
+          (fp) => !suppressedFingerprints.has(fp),
+        ),
+      );
       if (remaining.size > 0) {
         const fromScan = await fetchResolvedFindingFingerprints({
           repo,
@@ -944,21 +1138,31 @@ async function replacePendingPullRequestReview(input: {
           wanted: remaining,
           allowedAuthors,
         });
-        suppressedFingerprints = new Set([...suppressedFingerprints, ...fromScan]);
+        suppressedFingerprints = new Set([
+          ...suppressedFingerprints,
+          ...fromScan,
+        ]);
       }
 
       if (suppressedFingerprints.size > 0) {
-        findings = findings.filter((finding) => !suppressedFingerprints.has(findingFingerprint(finding)));
+        findings = findings.filter(
+          (finding) => !suppressedFingerprints.has(findingFingerprint(finding)),
+        );
       }
     }
   }
 
   const rawComments = findingsToPendingReviewComments(findings);
-  const diffContext = input.preloadedPrDiffContext ?? await loadPullRequestDiffContext(repo, prNumber, workspacePath);
+  const diffContext =
+    input.preloadedPrDiffContext ??
+    (await loadPullRequestDiffContext(repo, prNumber, workspacePath));
   warnPrAnchorIssues(findings, diffContext);
   const comments = rawComments
     .map((candidate) => candidateToComment(candidate, diffContext))
-    .filter((comment): comment is GitHubPendingReviewCommentInput => comment !== undefined);
+    .filter(
+      (comment): comment is GitHubPendingReviewCommentInput =>
+        comment !== undefined,
+    );
   const skippedUnanchorable = rawComments.length - comments.length;
 
   if (pendingMine.length > 0) {
@@ -980,7 +1184,10 @@ async function replacePendingPullRequestReview(input: {
     prDiffContext: diffContext,
     runMetadata: input.runMetadata,
   });
-  const created = await ghApi<{ readonly id: number; readonly html_url: string }>(
+  const created = await ghApi<{
+    readonly id: number;
+    readonly html_url: string;
+  }>(
     `repos/${repo}/pulls/${prNumber}/reviews`,
     "POST",
     {
@@ -1021,8 +1228,19 @@ function sanitizeRepoForCache(repo: string): string {
   return repo.replaceAll("/", "__");
 }
 
-function findingCachePath(workspacePath: string, repo: string, prNumber: number): string {
-  return join(workspacePath, ".review-agent", "pr-cache", sanitizeRepoForCache(repo), `pr-${prNumber}`, "finding-threads.json");
+function findingCachePath(
+  workspacePath: string,
+  repo: string,
+  prNumber: number,
+): string {
+  return join(
+    workspacePath,
+    ".review-agent",
+    "pr-cache",
+    sanitizeRepoForCache(repo),
+    `pr-${prNumber}`,
+    "finding-threads.json",
+  );
 }
 
 async function loadLocalFindingThreadCache(
@@ -1034,7 +1252,12 @@ async function loadLocalFindingThreadCache(
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as Partial<PendingReviewFindingCache>;
-    if (parsed.version !== 1 || parsed.repo !== repo || parsed.prNumber !== prNumber || !Array.isArray(parsed.findings)) {
+    if (
+      parsed.version !== 1 ||
+      parsed.repo !== repo ||
+      parsed.prNumber !== prNumber ||
+      !Array.isArray(parsed.findings)
+    ) {
       return undefined;
     }
     return parsed as PendingReviewFindingCache;
@@ -1043,7 +1266,10 @@ async function loadLocalFindingThreadCache(
   }
 }
 
-async function writeLocalFindingThreadCache(workspacePath: string, cache: PendingReviewFindingCache): Promise<void> {
+async function writeLocalFindingThreadCache(
+  workspacePath: string,
+  cache: PendingReviewFindingCache,
+): Promise<void> {
   const path = findingCachePath(workspacePath, cache.repo, cache.prNumber);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
@@ -1055,7 +1281,11 @@ async function suppressFingerprintsFromLocalCache(input: {
   readonly workspacePath: string;
   readonly wanted: ReadonlySet<string>;
 }): Promise<Set<string>> {
-  const cache = await loadLocalFindingThreadCache(input.workspacePath, input.repo, input.prNumber);
+  const cache = await loadLocalFindingThreadCache(
+    input.workspacePath,
+    input.repo,
+    input.prNumber,
+  );
   if (cache === undefined) {
     return new Set();
   }
@@ -1083,7 +1313,8 @@ async function suppressFingerprintsFromLocalCache(input: {
     };
   }>(
     {
-      query: "query($ids:[ID!]!){nodes(ids:$ids){... on PullRequestReviewThread{id isResolved}}}",
+      query:
+        "query($ids:[ID!]!){nodes(ids:$ids){... on PullRequestReviewThread{id isResolved}}}",
       variables: { ids: uniqueThreadIds },
     },
     input.workspacePath,
@@ -1112,7 +1343,9 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
   readonly workspacePath: string;
   readonly allowedAuthors: ReadonlySet<string>;
 }): Promise<void> {
-  const reviewComments = await ghApi<ReadonlyArray<{ readonly node_id: string; readonly body: string }>>(
+  const reviewComments = await ghApi<
+    ReadonlyArray<{ readonly node_id: string; readonly body: string }>
+  >(
     `repos/${input.repo}/pulls/${input.prNumber}/reviews/${input.reviewId}/comments`,
     "GET",
     undefined,
@@ -1168,30 +1401,42 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
               };
               readonly nodes?: ReadonlyArray<{
                 readonly id: string;
-                readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly id: string; readonly author?: { readonly login?: string } }> };
+                readonly comments?: {
+                  readonly nodes?: ReadonlyArray<{
+                    readonly id: string;
+                    readonly author?: { readonly login?: string };
+                  }>;
+                };
               }>;
             };
           };
         };
       };
-    }>([
-      "api",
-      "graphql",
-      "-f",
-      `query=${query}`,
-      "-f",
-      `o=${owner}`,
-      "-f",
-      `r=${name}`,
-      "-F",
-      `n=${input.prNumber}`,
-      ...(beforeCursor !== undefined ? ["-f", `before=${beforeCursor}`] : []),
-    ], input.workspacePath);
+    }>(
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-f",
+        `o=${owner}`,
+        "-f",
+        `r=${name}`,
+        "-F",
+        `n=${input.prNumber}`,
+        ...(beforeCursor !== undefined ? ["-f", `before=${beforeCursor}`] : []),
+      ],
+      input.workspacePath,
+    );
 
-    for (const thread of resp.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []) {
+    for (const thread of resp.data?.repository?.pullRequest?.reviewThreads
+      ?.nodes ?? []) {
       for (const comment of thread.comments?.nodes ?? []) {
         const authorLogin = comment.author?.login;
-        if (typeof authorLogin !== "string" || !input.allowedAuthors.has(authorLogin)) {
+        if (
+          typeof authorLogin !== "string" ||
+          !input.allowedAuthors.has(authorLogin)
+        ) {
           continue;
         }
         const fingerprint = commentIdsToFingerprint.get(comment.id);
@@ -1204,7 +1449,8 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
     if (found.size >= commentIdsToFingerprint.size) {
       break;
     }
-    const pageInfo = resp.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
+    const pageInfo =
+      resp.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
     if (pageInfo?.hasPreviousPage !== true) {
       break;
     }
@@ -1219,7 +1465,11 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
     return;
   }
 
-  const existing = await loadLocalFindingThreadCache(input.workspacePath, input.repo, input.prNumber);
+  const existing = await loadLocalFindingThreadCache(
+    input.workspacePath,
+    input.repo,
+    input.prNumber,
+  );
   const merged = new Map<string, string>();
   for (const entry of existing?.findings ?? []) {
     merged.set(entry.fingerprint, entry.threadId);
@@ -1233,7 +1483,10 @@ async function updateLocalFindingThreadCacheAfterPost(input: {
     repo: input.repo,
     prNumber: input.prNumber,
     updatedAt: new Date().toISOString(),
-    findings: [...merged.entries()].map(([fingerprint, threadId]) => ({ fingerprint, threadId })),
+    findings: [...merged.entries()].map(([fingerprint, threadId]) => ({
+      fingerprint,
+      threadId,
+    })),
   });
 }
 
@@ -1274,30 +1527,42 @@ async function fetchResolvedFindingFingerprints(input: {
         readonly repository?: {
           readonly pullRequest?: {
             readonly reviewThreads?: {
-              readonly pageInfo?: { readonly hasNextPage?: boolean; readonly endCursor?: string | null };
+              readonly pageInfo?: {
+                readonly hasNextPage?: boolean;
+                readonly endCursor?: string | null;
+              };
               readonly nodes?: ReadonlyArray<{
                 readonly isResolved?: boolean;
-                readonly comments?: { readonly nodes?: ReadonlyArray<{ readonly body?: string; readonly author?: { readonly login?: string } }> };
+                readonly comments?: {
+                  readonly nodes?: ReadonlyArray<{
+                    readonly body?: string;
+                    readonly author?: { readonly login?: string };
+                  }>;
+                };
               }>;
             };
           };
         };
       };
-    }>([
-      "api",
-      "graphql",
-      "-f",
-      `query=${query}`,
-      "-f",
-      `o=${owner}`,
-      "-f",
-      `r=${name}`,
-      "-F",
-      `n=${input.prNumber}`,
-      ...(after !== undefined ? ["-f", `after=${after}`] : []),
-    ], input.workspacePath);
+    }>(
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-f",
+        `o=${owner}`,
+        "-f",
+        `r=${name}`,
+        "-F",
+        `n=${input.prNumber}`,
+        ...(after !== undefined ? ["-f", `after=${after}`] : []),
+      ],
+      input.workspacePath,
+    );
 
-    const threads = response.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    const threads =
+      response.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
     for (const thread of threads) {
       if (thread.isResolved !== true) {
         continue;
@@ -1308,7 +1573,10 @@ async function fetchResolvedFindingFingerprints(input: {
           continue;
         }
         const authorLogin = comment.author?.login;
-        if (typeof authorLogin !== "string" || !input.allowedAuthors.has(authorLogin)) {
+        if (
+          typeof authorLogin !== "string" ||
+          !input.allowedAuthors.has(authorLogin)
+        ) {
           continue;
         }
         for (const match of body.matchAll(marker)) {
@@ -1323,7 +1591,8 @@ async function fetchResolvedFindingFingerprints(input: {
     if (suppressed.size >= input.wanted.size) {
       break;
     }
-    const pageInfo = response.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
+    const pageInfo =
+      response.data?.repository?.pullRequest?.reviewThreads?.pageInfo;
     if (pageInfo?.hasNextPage !== true) {
       break;
     }
@@ -1354,14 +1623,22 @@ async function checkLocalAheadOfPullRequest(input: {
 }): Promise<
   | { readonly status: "unavailable" }
   | { readonly status: "ok" }
-  | { readonly status: "ahead"; readonly prHeadSha: string; readonly localHeadSha: string }
+  | {
+      readonly status: "ahead";
+      readonly prHeadSha: string;
+      readonly localHeadSha: string;
+    }
 > {
   const prHeadSha = input.currentHeadSha?.trim();
   if (prHeadSha === undefined || prHeadSha.length === 0) {
     return { status: "unavailable" };
   }
 
-  const localHeadSha = (await runCommand(["git", "rev-parse", "HEAD"], input.workspacePath, { gitAware: true }))?.trim();
+  const localHeadSha = (
+    await runCommand(["git", "rev-parse", "HEAD"], input.workspacePath, {
+      gitAware: true,
+    })
+  )?.trim();
   if (localHeadSha === undefined || localHeadSha.length === 0) {
     return { status: "unavailable" };
   }
@@ -1399,13 +1676,21 @@ async function checkReviewPullRequestDivergence(
   }
   const prNumber = parsePrNumber(metadata.pr_number);
   const reviewedHeadSha = metadata.pr_reviewed_head_sha?.trim();
-  if (prNumber === undefined || reviewedHeadSha === undefined || reviewedHeadSha.length === 0) {
+  if (
+    prNumber === undefined ||
+    reviewedHeadSha === undefined ||
+    reviewedHeadSha.length === 0
+  ) {
     return { status: "unavailable" };
   }
 
   const workspacePath = resolveWorkspaceCwd(workspacePathInput);
   const repo = await getRepoNameWithOwner(workspacePath);
-  const currentHeadSha = await fetchPullRequestHeadSha(repo, prNumber, workspacePath);
+  const currentHeadSha = await fetchPullRequestHeadSha(
+    repo,
+    prNumber,
+    workspacePath,
+  );
   if (currentHeadSha === undefined || currentHeadSha.length === 0) {
     return { status: "unavailable" };
   }
@@ -1418,23 +1703,32 @@ async function checkReviewPullRequestDivergence(
   };
 }
 
-async function confirmProceedAfterStaleness(noConfirm: boolean): Promise<boolean> {
+async function confirmProceedAfterStaleness(
+  noConfirm: boolean,
+): Promise<boolean> {
   if (noConfirm) {
     return true;
   }
   if (process.platform === "win32") {
-    console.warn("Interactive prompt is unsupported on Windows. Re-run with --no-confirm.");
+    console.warn(
+      "Interactive prompt is unsupported on Windows. Re-run with --no-confirm.",
+    );
     return false;
   }
   if (process.stdin.isTTY !== true) {
-    console.warn("Non-interactive stdin detected. Re-run with --no-confirm to post anyway.");
+    console.warn(
+      "Non-interactive stdin detected. Re-run with --no-confirm to post anyway.",
+    );
     return false;
   }
   process.stdout.write("Post pending review anyway? [y/N] ");
   const reader = Bun.stdin.stream().getReader();
   try {
     const { value } = await reader.read();
-    const answer = value === undefined ? "" : new TextDecoder().decode(value).trim().toLowerCase();
+    const answer =
+      value === undefined
+        ? ""
+        : new TextDecoder().decode(value).trim().toLowerCase();
     return answer === "y" || answer === "yes";
   } catch {
     return false;
@@ -1443,23 +1737,32 @@ async function confirmProceedAfterStaleness(noConfirm: boolean): Promise<boolean
   }
 }
 
-async function confirmProceedAfterLocalAhead(noConfirm: boolean): Promise<boolean> {
+async function confirmProceedAfterLocalAhead(
+  noConfirm: boolean,
+): Promise<boolean> {
   if (noConfirm) {
     return true;
   }
   if (process.platform === "win32") {
-    console.warn("Interactive prompt is unsupported on Windows. Re-run with --no-confirm.");
+    console.warn(
+      "Interactive prompt is unsupported on Windows. Re-run with --no-confirm.",
+    );
     return false;
   }
   if (process.stdin.isTTY !== true) {
-    console.warn("Non-interactive stdin detected. Re-run with --no-confirm to post anyway.");
+    console.warn(
+      "Non-interactive stdin detected. Re-run with --no-confirm to post anyway.",
+    );
     return false;
   }
   process.stdout.write("Post pending review anyway? [y/N] ");
   const reader = Bun.stdin.stream().getReader();
   try {
     const { value } = await reader.read();
-    const answer = value === undefined ? "" : new TextDecoder().decode(value).trim().toLowerCase();
+    const answer =
+      value === undefined
+        ? ""
+        : new TextDecoder().decode(value).trim().toLowerCase();
     return answer === "y" || answer === "yes";
   } catch {
     return false;
@@ -1474,7 +1777,9 @@ async function confirmReplacePendingReview(input: {
   readonly pendingCount: number;
 }): Promise<boolean> {
   if (input.noConfirm) {
-    console.warn("Non-interactive pending review replacement requires --replace-pending-review.");
+    console.warn(
+      "Non-interactive pending review replacement requires --replace-pending-review.",
+    );
     return false;
   }
   if (process.platform === "win32") {
@@ -1496,7 +1801,10 @@ async function confirmReplacePendingReview(input: {
   const reader = Bun.stdin.stream().getReader();
   try {
     const { value } = await reader.read();
-    const answer = value === undefined ? "" : new TextDecoder().decode(value).trim().toLowerCase();
+    const answer =
+      value === undefined
+        ? ""
+        : new TextDecoder().decode(value).trim().toLowerCase();
     return answer === "y" || answer === "yes";
   } catch {
     return false;
@@ -1561,7 +1869,8 @@ export function formatReviewCoverageSectionLines(
   const parsed = parseCodeReviewRunMetadata(runMetadata);
   const tier = parsed.triageTier;
   const triageRaw = parsed.triageRaw;
-  const expected = tier === undefined ? undefined : new Set(expectedRolesForTriageTier(tier));
+  const expected =
+    tier === undefined ? undefined : new Set(expectedRolesForTriageTier(tier));
   const skippedByTriage = CODE_REVIEW_ROLE_IDS.filter(
     (id) => expected !== undefined && !expected.has(id),
   );
@@ -1584,11 +1893,11 @@ export function formatReviewCoverageSectionLines(
   const hasOutcomeDetail =
     completed.length > 0 || timedOut.length > 0 || failed.length > 0;
   const hasSignal =
-    (triageRaw !== undefined && triageRaw.length > 0)
-    || skippedByTriage.length > 0
-    || timedOutRolesRaw.length > 0
-    || failedRolesRaw.length > 0
-    || completed.length > 0;
+    (triageRaw !== undefined && triageRaw.length > 0) ||
+    skippedByTriage.length > 0 ||
+    timedOutRolesRaw.length > 0 ||
+    failedRolesRaw.length > 0 ||
+    completed.length > 0;
 
   if (!hasSignal) {
     return [];
@@ -1597,15 +1906,18 @@ export function formatReviewCoverageSectionLines(
   let missingOutcome: readonly string[] = [];
   if (tier !== undefined && expected !== undefined && hasOutcomeDetail) {
     missingOutcome = [...expected].filter(
-      (id) => !completed.includes(id) && !timedOut.includes(id) && !failed.includes(id),
+      (id) =>
+        !completed.includes(id) &&
+        !timedOut.includes(id) &&
+        !failed.includes(id),
     );
   }
 
   const hasProblem =
-    skippedByTriage.length > 0
-    || timedOut.length > 0
-    || failed.length > 0
-    || missingOutcome.length > 0;
+    skippedByTriage.length > 0 ||
+    timedOut.length > 0 ||
+    failed.length > 0 ||
+    missingOutcome.length > 0;
 
   const lines: string[] = ["", "### Review coverage"];
 
@@ -1642,9 +1954,13 @@ export function formatReviewCoverageSectionLines(
   }
 
   if (!hasProblem && tier !== undefined && hasOutcomeDetail) {
-    lines.push("- All scheduled reviewers **completed**; no triage omissions or incomplete roles.");
+    lines.push(
+      "- All scheduled reviewers **completed**; no triage omissions or incomplete roles.",
+    );
   } else if (!hasProblem && tier === undefined && hasOutcomeDetail) {
-    lines.push("- All reported reviewer roles **completed**; no failures or timeouts in run metadata.");
+    lines.push(
+      "- All reported reviewer roles **completed**; no failures or timeouts in run metadata.",
+    );
   }
 
   return lines;
@@ -1657,7 +1973,9 @@ function renderTriageSummary(
   prDiffContext: PullRequestDiffContext | undefined,
   runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
-  const critical = findings.filter((finding) => finding.severity === "critical");
+  const critical = findings.filter(
+    (finding) => finding.severity === "critical",
+  );
   const warnings = findings.filter((finding) => finding.severity === "warning");
   const lines = [
     "## At a Glance",
@@ -1709,7 +2027,10 @@ function renderImpactSummary(
     return lines.join("\n");
   }
 
-  const groups: Record<"security" | "performance" | "quality" | "compliance" | "other", Finding[]> = {
+  const groups: Record<
+    "security" | "performance" | "quality" | "compliance" | "other",
+    Finding[]
+  > = {
     security: [],
     performance: [],
     quality: [],
@@ -1724,16 +2045,32 @@ function renderImpactSummary(
   lines.push(
     "",
     "### Security",
-    ...formatFindingBullets(groups.security, "No security findings.", prDiffContext),
+    ...formatFindingBullets(
+      groups.security,
+      "No security findings.",
+      prDiffContext,
+    ),
     "",
     "### Runtime / Performance",
-    ...formatFindingBullets(groups.performance, "No performance findings.", prDiffContext),
+    ...formatFindingBullets(
+      groups.performance,
+      "No performance findings.",
+      prDiffContext,
+    ),
     "",
     "### Correctness / Quality",
-    ...formatFindingBullets(groups.quality, "No quality findings.", prDiffContext),
+    ...formatFindingBullets(
+      groups.quality,
+      "No quality findings.",
+      prDiffContext,
+    ),
     "",
     "### Documentation / Compliance",
-    ...formatFindingBullets(groups.compliance, "No compliance findings.", prDiffContext),
+    ...formatFindingBullets(
+      groups.compliance,
+      "No compliance findings.",
+      prDiffContext,
+    ),
   );
 
   if (groups.other.length > 0) {
@@ -1741,7 +2078,11 @@ function renderImpactSummary(
       "",
       "### Uncategorized findings",
       "- _These findings omit `sourceRole` or use an unexpected reviewer label._",
-      ...formatFindingBullets(groups.other, "No uncategorized findings.", prDiffContext),
+      ...formatFindingBullets(
+        groups.other,
+        "No uncategorized findings.",
+        prDiffContext,
+      ),
     );
   }
 
@@ -1752,7 +2093,12 @@ function impactBucketForSourceRole(
   role: Finding["sourceRole"] | undefined,
 ): "security" | "performance" | "quality" | "compliance" | "other" {
   const trimmed = typeof role === "string" ? role.trim() : "";
-  if (trimmed === "security" || trimmed === "performance" || trimmed === "quality" || trimmed === "compliance") {
+  if (
+    trimmed === "security" ||
+    trimmed === "performance" ||
+    trimmed === "quality" ||
+    trimmed === "compliance"
+  ) {
     return trimmed;
   }
   return "other";
@@ -1781,9 +2127,10 @@ function renderEvidenceSummary(
   }
 
   for (const [index, finding] of findings.slice(0, 6).entries()) {
-    const caption = prDiffContext === undefined
-      ? undefined
-      : findingInlinePostingCaption(finding, prDiffContext);
+    const caption =
+      prDiffContext === undefined
+        ? undefined
+        : findingInlinePostingCaption(finding, prDiffContext);
     lines.push(
       "",
       `### Finding ${index + 1}: ${severityEmoji(finding.severity)} ${finding.title}`,
@@ -1806,10 +2153,14 @@ function formatFindingBullets(
     return [`- ✅ ${emptyLine}`];
   }
   return findings.map((finding) => {
-    const location = finding.file !== undefined && finding.line !== undefined
-      ? ` (${finding.file}:${finding.line})`
-      : "";
-    const caption = prDiffContext === undefined ? undefined : findingInlinePostingCaption(finding, prDiffContext);
+    const location =
+      finding.file !== undefined && finding.line !== undefined
+        ? ` (${finding.file}:${finding.line})`
+        : "";
+    const caption =
+      prDiffContext === undefined
+        ? undefined
+        : findingInlinePostingCaption(finding, prDiffContext);
     const suffix = caption === undefined ? "" : ` — _${caption}_`;
     return `- ${severityEmoji(finding.severity)} ${finding.title}${location}${suffix}`;
   });
@@ -1828,29 +2179,30 @@ function suggestFixFromRole(role: Finding["sourceRole"]): string {
   return "Align docs and conventions with implemented behavior.";
 }
 
-async function getCurrentPullRequestNumber(repo: string, workspacePath?: string): Promise<number> {
-  const view = await runGh<{ readonly number: number }>([
-    "pr",
-    "view",
-    "--repo",
-    repo,
-    "--json",
-    "number",
-  ], workspacePath);
+async function getCurrentPullRequestNumber(
+  repo: string,
+  workspacePath?: string,
+): Promise<number> {
+  const view = await runGh<{ readonly number: number }>(
+    ["pr", "view", "--repo", repo, "--json", "number"],
+    workspacePath,
+  );
   if (!Number.isInteger(view.number)) {
     throw new Error("Could not resolve current PR number from gh pr view.");
   }
   return view.number;
 }
 
-async function fetchPullRequestHeadSha(repo: string, prNumber: number, workspacePath?: string): Promise<string | undefined> {
-  const output = await runCommand([
-    "gh",
-    "api",
-    `repos/${repo}/pulls/${prNumber}`,
-    "--jq",
-    ".head.sha",
-  ], workspacePath, { gitAware: true });
+async function fetchPullRequestHeadSha(
+  repo: string,
+  prNumber: number,
+  workspacePath?: string,
+): Promise<string | undefined> {
+  const output = await runCommand(
+    ["gh", "api", `repos/${repo}/pulls/${prNumber}`, "--jq", ".head.sha"],
+    workspacePath,
+    { gitAware: true },
+  );
   const value = output?.trim();
   return value === undefined || value.length === 0 ? undefined : value;
 }
@@ -1859,7 +2211,9 @@ async function updateRunResultMetadata(
   artifacts: readonly string[],
   entries: Readonly<Record<string, string>>,
 ): Promise<void> {
-  const resultPath = artifacts.find((artifact) => artifact.endsWith("/result.json"));
+  const resultPath = artifacts.find((artifact) =>
+    artifact.endsWith("/result.json"),
+  );
   if (resultPath === undefined) {
     return;
   }
@@ -1872,17 +2226,19 @@ async function updateRunResultMetadata(
     ...(parsed.metadata ?? {}),
     ...entries,
   };
-  await writeFile(resultPath, `${JSON.stringify({ ...parsed, metadata }, null, 2)}\n`, "utf8");
+  await writeFile(
+    resultPath,
+    `${JSON.stringify({ ...parsed, metadata }, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function getRepoNameWithOwner(workspacePath?: string): Promise<string> {
   try {
-    const repo = await runGh<{ readonly nameWithOwner: string }>([
-      "repo",
-      "view",
-      "--json",
-      "nameWithOwner",
-    ], workspacePath);
+    const repo = await runGh<{ readonly nameWithOwner: string }>(
+      ["repo", "view", "--json", "nameWithOwner"],
+      workspacePath,
+    );
     if (repo.nameWithOwner.trim().length > 0) {
       return repo.nameWithOwner;
     }
@@ -1891,13 +2247,18 @@ async function getRepoNameWithOwner(workspacePath?: string): Promise<string> {
   }
   const fromRemote = await resolveRepoNameWithOwnerFromRemote(workspacePath);
   if (fromRemote === undefined) {
-    throw new Error("Could not resolve repository nameWithOwner from gh or remotes.");
+    throw new Error(
+      "Could not resolve repository nameWithOwner from gh or remotes.",
+    );
   }
   return fromRemote;
 }
 
 async function getViewerLogin(workspacePath?: string): Promise<string> {
-  const user = await runGh<{ readonly login: string }>(["api", "user"], workspacePath);
+  const user = await runGh<{ readonly login: string }>(
+    ["api", "user"],
+    workspacePath,
+  );
   if (user.login.trim().length === 0) {
     throw new Error("Could not resolve GitHub login from gh api user.");
   }
@@ -1927,23 +2288,35 @@ async function ghApi<T>(
 }
 
 async function runGhGraphql<T>(
-  input: { readonly query: string; readonly variables?: Readonly<Record<string, unknown>> },
+  input: {
+    readonly query: string;
+    readonly variables?: Readonly<Record<string, unknown>>;
+  },
   workspacePath?: string,
 ): Promise<T> {
-  const inputPath = join(tmpdir(), `aguil-agents-gh-graphql-${crypto.randomUUID()}.json`);
+  const inputPath = join(
+    tmpdir(),
+    `aguil-agents-gh-graphql-${crypto.randomUUID()}.json`,
+  );
   const body =
     input.variables !== undefined
       ? { query: input.query, variables: input.variables }
       : { query: input.query };
   await writeFile(inputPath, `${JSON.stringify(body)}\n`, "utf8");
   try {
-    return await runGh<T>(["api", "graphql", "--input", inputPath], workspacePath);
+    return await runGh<T>(
+      ["api", "graphql", "--input", inputPath],
+      workspacePath,
+    );
   } finally {
     await rm(inputPath, { force: true });
   }
 }
 
-async function runGh<T>(args: readonly string[], workspacePath?: string): Promise<T> {
+async function runGh<T>(
+  args: readonly string[],
+  workspacePath?: string,
+): Promise<T> {
   const gitAware = await resolveGhCwd(workspacePath);
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -1982,7 +2355,8 @@ async function runGh<T>(args: readonly string[], workspacePath?: string): Promis
       throw new Error(`gh ${args.join(" ")} failed: ${message}`);
     }
 
-    const backoffMs = 250 * (2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+    const backoffMs =
+      250 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250);
     await Bun.sleep(backoffMs);
   }
 
@@ -2009,16 +2383,22 @@ async function resolveGhCwd(workspacePath?: string): Promise<string> {
   return pending;
 }
 
-async function resolveRepoNameWithOwnerFromRemote(workspacePath?: string): Promise<string | undefined> {
+async function resolveRepoNameWithOwnerFromRemote(
+  workspacePath?: string,
+): Promise<string | undefined> {
   const remoteUrl = (
-    await runCommand(["jj", "git", "remote", "list"], workspacePath) ??
-    await runCommand(["git", "remote", "get-url", "origin"], workspacePath, { gitAware: true })
+    (await runCommand(["jj", "git", "remote", "list"], workspacePath)) ??
+    (await runCommand(["git", "remote", "get-url", "origin"], workspacePath, {
+      gitAware: true,
+    }))
   )?.trim();
   if (remoteUrl === undefined || remoteUrl.length === 0) {
     return undefined;
   }
 
-  const line = remoteUrl.split(/\r?\n/).find((entry) => entry.startsWith("origin "));
+  const line = remoteUrl
+    .split(/\r?\n/)
+    .find((entry) => entry.startsWith("origin "));
   const rawUrl = line?.replace(/^origin\s+/, "") ?? remoteUrl;
   return parseNameWithOwnerFromRemoteUrl(rawUrl);
 }
@@ -2058,7 +2438,10 @@ async function resolveGitAwareCwd(workspacePath?: string): Promise<string> {
 
   const pending = (async () => {
     const resolved = await resolveGitAwarePath(cwd);
-    if (resolved.warning !== undefined && !emittedGitAwareWarnings.has(resolved.warning)) {
+    if (
+      resolved.warning !== undefined &&
+      !emittedGitAwareWarnings.has(resolved.warning)
+    ) {
       emittedGitAwareWarnings.add(resolved.warning);
       console.warn(resolved.warning);
     }
@@ -2075,9 +2458,10 @@ async function runCommand(
   options: { readonly gitAware?: boolean } = {},
 ): Promise<string | undefined> {
   try {
-    const cwd = options.gitAware === true
-      ? await resolveGitAwareCwd(workspacePath)
-      : resolveWorkspaceCwd(workspacePath);
+    const cwd =
+      options.gitAware === true
+        ? await resolveGitAwareCwd(workspacePath)
+        : resolveWorkspaceCwd(workspacePath);
     const proc = Bun.spawn({
       cmd: [...cmd],
       cwd,
@@ -2117,7 +2501,10 @@ interface GitHubPullRequestFile {
   readonly patch?: string;
 }
 
-const pullRequestDiffContextCache = new Map<string, Promise<PullRequestDiffContext>>();
+const pullRequestDiffContextCache = new Map<
+  string,
+  Promise<PullRequestDiffContext>
+>();
 
 async function loadPullRequestDiffContext(
   repo: string,
@@ -2129,7 +2516,11 @@ async function loadPullRequestDiffContext(
   if (cached !== undefined) {
     return cached;
   }
-  const pending = loadPullRequestDiffContextUncached(repo, prNumber, workspacePath);
+  const pending = loadPullRequestDiffContextUncached(
+    repo,
+    prNumber,
+    workspacePath,
+  );
   pullRequestDiffContextCache.set(key, pending);
   pending.catch(() => {
     pullRequestDiffContextCache.delete(key);
@@ -2159,7 +2550,11 @@ function candidateToComment(
   candidate: PendingReviewComment,
   context: PullRequestDiffContext,
 ): GitHubPendingReviewCommentInput | undefined {
-  const position = resolveReviewDiffPosition(candidate.path, candidate.line, context);
+  const position = resolveReviewDiffPosition(
+    candidate.path,
+    candidate.line,
+    context,
+  );
   if (position === undefined) {
     return undefined;
   }
@@ -2170,7 +2565,9 @@ function candidateToComment(
   };
 }
 
-function extractRightSideHunkPositions(patch: string | undefined): ReadonlyMap<number, number> {
+function extractRightSideHunkPositions(
+  patch: string | undefined,
+): ReadonlyMap<number, number> {
   if (patch === undefined) {
     return new Map<number, number>();
   }
@@ -2205,7 +2602,6 @@ function extractRightSideHunkPositions(patch: string | undefined): ReadonlyMap<n
       continue;
     }
     if (line.startsWith("\\")) {
-      continue;
     }
   }
   return positions;

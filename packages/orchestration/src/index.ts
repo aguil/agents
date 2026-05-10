@@ -1,10 +1,14 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import type {
+  Finding,
+  HarnessRunRequest,
+  HarnessRunResult,
+} from "@aguil/agents-core";
 import { ensureDirectory, writeJsonFile } from "@aguil/agents-core";
-import type { Finding, HarnessRunRequest, HarnessRunResult } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
 import { isFinding } from "@aguil/agents-execution";
 import type { EventSink } from "@aguil/agents-telemetry";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 export interface RoleDefinition {
   readonly id: string;
@@ -76,7 +80,10 @@ export class NativeBunOrchestrator implements Orchestrator {
       metadata,
     };
 
-    await writeJsonFile(join(request.scratchpadPath, "result.raw.json"), result);
+    await writeJsonFile(
+      join(request.scratchpadPath, "result.raw.json"),
+      result,
+    );
     return result;
   }
 
@@ -100,11 +107,14 @@ export class NativeBunOrchestrator implements Orchestrator {
       roleId: role.id,
       prompt,
       workspacePath: request.workspacePath,
-      contextBundlePath: request.contextBundlePath ?? this.options.contextBundlePath,
+      contextBundlePath:
+        request.contextBundlePath ?? this.options.contextBundlePath,
       scratchpadPath: roleScratchpadPath,
       timeoutMs: role.timeoutMs,
       allowedCommands:
-        role.allowedCommands ?? this.options.definition.defaultAllowedCommands ?? [],
+        role.allowedCommands ??
+        this.options.definition.defaultAllowedCommands ??
+        [],
       metadata: request.metadata,
     };
 
@@ -144,7 +154,9 @@ async function readPrompt(
   return role.description;
 }
 
-function statusFromFindings(findings: readonly Finding[]): HarnessRunResult["status"] {
+function statusFromFindings(
+  findings: readonly Finding[],
+): HarnessRunResult["status"] {
   if (findings.some((finding) => finding.severity === "critical")) {
     return "failed";
   }
@@ -186,8 +198,13 @@ function hasTimedOut(data: unknown): boolean {
   );
 }
 
-function assertAdapterCapabilities(adapter: AgentAdapter, definition: HarnessDefinition): void {
-  const capabilities = adapter.capabilities() as unknown as Readonly<Record<string, boolean>>;
+function assertAdapterCapabilities(
+  adapter: AgentAdapter,
+  definition: HarnessDefinition,
+): void {
+  const capabilities = adapter.capabilities() as unknown as Readonly<
+    Record<string, boolean>
+  >;
   const missing = definition.roles.flatMap((role) =>
     role.requiredCapabilities
       .filter((capability) => capabilities[capability] !== true)

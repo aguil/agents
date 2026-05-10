@@ -81,7 +81,10 @@ export function nowIso(date: Date = new Date()): string {
 }
 
 export function createRunId(prefix = "run", date: Date = new Date()): string {
-  const timestamp = date.toISOString().replaceAll(/[-:.TZ]/g, "").slice(0, 14);
+  const timestamp = date
+    .toISOString()
+    .replaceAll(/[-:.TZ]/g, "")
+    .slice(0, 14);
   const suffix = crypto.randomUUID().slice(0, 8);
   return `${prefix}-${timestamp}-${suffix}`;
 }
@@ -103,13 +106,19 @@ export async function ensureDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
 }
 
-export async function writeTextFile(path: string, content: string): Promise<string> {
+export async function writeTextFile(
+  path: string,
+  content: string,
+): Promise<string> {
   await ensureDirectory(dirname(path));
   await writeFile(path, content, "utf8");
   return path;
 }
 
-export async function writeJsonFile(path: string, value: unknown): Promise<string> {
+export async function writeJsonFile(
+  path: string,
+  value: unknown,
+): Promise<string> {
   return writeTextFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
@@ -117,7 +126,9 @@ export async function readJsonFile<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
 }
 
-export async function resolveGitAwarePath(workspacePath: string): Promise<GitAwarePathResult> {
+export async function resolveGitAwarePath(
+  workspacePath: string,
+): Promise<GitAwarePathResult> {
   const resolvedWorkspacePath = resolve(workspacePath);
   const gitPath = join(resolvedWorkspacePath, ".git");
   try {
@@ -136,9 +147,10 @@ export async function resolveGitAwarePath(workspacePath: string): Promise<GitAwa
   try {
     pointer = (await readFile(jjRepoPointerPath, "utf8")).trim();
   } catch (error) {
-    const code = typeof error === "object" && error !== null && "code" in error
-      ? String((error as { readonly code?: unknown }).code)
-      : undefined;
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { readonly code?: unknown }).code)
+        : undefined;
     if (code === "ENOENT") {
       return {
         gitAwarePath: resolvedWorkspacePath,

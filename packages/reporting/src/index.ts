@@ -4,7 +4,9 @@ export interface ReportRenderer {
   render(result: HarnessRunResult): string | Promise<string>;
 }
 
-export function actionableFindings(findings: readonly Finding[]): readonly Finding[] {
+export function actionableFindings(
+  findings: readonly Finding[],
+): readonly Finding[] {
   return findings.filter(isActionableFinding);
 }
 
@@ -15,7 +17,9 @@ export function isActionableFinding(finding: Finding): boolean {
   return hasSubstantiveValidationDetails(finding.validation.details);
 }
 
-export function dedupeFindings(findings: readonly Finding[]): readonly Finding[] {
+export function dedupeFindings(
+  findings: readonly Finding[],
+): readonly Finding[] {
   const seen = new Set<string>();
   const deduped: Finding[] = [];
 
@@ -33,17 +37,31 @@ export function dedupeFindings(findings: readonly Finding[]): readonly Finding[]
 
 export function findingFingerprint(finding: Finding): string {
   if (finding.file !== undefined && finding.line !== undefined) {
-    const semantic = semanticSignature([finding.description, finding.evidence].join(" "));
-    return [finding.sourceRole, `${finding.file}:${finding.line}`, semantic].join("|");
+    const semantic = semanticSignature(
+      [finding.description, finding.evidence].join(" "),
+    );
+    return [
+      finding.sourceRole,
+      `${finding.file}:${finding.line}`,
+      semantic,
+    ].join("|");
   }
   if (finding.file !== undefined) {
-    return [finding.sourceRole, finding.file, semanticSignature(finding.title)].join("|");
+    return [
+      finding.sourceRole,
+      finding.file,
+      semanticSignature(finding.title),
+    ].join("|");
   }
-  const semantic = semanticSignature([finding.title, finding.description, finding.evidence].join(" "));
+  const semantic = semanticSignature(
+    [finding.title, finding.description, finding.evidence].join(" "),
+  );
   return [finding.sourceRole, semantic].join("|");
 }
 
-export function statusForFindings(findings: readonly Finding[]): HarnessRunResult["status"] {
+export function statusForFindings(
+  findings: readonly Finding[],
+): HarnessRunResult["status"] {
   if (findings.some((finding) => finding.severity === "critical")) {
     return "failed";
   }
@@ -61,9 +79,10 @@ export class MarkdownReportRenderer implements ReportRenderer {
 
 export function renderMarkdownReport(result: HarnessRunResult): string {
   const findings = sortFindings(result.findings);
-  const summary = findings.length === 0
-    ? "No verified critical or warning findings."
-    : `${findings.length} verified finding${findings.length === 1 ? "" : "s"}.`;
+  const summary =
+    findings.length === 0
+      ? "No verified critical or warning findings."
+      : `${findings.length} verified finding${findings.length === 1 ? "" : "s"}.`;
 
   const sections = findings.map((finding, index) => {
     const location = finding.file
@@ -94,7 +113,7 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
     `Summary: ${summary}`,
     "",
     ...executionNotes,
-    ...executionNotes.length > 0 ? [""] : [],
+    ...(executionNotes.length > 0 ? [""] : []),
     ...sections,
     "",
   ].join("\n");

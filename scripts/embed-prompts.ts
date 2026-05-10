@@ -4,7 +4,12 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const promptsDir = join("harnesses", "code-review", "prompts");
-const outputPath = join("harnesses", "code-review", "src", "embedded-prompts.ts");
+const outputPath = join(
+  "harnesses",
+  "code-review",
+  "src",
+  "embedded-prompts.ts",
+);
 
 function toRoleId(fileName: string): string {
   return fileName.replace(/\.md$/i, "");
@@ -32,7 +37,9 @@ async function main(): Promise<void> {
   ].join("\n")}`;
 
   await writeFile(outputPath, generated, "utf8");
-  process.stdout.write(`Embedded ${promptFiles.length} prompts into ${outputPath}\n`);
+  process.stdout.write(
+    `Embedded ${promptFiles.length} prompts into ${outputPath}\n`,
+  );
 }
 
 await main();
