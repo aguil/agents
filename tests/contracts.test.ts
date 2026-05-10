@@ -143,9 +143,22 @@ test("parseCodeReviewArgv binds string options when values look like flag tokens
   expect(presetFollowing.presetName).toBe("ci");
   expect(presetFollowing.options.adapter).toBe("opencode");
 
+  const presetEquals = parseCodeReviewArgv(["--preset=qa", "--adapter", "fake"]);
+  expect(presetEquals.presetName).toBe("qa");
+
   const adapterAfterPreset = parseCodeReviewArgv(["--preset", "ci", "--adapter", "fake"]);
   expect(adapterAfterPreset.presetName).toBe("ci");
   expect(adapterAfterPreset.options.adapter).toBe("fake");
+
+  const equalsAdapter = parseCodeReviewArgv(["--adapter=opencode"]);
+  expect(equalsAdapter.options.adapter).toBe("opencode");
+
+  const cursorArgsEscaped = parseCodeReviewArgv(["--cursor-args=--strict,--trust,--print"]);
+  expect(cursorArgsEscaped.options.cursorArgs).toBe("--strict,--trust,--print");
+  expect(cursorArgsEscaped.explicitKeys.has("cursorArgs")).toBe(true);
+
+  const claudeArgsEscaped = parseCodeReviewArgv(["--claude-args=--dangerously-skip-permissions"]);
+  expect(claudeArgsEscaped.options.claudeArgs).toBe("--dangerously-skip-permissions");
 });
 
 test("resolveEffectivePostOnly ignores merged postOnly for replay subcommand", () => {

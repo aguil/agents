@@ -101,6 +101,23 @@ export function parseCodeReviewArgv(argv: readonly string[]): ParsedCodeReviewAr
     if (!arg.startsWith("--")) {
       continue;
     }
+
+    const equalsOption = /^--([^=]+)=(.*)$/.exec(arg);
+    if (equalsOption !== null) {
+      const nameEq = equalsOption[1];
+      const valueEq = equalsOption[2];
+      const stringKeyEq = STRING_OPTION_TO_KEY[nameEq];
+      if (stringKeyEq !== undefined) {
+        stringOptions[nameEq] = valueEq;
+        explicitKeys.add(stringKeyEq);
+        continue;
+      }
+      if (nameEq === "preset") {
+        presetName = valueEq.trim().length === 0 ? undefined : valueEq.trim();
+        continue;
+      }
+    }
+
     const optName = arg.slice(2);
     const next = argv[index + 1];
 
