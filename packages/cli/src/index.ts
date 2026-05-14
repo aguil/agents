@@ -34,10 +34,25 @@ import {
   peelCodeReviewSubcommand,
   resolveEffectivePostOnly,
 } from "./parse-code-review-argv";
+import {
+  renderTriageHelp,
+  resolveTriageHelp,
+  triageHelpStderrExtras,
+} from "./triage-help";
+import { runTriageCli } from "./triage-main";
 
 export async function main(
   argv: readonly string[] = Bun.argv.slice(2),
 ): Promise<number> {
+  const triageHelpReq = resolveTriageHelp(argv);
+  if (triageHelpReq !== null) {
+    console.log(renderTriageHelp(triageHelpReq));
+    for (const line of triageHelpStderrExtras(triageHelpReq)) {
+      console.error(line);
+    }
+    return 0;
+  }
+
   const helpReq = resolveCodeReviewHelp(argv);
   if (helpReq !== null) {
     console.log(renderCodeReviewHelp(helpReq));
@@ -45,6 +60,10 @@ export async function main(
       console.error(line);
     }
     return 0;
+  }
+
+  if (argv[0] === "triage") {
+    return await runTriageCli(argv);
   }
 
   if (argv[0] === "code-review") {

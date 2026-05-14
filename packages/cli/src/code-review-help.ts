@@ -166,6 +166,8 @@ Getting help (context-specific option lists):
   agents code-review replay --help         Replay synopsis and shortcuts
   agents code-review post --help           Publish from stored result.json
 
+  agents triage --help                     Normalize triage queues from producer output
+
 Deprecated spelling (shows help anyway):
 
   agents run code-review [--help]
@@ -174,7 +176,8 @@ Commands:
 
   code-review [options]                 Run reviewers and write artifacts
   code-review replay [path] [options]   Replay with optional bundle path (-> --context-bundle)
-  code-review post [options]            Publish pending PR review from result.json`;
+  code-review post [options]            Publish pending PR review from result.json
+  triage [options]                       Build triage-queue files (--from producer; code-review today)`;
 }
 
 function legacyRunReminderLine(include: boolean): string {
