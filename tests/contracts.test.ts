@@ -1118,7 +1118,7 @@ test("discovers latest run result path", async () => {
   }
 });
 
-test("discoverLatestResultPath merges dry-run newer than runs for post", async () => {
+test("discoverLatestResultPath ignores dry-run when selecting post artifact", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "agents-post-disc-over-"));
   try {
     const runsRoot = join(workspace, ".review-agent", "runs");
@@ -1142,7 +1142,7 @@ test("discoverLatestResultPath merges dry-run newer than runs for post", async (
 
     const discovered = await discoverLatestResultPath(workspace);
     expect(discovered).toBe(
-      join(dryRoot, "code-review-20260503120000-zzzz", "result.json"),
+      join(runsRoot, "code-review-20260501120000-aaaa", "result.json"),
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });

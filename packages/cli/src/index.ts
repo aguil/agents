@@ -833,10 +833,10 @@ async function runPostOnly(options: CliOptions): Promise<number> {
 export async function discoverLatestResultPath(
   workspacePath: string,
 ): Promise<string | undefined> {
-  const { discoverLatestCodeReviewResultPath } = await import(
+  const { discoverLatestRunsCodeReviewResultPath } = await import(
     "@aguil/agents-triage"
   );
-  return discoverLatestCodeReviewResultPath(workspacePath);
+  return discoverLatestRunsCodeReviewResultPath(workspacePath);
 }
 
 export async function loadStoredReviewResult(

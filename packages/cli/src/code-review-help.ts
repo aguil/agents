@@ -249,7 +249,7 @@ Post-only publishes from result.json — adapter/model/consensus/context collect
 
 Posting flags:
 
-  --result <path>        Stored result JSON (omit to auto-discover latest under <workspace>/.review-agent/dry-run or …/runs/)
+  --result <path>        Stored result JSON (omit to auto-discover latest under <workspace>/.review-agent/runs/ only; dry-run artifacts are never posted)
   --pr <number>          Explicit posting/metadata PR when inferred values are insufficient
   --post-pr <number>     Alternate posting PR when differing from inferred/--pr pairing (rare)
   --pending-review       Accepted but ignored (post implies pending review semantics)
