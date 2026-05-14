@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { encode } from "@toon-format/toon";
+import { assertResolvedPathInsideWorkspace } from "./safe-path";
 import type { TriageEnvelopeV1 } from "./types";
 
 export type TriageSerializationFormat = "json" | "toon" | "both";
@@ -38,6 +39,10 @@ export async function writeTriageOutputs(options: {
   }
 
   await mkdir(options.outputDir, { recursive: true });
+  await assertResolvedPathInsideWorkspace(
+    options.envelope.workspacePath,
+    options.outputDir,
+  );
 
   const writes: Promise<void>[] = [];
   if (options.format === "json" || options.format === "both") {
