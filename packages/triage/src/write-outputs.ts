@@ -1,7 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { encode } from "@toon-format/toon";
-import { assertResolvedPathInsideWorkspace } from "./safe-path";
+import {
+  assertOutputDirectoryWillResolveInsideWorkspace,
+  assertResolvedPathInsideWorkspace,
+} from "./safe-path";
 import type { TriageEnvelopeV1 } from "./types";
 
 export type TriageSerializationFormat = "json" | "toon" | "both";
@@ -38,21 +41,28 @@ export async function writeTriageOutputs(options: {
     return;
   }
 
-  await mkdir(options.outputDir, { recursive: true });
-  await assertResolvedPathInsideWorkspace(
-    options.envelope.workspacePath,
-    options.outputDir,
+  const workspacePath = options.envelope.workspacePath;
+  const outputAbs = resolve(options.outputDir);
+  await assertOutputDirectoryWillResolveInsideWorkspace(
+    workspacePath,
+    outputAbs,
+  );
+  await mkdir(outputAbs, { recursive: true });
+
+  const { candidateReal } = await assertResolvedPathInsideWorkspace(
+    workspacePath,
+    outputAbs,
   );
 
   const writes: Promise<void>[] = [];
   if (options.format === "json" || options.format === "both") {
-    const jsonPath = join(options.outputDir, TRIAGE_JSON);
+    const jsonPath = join(candidateReal, TRIAGE_JSON);
     writes.push(
       writeFile(jsonPath, `${JSON.stringify(plain, null, 2)}\n`, "utf8"),
     );
   }
   if (options.format === "toon" || options.format === "both") {
-    const toonPath = join(options.outputDir, TRIAGE_TOON);
+    const toonPath = join(candidateReal, TRIAGE_TOON);
     writes.push(writeFile(toonPath, `${encode(plain)}\n`, "utf8"));
   }
   await Promise.all(writes);
