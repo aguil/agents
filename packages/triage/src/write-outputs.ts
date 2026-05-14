@@ -13,12 +13,6 @@ export type TriageSerializationFormat = "json" | "toon" | "both";
 const TRIAGE_JSON = "triage-queue.json";
 const TRIAGE_TOON = "triage-queue.toon";
 
-function toLosslessPlainObject(
-  envelope: TriageEnvelopeV1,
-): Record<string, unknown> {
-  return structuredClone(envelope) as unknown as Record<string, unknown>;
-}
-
 async function writeUtf8FileNoFollow(
   path: string,
   body: string,
@@ -44,13 +38,12 @@ export async function writeTriageOutputs(options: {
   readonly stdout?: boolean;
   readonly stdoutFormat?: "json" | "toon";
 }): Promise<void> {
-  const plain = toLosslessPlainObject(options.envelope);
-
   if (options.stdout === true) {
     const sf = options.stdoutFormat;
     if (sf !== "json" && sf !== "toon") {
       throw new Error("--stdout requires --format json or --format toon.");
     }
+    const plain = options.envelope as unknown as Record<string, unknown>;
     if (sf === "json") {
       process.stdout.write(`${JSON.stringify(plain, null, 2)}\n`);
       return;
@@ -71,6 +64,8 @@ export async function writeTriageOutputs(options: {
     workspacePath,
     outputAbs,
   );
+
+  const plain = options.envelope as unknown as Record<string, unknown>;
 
   const writes: Promise<void>[] = [];
   if (options.format === "json" || options.format === "both") {
