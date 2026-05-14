@@ -1,4 +1,4 @@
-import { access, readdir } from "node:fs/promises";
+import { access, lstat, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 /**
@@ -70,6 +70,16 @@ async function appendCodeReviewRunDirs(
     )
     .filter((entry) => entry.startsWith("code-review-"));
   for (const name of names) {
-    acc.push(join(parent, name));
+    const dirPath = join(parent, name);
+    try {
+      const st = await lstat(dirPath);
+      if (st.isSymbolicLink()) {
+        continue;
+      }
+      if (!st.isDirectory()) {
+        continue;
+      }
+      acc.push(dirPath);
+    } catch {}
   }
 }
