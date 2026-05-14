@@ -1,7 +1,7 @@
-import { constants as fsc } from "node:fs";
-import { mkdir, open } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { encode } from "@toon-format/toon";
+import { writeUtf8FileNoFollow } from "./no-follow-io";
 import {
   assertOutputDirectoryWillResolveInsideWorkspace,
   assertResolvedPathInsideWorkspace,
@@ -12,23 +12,6 @@ export type TriageSerializationFormat = "json" | "toon" | "both";
 
 const TRIAGE_JSON = "triage-queue.json";
 const TRIAGE_TOON = "triage-queue.toon";
-
-async function writeUtf8FileNoFollow(
-  path: string,
-  body: string,
-): Promise<void> {
-  const nofollow = fsc.O_NOFOLLOW ?? 0;
-  const fh = await open(
-    path,
-    fsc.O_WRONLY | fsc.O_CREAT | fsc.O_TRUNC | nofollow,
-    0o644,
-  );
-  try {
-    await fh.writeFile(body, "utf8");
-  } finally {
-    await fh.close().catch(() => {});
-  }
-}
 
 /** Write serialized triage envelopes to disk or stdout. */
 export async function writeTriageOutputs(options: {
@@ -60,10 +43,19 @@ export async function writeTriageOutputs(options: {
   );
   await mkdir(outputAbs, { recursive: true });
 
+  const firstResolved = await assertResolvedPathInsideWorkspace(
+    workspacePath,
+    outputAbs,
+  );
   const { candidateReal } = await assertResolvedPathInsideWorkspace(
     workspacePath,
     outputAbs,
   );
+  if (firstResolved.candidateReal !== candidateReal) {
+    throw new Error(
+      "Output directory resolution changed during triage write setup.",
+    );
+  }
 
   const plain = options.envelope as unknown as Record<string, unknown>;
 

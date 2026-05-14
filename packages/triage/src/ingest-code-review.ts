@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises";
 import { normalize, resolve } from "node:path";
 import type { Finding, HarnessRunResult } from "@aguil/agents-core";
 import { nowIso } from "@aguil/agents-core";
 import { discoverLatestCodeReviewResultPath } from "./discover-code-review-result";
+import { readUtf8FileNoFollow } from "./no-follow-io";
 import { computeOutputSlug } from "./output-slug";
 import { assertResolvedPathInsideWorkspace } from "./safe-path";
 import { sortReviewFindings } from "./sort-items";
@@ -79,11 +79,20 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
   readonly workspacePath: string;
   readonly resultAbsolutePath: string;
 }): Promise<TriageEnvelopeV1> {
+  const firstResolved = await assertResolvedPathInsideWorkspace(
+    options.workspacePath,
+    options.resultAbsolutePath,
+  );
   const { candidateReal } = await assertResolvedPathInsideWorkspace(
     options.workspacePath,
     options.resultAbsolutePath,
   );
-  const raw = await readFile(candidateReal, "utf8");
+  if (firstResolved.candidateReal !== candidateReal) {
+    throw new Error(
+      "Code-review result path resolution changed during triage ingest.",
+    );
+  }
+  const raw = await readUtf8FileNoFollow(candidateReal);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
