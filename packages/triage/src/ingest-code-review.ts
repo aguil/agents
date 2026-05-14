@@ -108,6 +108,7 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
   if (reResolvedAgain !== reResolved) {
     throw new Error("Code-review result path moved immediately before read.");
   }
+  // ADR 0002: pathname read after validation; openat-style hardening deferred (accepted risk).
   const raw = await readUtf8FileNoFollow(reResolvedAgain);
   let parsed: unknown;
   try {

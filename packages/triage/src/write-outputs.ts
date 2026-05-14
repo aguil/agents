@@ -72,6 +72,7 @@ export async function writeTriageOutputs(options: {
     throw new Error("Output directory moved immediately before write.");
   }
 
+  // ADR 0002: pathname writes after validation; openat-style hardening deferred (accepted risk).
   const plain = options.envelope as unknown as Record<string, unknown>;
 
   const writes: Promise<void>[] = [];
