@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Finding } from "@aguil/agents-core";
-import { discoverLatestCodeReviewResultPath } from "./discover-code-review-result";
+import {
+  discoverLatestCodeReviewResultPath,
+  discoverLatestRunsCodeReviewResultPath,
+} from "./discover-code-review-result";
 import { canonicalKeyForCodeReviewArtifact } from "./ingest-code-review";
 import { computeOutputSlug, fingerprint12 } from "./output-slug";
 import { assertOutputDirectoryWillResolveInsideWorkspace } from "./safe-path";
@@ -73,6 +76,32 @@ test("discoverLatestCodeReviewResultPath merges dry-run + runs newest id", async
   );
 });
 
+test("discoverLatestRunsCodeReviewResultPath only considers runs/", async () => {
+  const base = await mkdtemp(join(tmpdir(), "agents-triage-runs-only-"));
+  const ws = join(base, "ws");
+  await mkdir(join(ws, ".review-agent", "runs", "code-review-BBB"), {
+    recursive: true,
+  });
+  await mkdir(join(ws, ".review-agent", "dry-run", "code-review-ZZZ"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(ws, ".review-agent", "runs", "code-review-BBB", "result.json"),
+    "{}",
+    "utf8",
+  );
+  await writeFile(
+    join(ws, ".review-agent", "dry-run", "code-review-ZZZ", "result.json"),
+    "{}",
+    "utf8",
+  );
+  const p = await discoverLatestRunsCodeReviewResultPath(ws);
+  expect(
+    typeof p === "string" && p.includes(join(".review-agent", "runs")),
+  ).toBe(true);
+  expect(typeof p === "string" && p.includes("code-review-BBB")).toBe(true);
+});
+
 test("assertOutputDirectoryWillResolveInsideWorkspace rejects escape before mkdir", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-safe-"));
   await mkdir(join(base, "ws", "nested"), { recursive: true });
@@ -82,6 +111,23 @@ test("assertOutputDirectoryWillResolveInsideWorkspace rejects escape before mkdi
       join(base, "escape-target"),
     ),
   ).rejects.toThrow(/outside workspace/u);
+});
+
+test("assertOutputDirectoryWillResolveInsideWorkspace rejects broken symlink ancestor", async () => {
+  const base = await mkdtemp(join(tmpdir(), "agents-triage-broken-symlink-"));
+  const ws = join(base, "ws");
+  await mkdir(join(ws, "nested"), { recursive: true });
+  const danglingTarget = join(
+    tmpdir(),
+    `agents-dangle-${Math.random().toString(36).slice(2)}`,
+  );
+  await symlink(danglingTarget, join(ws, "nested", "broken"), "dir");
+  await expect(
+    assertOutputDirectoryWillResolveInsideWorkspace(
+      ws,
+      join(ws, "nested", "broken", "out", "deep"),
+    ),
+  ).rejects.toThrow(/Broken symlink/u);
 });
 
 test("sortReviewFindings orders by severity then fingerprint then id", () => {

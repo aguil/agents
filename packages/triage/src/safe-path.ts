@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { dirname, normalize, resolve, sep } from "node:path";
 
 /** True when `targetReal` is exactly `dirReal` or a path under it (after realpath resolution). */
@@ -54,6 +54,10 @@ function isEnoent(e: unknown): boolean {
  * Ensure an output directory path will resolve inside the workspace before it is
  * created. Walks up until an existing directory is found, then applies the same
  * realpath prefix check as {@link assertResolvedPathInsideWorkspace}.
+ *
+ * Uses `lstat` so a **dangling symlink** in the ancestor chain is rejected
+ * instead of being skipped like a missing directory (which could otherwise
+ * anchor the check too high and miss an escape).
  */
 export async function assertOutputDirectoryWillResolveInsideWorkspace(
   workspacePath: string,
@@ -64,17 +68,35 @@ export async function assertOutputDirectoryWillResolveInsideWorkspace(
 
   for (;;) {
     try {
-      const st = await stat(candidate);
-      if (!st.isDirectory()) {
-        throw new Error(`Output path is not a directory: ${candidate}`);
+      const st = await lstat(candidate);
+      if (st.isSymbolicLink()) {
+        let candidateReal: string;
+        try {
+          candidateReal = await realpath(candidate);
+        } catch {
+          throw new Error(`Broken symlink in output path: ${candidate}`);
+        }
+        const followed = await stat(candidate);
+        if (!followed.isDirectory()) {
+          throw new Error(`Output path is not a directory: ${candidate}`);
+        }
+        if (!pathIsInsideDirectory(workspaceReal, candidateReal)) {
+          throw new Error(
+            `Path resolves outside workspace: ${outputDirAbsolute}`,
+          );
+        }
+        return;
       }
-      const candidateReal = await realpath(candidate);
-      if (!pathIsInsideDirectory(workspaceReal, candidateReal)) {
-        throw new Error(
-          `Path resolves outside workspace: ${outputDirAbsolute}`,
-        );
+      if (st.isDirectory()) {
+        const candidateReal = await realpath(candidate);
+        if (!pathIsInsideDirectory(workspaceReal, candidateReal)) {
+          throw new Error(
+            `Path resolves outside workspace: ${outputDirAbsolute}`,
+          );
+        }
+        return;
       }
-      return;
+      throw new Error(`Output path is not a directory: ${candidate}`);
     } catch (e: unknown) {
       if (isEnoent(e)) {
         const parent = dirname(candidate);
