@@ -1,24 +1,30 @@
 import type { Finding } from "@aguil/agents-core";
 import { findingFingerprint } from "@aguil/agents-reporting";
 
-function compareFinding(a: Finding, b: Finding): number {
-  if (a.severity !== b.severity) {
-    if (a.severity === "critical") {
+function compareDecorated(
+  a: { readonly f: Finding; readonly fp: string },
+  b: { readonly f: Finding; readonly fp: string },
+): number {
+  if (a.f.severity !== b.f.severity) {
+    if (a.f.severity === "critical") {
       return -1;
     }
     return 1;
   }
-  const fa = findingFingerprint(a);
-  const fb = findingFingerprint(b);
-  if (fa !== fb) {
-    return fa.localeCompare(fb);
+  if (a.fp !== b.fp) {
+    return a.fp.localeCompare(b.fp);
   }
-  return a.id.localeCompare(b.id);
+  return a.f.id.localeCompare(b.f.id);
 }
 
 /** Deterministic reviewer finding order mapped 1:1 to triage rows. */
 export function sortReviewFindings(
   findings: readonly Finding[],
 ): readonly Finding[] {
-  return [...findings].sort(compareFinding);
+  const decorated = findings.map((f) => ({
+    f,
+    fp: findingFingerprint(f),
+  }));
+  decorated.sort(compareDecorated);
+  return decorated.map((d) => d.f);
 }
