@@ -4,6 +4,7 @@ import type { Finding, HarnessRunResult } from "@aguil/agents-core";
 import { nowIso } from "@aguil/agents-core";
 import { discoverLatestCodeReviewResultPath } from "./discover-code-review-result";
 import { computeOutputSlug } from "./output-slug";
+import { assertResolvedPathInsideWorkspace } from "./safe-path";
 import { sortReviewFindings } from "./sort-items";
 import type { TriageEnvelopeV1, TriageItemAnchor, TriageItemV1 } from "./types";
 import { TRIAGE_ENVELOPE_SCHEMA_ID } from "./types";
@@ -78,13 +79,17 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
   readonly workspacePath: string;
   readonly resultAbsolutePath: string;
 }): Promise<TriageEnvelopeV1> {
-  const raw = await readFile(options.resultAbsolutePath, "utf8");
+  const { candidateReal } = await assertResolvedPathInsideWorkspace(
+    options.workspacePath,
+    options.resultAbsolutePath,
+  );
+  const raw = await readFile(candidateReal, "utf8");
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch (e) {
     throw new Error(
-      `Invalid JSON at ${options.resultAbsolutePath}: ${e instanceof Error ? e.message : String(e)}`,
+      `Invalid JSON at ${candidateReal}: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
   if (
@@ -93,14 +98,12 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
     !Array.isArray((parsed as { findings?: unknown }).findings)
   ) {
     throw new Error(
-      `Invalid result envelope at ${options.resultAbsolutePath}.`,
+      `Invalid result envelope at ${candidateReal}.`,
     );
   }
   const doc = parsed as StoredHarnessResult;
   const sorted = sortReviewFindings(doc.findings);
-  const canonicalKey = canonicalKeyForCodeReviewArtifact(
-    options.resultAbsolutePath,
-  );
+  const canonicalKey = normalize(candidateReal);
   const outputSlug = computeOutputSlug(CODE_REVIEW_FROM, canonicalKey);
 
   const metadata =
@@ -118,7 +121,7 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
     outputSlug,
     upstream: {
       producer: CODE_REVIEW_FROM,
-      resultPath: options.resultAbsolutePath,
+      resultPath: candidateReal,
       upstreamRunId: doc.runId,
       ...(metadata === undefined ? {} : { metadataSubset: metadata }),
     },
