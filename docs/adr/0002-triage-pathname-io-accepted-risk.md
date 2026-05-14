@@ -21,4 +21,4 @@ For this monorepo’s **operator-controlled review workspaces** (local dev, CI s
 
 ## Related
 
-- Pointer-based latest `result.json` discovery (`harnesses/code-review` + `discover-code-review-result.ts`) reduces how often large `runs/` trees are scanned; the **fallback** full `lstat` pass when the pointer is missing or stale remains **O(n)** by design so mtime ordering stays correct across run directories. That cost is also **accepted** where histories are large but operator-controlled; use `AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1` when forcing a rescan after manual tree edits.
+- Pointer-based latest `result.json` discovery (`harnesses/code-review` + `discover-code-review-result.ts`) writes `.code-review-latest-result` after each harness run; discovery **merges** that pointer with a concurrent scan of `code-review-*` directories so the returned path is always the mtime+tie winner. Set `AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1` to ignore the pointer when repairing a corrupted tree. The scan is **O(n)** in the number of stored runs when run directories exist.

@@ -13,11 +13,9 @@ function discoverFullScanEnv(): boolean {
  * Latest result.json under ".review-agent/runs/code-review-*" only. Picks the
  * newest accessible result.json by file mtime (descending), then
  * code-review-* basename lexicographic descending as a stable tie-breaker.
- * After a harness run, ".review-agent/runs/.code-review-latest-result" holds an
- * absolute path so this call is usually O(1). Set
- * AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1 to ignore the pointer (for example
- * after manual edits under runs/). Without a valid pointer, each run's
- * result.json is lstat'd concurrently.
+ * When ".code-review-latest-result" exists, its path is merged with a scan of
+ * run directories so a stale pointer cannot beat a newer on-disk run.
+ * Set AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1 to ignore the pointer entirely.
  * Used for agents code-review post auto-discovery so disposable dry-run
  * artifacts are never selected for GitHub publish.
  */
@@ -25,24 +23,15 @@ export async function discoverLatestRunsCodeReviewResultPath(
   workspacePath: string,
 ): Promise<string | undefined> {
   const runsRoot = join(workspacePath, ".review-agent", "runs");
-  if (!discoverFullScanEnv()) {
-    const fromPointer = await tryReadLatestPointerScored(runsRoot);
-    if (fromPointer !== undefined) {
-      return fromPointer.path;
-    }
-  }
-  const dirs: string[] = [];
-  await appendCodeReviewRunDirs(runsRoot, dirs);
-  return (await pickLatestScoredFromDirs(dirs))?.path;
+  return (await bestScoredMergingPointer(runsRoot))?.path;
 }
 
 /**
  * Latest result.json among ".review-agent/dry-run" and ".review-agent/runs"
  * code-review-* trees. Selection uses file mtime (descending), then basename
  * lexicographic descending as a stable tie-breaker so same-second run ids do
- * not pick arbitrarily by random suffix alone. Uses per-tree
- * ".code-review-latest-result" pointers when present (see
- * discoverLatestRunsCodeReviewResultPath); otherwise scans that tree.
+ * not pick arbitrarily by random suffix alone. Per-tree pointers are merged
+ * with directory scans (see discoverLatestRunsCodeReviewResultPath).
  */
 export async function discoverLatestCodeReviewResultPath(
   workspacePath: string,
@@ -51,8 +40,8 @@ export async function discoverLatestCodeReviewResultPath(
   const dryRunRoot = join(reviewAgent, "dry-run");
   const runsRoot = join(reviewAgent, "runs");
 
-  const scoredDry = await bestScoredInCodeReviewTree(dryRunRoot);
-  const scoredRuns = await bestScoredInCodeReviewTree(runsRoot);
+  const scoredDry = await bestScoredMergingPointer(dryRunRoot);
+  const scoredRuns = await bestScoredMergingPointer(runsRoot);
   return pickBetterOf(scoredDry, scoredRuns)?.path;
 }
 
@@ -82,18 +71,23 @@ function pickBetterOf(
   return compareScored(a, b) < 0 ? a : b;
 }
 
-async function bestScoredInCodeReviewTree(
+async function bestScoredMergingPointer(
   root: string,
 ): Promise<ScoredResult | undefined> {
-  if (!discoverFullScanEnv()) {
-    const fromPointer = await tryReadLatestPointerScored(root);
-    if (fromPointer !== undefined) {
-      return fromPointer;
-    }
-  }
   const dirs: string[] = [];
   await appendCodeReviewRunDirs(root, dirs);
-  return await pickLatestScoredFromDirs(dirs);
+  const scoredDirs = await pickLatestScoredFromDirs(dirs);
+  if (discoverFullScanEnv()) {
+    return scoredDirs;
+  }
+  const fromPointer = await tryReadLatestPointerScored(root);
+  if (fromPointer === undefined) {
+    return scoredDirs;
+  }
+  if (scoredDirs === undefined) {
+    return fromPointer;
+  }
+  return pickBetterOf(fromPointer, scoredDirs);
 }
 
 async function tryReadLatestPointerScored(

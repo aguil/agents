@@ -96,7 +96,7 @@ test("discoverLatestRunsCodeReviewResultPath prefers newer mtime over lex tie-br
   ).toBe(true);
 });
 
-test("discoverLatestRunsCodeReviewResultPath trusts .code-review-latest-result pointer", async () => {
+test("discoverLatestRunsCodeReviewResultPath agrees with valid pointer when sole run", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-pointer-"));
   const ws = join(base, "ws");
   const runsRoot = join(ws, ".review-agent", "runs");
@@ -111,6 +111,29 @@ test("discoverLatestRunsCodeReviewResultPath trusts .code-review-latest-result p
   );
   const p = await discoverLatestRunsCodeReviewResultPath(ws);
   expect(p).toBe(resultPath);
+});
+
+test("discoverLatestRunsCodeReviewResultPath prefers newer run over stale pointer", async () => {
+  const base = await mkdtemp(join(tmpdir(), "agents-triage-stale-pointer-"));
+  const ws = join(base, "ws");
+  const runsRoot = join(ws, ".review-agent", "runs");
+  const dirOld = join(runsRoot, "code-review-20990101000000-old");
+  const dirNew = join(runsRoot, "code-review-20990102000000-new");
+  await mkdir(dirOld, { recursive: true });
+  await mkdir(dirNew, { recursive: true });
+  const oldPath = join(dirOld, "result.json");
+  const newPath = join(dirNew, "result.json");
+  await writeFile(oldPath, "{}", "utf8");
+  await writeFile(newPath, "{}", "utf8");
+  await utimes(oldPath, new Date(2020, 0, 1), new Date(2020, 0, 1));
+  await utimes(newPath, new Date(2040, 0, 1), new Date(2040, 0, 1));
+  await writeFile(
+    join(runsRoot, ".code-review-latest-result"),
+    `${oldPath}\n`,
+    "utf8",
+  );
+  const p = await discoverLatestRunsCodeReviewResultPath(ws);
+  expect(p).toBe(newPath);
 });
 
 test("discoverLatestRunsCodeReviewResultPath ignores pointer when AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1", async () => {
