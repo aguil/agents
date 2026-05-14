@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -54,6 +54,9 @@ import {
 
 const sourceDir = dirname(fileURLToPath(import.meta.url));
 const promptDir = resolve(sourceDir, "../prompts");
+
+/** Written next to `code-review-*` run dirs for O(1) discovery (see triage discover). */
+const CODE_REVIEW_LATEST_RESULT_POINTER = ".code-review-latest-result";
 
 export interface CodeReviewRunOptions {
   readonly workspacePath?: string;
@@ -125,6 +128,31 @@ export const codeReviewHarnessDefinition: HarnessDefinition = {
     },
   ],
 };
+
+async function writeLatestCodeReviewDiscoveryPointer(options: {
+  readonly workspacePath: string;
+  readonly scratchpadRoot: string;
+  readonly resultPath: string;
+}): Promise<void> {
+  const ws = resolve(options.workspacePath);
+  const root = resolve(options.scratchpadRoot);
+  const expectedRuns = resolve(join(ws, ".review-agent", "runs"));
+  const expectedDry = resolve(join(ws, ".review-agent", "dry-run"));
+  let pointerParent: string | undefined;
+  if (root === expectedRuns) {
+    pointerParent = expectedRuns;
+  } else if (root === expectedDry) {
+    pointerParent = expectedDry;
+  }
+  if (pointerParent === undefined) {
+    return;
+  }
+  const pointerPath = join(pointerParent, CODE_REVIEW_LATEST_RESULT_POINTER);
+  const line = `${resolve(options.resultPath)}\n`;
+  const tmp = `${pointerPath}.${process.pid}.tmp`;
+  await writeFile(tmp, line, "utf8");
+  await rename(tmp, pointerPath);
+}
 
 export async function runCodeReview(
   options: CodeReviewRunOptions = {},
@@ -280,6 +308,11 @@ export async function runCodeReview(
     ...result,
     reportPath,
     contextBundlePath: writtenContext.jsonPath,
+  });
+  await writeLatestCodeReviewDiscoveryPointer({
+    workspacePath,
+    scratchpadRoot,
+    resultPath,
   });
 
   return {

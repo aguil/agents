@@ -96,6 +96,56 @@ test("discoverLatestRunsCodeReviewResultPath prefers newer mtime over lex tie-br
   ).toBe(true);
 });
 
+test("discoverLatestRunsCodeReviewResultPath trusts .code-review-latest-result pointer", async () => {
+  const base = await mkdtemp(join(tmpdir(), "agents-triage-pointer-"));
+  const ws = join(base, "ws");
+  const runsRoot = join(ws, ".review-agent", "runs");
+  const dirA = join(runsRoot, "code-review-20990101000000-a");
+  await mkdir(dirA, { recursive: true });
+  const resultPath = join(dirA, "result.json");
+  await writeFile(resultPath, "{}", "utf8");
+  await writeFile(
+    join(runsRoot, ".code-review-latest-result"),
+    `${resultPath}\n`,
+    "utf8",
+  );
+  const p = await discoverLatestRunsCodeReviewResultPath(ws);
+  expect(p).toBe(resultPath);
+});
+
+test("discoverLatestRunsCodeReviewResultPath ignores pointer when AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1", async () => {
+  const prev = process.env.AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN;
+  process.env.AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN = "1";
+  try {
+    const base = await mkdtemp(join(tmpdir(), "agents-triage-pointer-full-"));
+    const ws = join(base, "ws");
+    const runsRoot = join(ws, ".review-agent", "runs");
+    const dirLo = join(runsRoot, "code-review-20991201000000-lo");
+    const dirHi = join(runsRoot, "code-review-20991202000000-hi");
+    await mkdir(dirLo, { recursive: true });
+    await mkdir(dirHi, { recursive: true });
+    const loPath = join(dirLo, "result.json");
+    const hiPath = join(dirHi, "result.json");
+    await writeFile(loPath, "{}", "utf8");
+    await writeFile(hiPath, "{}", "utf8");
+    await utimes(loPath, new Date(2040, 0, 1), new Date(2040, 0, 1));
+    await utimes(hiPath, new Date(2020, 0, 1), new Date(2020, 0, 1));
+    await writeFile(
+      join(runsRoot, ".code-review-latest-result"),
+      `${hiPath}\n`,
+      "utf8",
+    );
+    const p = await discoverLatestRunsCodeReviewResultPath(ws);
+    expect(p).toBe(loPath);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN;
+    } else {
+      process.env.AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN = prev;
+    }
+  }
+});
+
 test("discoverLatestRunsCodeReviewResultPath only considers runs/", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-runs-only-"));
   const ws = join(base, "ws");
