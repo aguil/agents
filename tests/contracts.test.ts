@@ -60,6 +60,7 @@ import { serializeEvent } from "@aguil/agents-telemetry";
 import {
   canonicalKeyForCodeReviewArtifact,
   computeOutputSlug,
+  isToonEncodeAvailable,
 } from "@aguil/agents-triage";
 import {
   extractConfigDocument,
@@ -2758,7 +2759,27 @@ test("parseTriageArgv defaults format to both and requires --from", () => {
   expect(parsed.ok).toBe(true);
   if (parsed.ok) {
     expect(parsed.options.format).toBe("both");
+    expect(parsed.options.formatExplicit).toBe(false);
     expect(parsed.options.stdout).toBeUndefined();
+  }
+});
+
+test("parseTriageArgv sets formatExplicit when --format is passed", () => {
+  const implicit = parseTriageArgv(["--from", "code-review"]);
+  expect(implicit.ok).toBe(true);
+  if (implicit.ok) {
+    expect(implicit.options.formatExplicit).toBe(false);
+  }
+  const explicit = parseTriageArgv([
+    "--from",
+    "code-review",
+    "--format",
+    "json",
+  ]);
+  expect(explicit.ok).toBe(true);
+  if (explicit.ok) {
+    expect(explicit.options.formatExplicit).toBe(true);
+    expect(explicit.options.format).toBe("json");
   }
 });
 
@@ -2773,6 +2794,9 @@ test("parseTriageArgv rejects --stdout unless format is json or toon", () => {
     "json",
   ]);
   expect(okJson.ok).toBe(true);
+  if (okJson.ok) {
+    expect(okJson.options.formatExplicit).toBe(true);
+  }
 });
 
 test("runTriageCli accepts legacy leading ingest token", async () => {
@@ -2860,9 +2884,16 @@ test("runTriageCli writes triage-queue.json and triage-queue.toon under slug dir
     const envelope = JSON.parse(jsonRaw) as { outputSlug?: string };
     expect(envelope.outputSlug).toBe(slug);
     expect(jsonRaw.length).toBeGreaterThan(0);
-    expect(
-      (await readFile(join(outDir, "triage-queue.toon"), "utf8")).length,
-    ).toBeGreaterThan(0);
+    const toonInstalled = await isToonEncodeAvailable();
+    if (toonInstalled) {
+      expect(
+        (await readFile(join(outDir, "triage-queue.toon"), "utf8")).length,
+      ).toBeGreaterThan(0);
+    } else {
+      await expect(
+        readFile(join(outDir, "triage-queue.toon"), "utf8"),
+      ).rejects.toThrow();
+    }
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

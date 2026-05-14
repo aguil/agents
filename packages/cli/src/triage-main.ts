@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 import {
   buildEnvelopeFromCodeReviewResult,
   defaultTriageQueueDir,
+  isToonEncodeAvailable,
+  loadToonEncode,
   resolveCodeReviewResultPath,
   writeTriageOutputs,
 } from "@aguil/agents-triage";
@@ -28,6 +30,25 @@ export async function runTriageCli(argv: readonly string[]): Promise<number> {
   }
 
   const opt = parsed.options;
+  let format = opt.format;
+  const formatExplicit = opt.formatExplicit;
+
+  if (!formatExplicit && format === "both") {
+    if (!(await isToonEncodeAvailable())) {
+      console.warn(
+        "@toon-format/toon is not installed; writing JSON only (same as --format json). Install the optional dependency for triage-queue.toon or pass --format json explicitly.",
+      );
+      format = "json";
+    }
+  } else if (formatExplicit && (format === "toon" || format === "both")) {
+    try {
+      await loadToonEncode();
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : String(e));
+      return 1;
+    }
+  }
+
   const workspacePath = resolve(opt.workspace ?? process.cwd());
 
   if (opt.from !== CODE_REVIEW_PRODUCER) {
@@ -55,11 +76,11 @@ export async function runTriageCli(argv: readonly string[]): Promise<number> {
     await writeTriageOutputs({
       envelope,
       outputDir: outputDirResolved,
-      format: opt.format,
+      format,
       ...(opt.stdout === true
         ? {
             stdout: true,
-            stdoutFormat: opt.format === "json" ? "json" : "toon",
+            stdoutFormat: format === "json" ? "json" : "toon",
           }
         : {}),
     });

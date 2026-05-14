@@ -79,6 +79,8 @@
       "dependencies": {
         "@aguil/agents-core": "workspace:*",
         "@aguil/agents-reporting": "workspace:*",
+      },
+      "optionalDependencies": {
         "@toon-format/toon": "^2.2.0",
       },
     },

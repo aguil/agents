@@ -1,11 +1,11 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
-import { encode } from "@toon-format/toon";
 import { writeUtf8FileNoFollow } from "./no-follow-io";
 import {
   assertOutputDirectoryWillResolveInsideWorkspace,
   assertResolvedPathInsideWorkspace,
 } from "./safe-path";
+import { loadToonEncode } from "./toon-encode";
 import type { TriageEnvelopeV1 } from "./types";
 
 export type TriageSerializationFormat = "json" | "toon" | "both";
@@ -31,6 +31,7 @@ export async function writeTriageOutputs(options: {
       process.stdout.write(`${JSON.stringify(plain, null, 2)}\n`);
       return;
     }
+    const encode = await loadToonEncode();
     process.stdout.write(`${encode(plain)}\n`);
     return;
   }
@@ -83,6 +84,7 @@ export async function writeTriageOutputs(options: {
     );
   }
   if (options.format === "toon" || options.format === "both") {
+    const encode = await loadToonEncode();
     const toonPath = join(dirWrite, TRIAGE_TOON);
     writes.push(writeUtf8FileNoFollow(toonPath, `${encode(plain)}\n`));
   }

@@ -5,6 +5,8 @@ export interface TriageCliOptions {
   readonly workspace?: string;
   readonly result?: string;
   readonly format: "json" | "toon" | "both";
+  /** True when the user passed `--format` (including `=…` forms). */
+  readonly formatExplicit: boolean;
   readonly outputDir?: string;
   readonly stdout?: boolean;
 }
@@ -41,6 +43,7 @@ export function parseTriageArgv(
   let workspace: string | undefined;
   let result: string | undefined;
   let format: "json" | "toon" | "both" | undefined;
+  let formatExplicit = false;
   let outputDir: string | undefined;
   let stdout = false;
 
@@ -98,6 +101,7 @@ export function parseTriageArgv(
         result = value?.trim();
         break;
       case "format": {
+        formatExplicit = true;
         const v = value?.trim();
         if (v !== "json" && v !== "toon" && v !== "both") {
           return {
@@ -140,6 +144,7 @@ export function parseTriageArgv(
     ...(workspace !== undefined ? { workspace } : {}),
     ...(result !== undefined ? { result } : {}),
     format: formatFinal,
+    formatExplicit,
     ...(outputDir !== undefined ? { outputDir } : {}),
     ...(stdout === true ? { stdout } : {}),
   };

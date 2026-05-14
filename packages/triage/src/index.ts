@@ -14,6 +14,7 @@ export {
   fingerprint12,
 } from "./output-slug";
 export { sortReviewFindings } from "./sort-items";
+export { isToonEncodeAvailable, loadToonEncode } from "./toon-encode";
 export type {
   TriageEnvelopeV1,
   TriageItemAnchor,
