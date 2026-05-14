@@ -67,18 +67,22 @@ export async function writeTriageOutputs(options: {
       "Output directory moved relative to workspace anchor before write.",
     );
   }
+  const dirWrite = await realpath(anchoredDir);
+  if (dirWrite !== dirRead) {
+    throw new Error("Output directory moved immediately before write.");
+  }
 
   const plain = options.envelope as unknown as Record<string, unknown>;
 
   const writes: Promise<void>[] = [];
   if (options.format === "json" || options.format === "both") {
-    const jsonPath = join(dirRead, TRIAGE_JSON);
+    const jsonPath = join(dirWrite, TRIAGE_JSON);
     writes.push(
       writeUtf8FileNoFollow(jsonPath, `${JSON.stringify(plain, null, 2)}\n`),
     );
   }
   if (options.format === "toon" || options.format === "both") {
-    const toonPath = join(dirRead, TRIAGE_TOON);
+    const toonPath = join(dirWrite, TRIAGE_TOON);
     writes.push(writeUtf8FileNoFollow(toonPath, `${encode(plain)}\n`));
   }
   await Promise.all(writes);
