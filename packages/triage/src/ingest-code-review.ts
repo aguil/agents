@@ -104,7 +104,11 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
       "Code-review result path moved relative to workspace anchor before read.",
     );
   }
-  const raw = await readUtf8FileNoFollow(reResolved);
+  const reResolvedAgain = await realpath(anchored);
+  if (reResolvedAgain !== reResolved) {
+    throw new Error("Code-review result path moved immediately before read.");
+  }
+  const raw = await readUtf8FileNoFollow(reResolvedAgain);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
