@@ -1,4 +1,4 @@
-import { access, lstat, readdir } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 /**
@@ -47,7 +47,13 @@ async function pickLatestAccessibleResult(
   for (const dir of sorted) {
     const candidate = join(dir, "result.json");
     try {
-      await access(candidate);
+      const st = await lstat(candidate);
+      if (st.isSymbolicLink()) {
+        continue;
+      }
+      if (!st.isFile()) {
+        continue;
+      }
       return candidate;
     } catch {}
   }
