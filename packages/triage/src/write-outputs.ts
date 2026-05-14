@@ -1,5 +1,5 @@
-import { mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, realpath } from "node:fs/promises";
+import { join, relative, resolve, sep } from "node:path";
 import { encode } from "@toon-format/toon";
 import { writeUtf8FileNoFollow } from "./no-follow-io";
 import {
@@ -56,18 +56,29 @@ export async function writeTriageOutputs(options: {
       "Output directory resolution changed during triage write setup.",
     );
   }
+  const rel = relative(firstResolved.workspaceReal, candidateReal);
+  if (rel === ".." || rel.startsWith(`..${sep}`)) {
+    throw new Error("Triage output directory escapes workspace.");
+  }
+  const anchoredDir = join(firstResolved.workspaceReal, rel);
+  const dirRead = await realpath(anchoredDir);
+  if (dirRead !== candidateReal) {
+    throw new Error(
+      "Output directory moved relative to workspace anchor before write.",
+    );
+  }
 
   const plain = options.envelope as unknown as Record<string, unknown>;
 
   const writes: Promise<void>[] = [];
   if (options.format === "json" || options.format === "both") {
-    const jsonPath = join(candidateReal, TRIAGE_JSON);
+    const jsonPath = join(dirRead, TRIAGE_JSON);
     writes.push(
       writeUtf8FileNoFollow(jsonPath, `${JSON.stringify(plain, null, 2)}\n`),
     );
   }
   if (options.format === "toon" || options.format === "both") {
-    const toonPath = join(candidateReal, TRIAGE_TOON);
+    const toonPath = join(dirRead, TRIAGE_TOON);
     writes.push(writeUtf8FileNoFollow(toonPath, `${encode(plain)}\n`));
   }
   await Promise.all(writes);

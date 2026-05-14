@@ -1,4 +1,5 @@
-import { normalize, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
+import { join, normalize, relative, resolve, sep } from "node:path";
 import type { Finding, HarnessRunResult } from "@aguil/agents-core";
 import { nowIso } from "@aguil/agents-core";
 import { discoverLatestCodeReviewResultPath } from "./discover-code-review-result";
@@ -92,13 +93,24 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
       "Code-review result path resolution changed during triage ingest.",
     );
   }
-  const raw = await readUtf8FileNoFollow(candidateReal);
+  const rel = relative(firstResolved.workspaceReal, candidateReal);
+  if (rel === ".." || rel.startsWith(`..${sep}`)) {
+    throw new Error("Code-review result path escapes workspace.");
+  }
+  const anchored = join(firstResolved.workspaceReal, rel);
+  const reResolved = await realpath(anchored);
+  if (reResolved !== candidateReal) {
+    throw new Error(
+      "Code-review result path moved relative to workspace anchor before read.",
+    );
+  }
+  const raw = await readUtf8FileNoFollow(reResolved);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch (e) {
     throw new Error(
-      `Invalid JSON at ${candidateReal}: ${e instanceof Error ? e.message : String(e)}`,
+      `Invalid JSON at ${reResolved}: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
   if (
@@ -106,11 +118,11 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
     parsed === null ||
     !Array.isArray((parsed as { findings?: unknown }).findings)
   ) {
-    throw new Error(`Invalid result envelope at ${candidateReal}.`);
+    throw new Error(`Invalid result envelope at ${reResolved}.`);
   }
   const doc = parsed as StoredHarnessResult;
   const sorted = sortReviewFindings(doc.findings);
-  const canonicalKey = normalize(candidateReal);
+  const canonicalKey = normalize(reResolved);
   const outputSlug = computeOutputSlug(CODE_REVIEW_FROM, canonicalKey);
 
   const metadata =
@@ -128,7 +140,7 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
     outputSlug,
     upstream: {
       producer: CODE_REVIEW_FROM,
-      resultPath: candidateReal,
+      resultPath: reResolved,
       upstreamRunId: doc.runId,
       ...(metadata === undefined ? {} : { metadataSubset: metadata }),
     },
