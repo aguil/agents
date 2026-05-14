@@ -150,6 +150,7 @@ async function writeLatestCodeReviewDiscoveryPointer(options: {
   const pointerPath = join(pointerParent, CODE_REVIEW_LATEST_RESULT_POINTER);
   const line = `${resolve(options.resultPath)}\n`;
   const tmp = `${pointerPath}.${process.pid}.tmp`;
+  // ADR 0002: temp write + rename by pathname; openat deferred (accepted risk).
   await writeFile(tmp, line, "utf8");
   await rename(tmp, pointerPath);
 }

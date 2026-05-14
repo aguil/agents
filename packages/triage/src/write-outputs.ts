@@ -37,6 +37,7 @@ export async function writeTriageOutputs(options: {
 
   const workspacePath = options.envelope.workspacePath;
   const outputAbs = resolve(options.outputDir);
+  // ADR 0002: pathname mkdir and writes after validation; openat deferred (accepted risk).
   await assertOutputDirectoryWillResolveInsideWorkspace(
     workspacePath,
     outputAbs,
@@ -72,7 +73,6 @@ export async function writeTriageOutputs(options: {
     throw new Error("Output directory moved immediately before write.");
   }
 
-  // ADR 0002: pathname writes after validation; openat-style hardening deferred (accepted risk).
   const plain = options.envelope as unknown as Record<string, unknown>;
 
   const writes: Promise<void>[] = [];

@@ -1,18 +1,20 @@
-# ADR 0002: Accepted risk — pathname-based triage I/O (no openat chain)
+# ADR 0002: Accepted risk — pathname-based triage and harness I/O (no openat chain)
 
 **Status:** Accepted  
 **Date:** 2026-05-14  
-**Scope:** `packages/triage` ingest of `result.json` and triage output writes (`write-outputs.ts`), plus related path validation helpers.
+**Scope:** `packages/triage` ingest of `result.json`, triage output writes (`write-outputs.ts`), the code-review harness pointer writer (`writeLatestCodeReviewDiscoveryPointer` in `harnesses/code-review`), and related path validation helpers.
 
 ## Context
 
 Triage validates workspace-relative paths with `realpath` / prefix checks, then performs I/O using string paths (`readUtf8FileNoFollow`, `writeUtf8FileNoFollow`). Those helpers use `O_NOFOLLOW` on the **leaf** file so the final component cannot be a symlink, but they do **not** retain a directory file descriptor across the validation → open boundary.
 
+The harness updates `.code-review-latest-result` via a temp file and `rename(2)` on an absolute pathname under `.review-agent/runs` or `dry-run`, with the same ancestor-swap concern.
+
 A hostile or buggy concurrent actor that can flip **ancestor** directories to symlinks between validation and open could, in theory, redirect reads or writes outside the intended workspace tree. Eliminating that race on POSIX generally requires an **`openat`-style** walk from a trusted directory fd (or equivalent), not pathname reopens alone.
 
 ## Decision
 
-For this monorepo’s **operator-controlled review workspaces** (local dev, CI sandboxes, and similar environments where the tree is not adversarially mutated during a single `agents triage` invocation), we **accept** this residual TOCTOU class and **do not** require an `openat` implementation in the triage package today.
+For this monorepo’s **operator-controlled review workspaces** (local dev, CI sandboxes, and similar environments where the tree is not adversarially mutated during a single `agents triage` or `agents code-review` invocation), we **accept** this residual TOCTOU class and **do not** require an `openat` implementation in the triage package or harness pointer writer today.
 
 ## Consequences
 
@@ -21,4 +23,4 @@ For this monorepo’s **operator-controlled review workspaces** (local dev, CI s
 
 ## Related
 
-- Pointer-based latest `result.json` discovery (`harnesses/code-review` + `discover-code-review-result.ts`) writes `.code-review-latest-result` after each harness run; discovery **merges** that pointer with a concurrent scan of `code-review-*` directories so the returned path is always the mtime+tie winner. Set `AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1` to ignore the pointer when repairing a corrupted tree. The scan is **O(n)** in the number of stored runs when run directories exist.
+- Latest `result.json` discovery (`discover-code-review-result.ts`) **merges** the harness pointer with a concurrent scan of every `code-review-*` directory so the returned path is always the mtime+tie winner (no stale pointer). That correctness guarantee costs **O(n)** `lstat` calls when run directories exist; set `AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1` to ignore the pointer when repairing a corrupted tree.
