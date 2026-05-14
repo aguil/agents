@@ -5,6 +5,10 @@ import { basename, join } from "node:path";
  * Latest `result.json` among `.review-agent/{dry-run,runs}/code-review-*`
  * (basename lexicographic descending; try in that order).
  *
+ * Implementation picks the newest-looking `code-review-*` directory first in
+ * O(pool) per probe (no eager full sort; typical case resolves in one pass once
+ * newest run has a `result.json`).
+ *
  * `dry-run` runs are included so `agents triage` without `--result` matches the
  * newest code-review artifact from local dry-runs as well as persisted runs.
  */
@@ -19,14 +23,31 @@ export async function discoverLatestCodeReviewResultPath(
   await appendCodeReviewRunDirs(dryRunRoot, dirs);
   await appendCodeReviewRunDirs(runsRoot, dirs);
 
-  if (dirs.length === 0) {
-    return undefined;
-  }
-
-  dirs.sort((a, b) => basename(b).localeCompare(basename(a)));
-
-  for (const dir of dirs) {
-    const candidate = join(dir, "result.json");
+  let pool = dirs;
+  while (pool.length > 0) {
+    const head = pool[0];
+    if (head === undefined) {
+      break;
+    }
+    let bestIdx = 0;
+    let bestBase = basename(head);
+    for (let i = 1; i < pool.length; i++) {
+      const dirEntry = pool[i];
+      if (dirEntry === undefined) {
+        continue;
+      }
+      const candidateBase = basename(dirEntry);
+      if (candidateBase > bestBase) {
+        bestBase = candidateBase;
+        bestIdx = i;
+      }
+    }
+    const chosen = pool[bestIdx];
+    if (chosen === undefined) {
+      break;
+    }
+    pool = pool.filter((_, i) => i !== bestIdx);
+    const candidate = join(chosen, "result.json");
     try {
       await access(candidate);
       return candidate;
