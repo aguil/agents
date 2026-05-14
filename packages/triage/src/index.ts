@@ -1,5 +1,8 @@
 export { defaultTriageQueueDir } from "./default-output-dir";
-export { discoverLatestCodeReviewResultPath } from "./discover-code-review-result";
+export {
+  discoverLatestCodeReviewResultPath,
+  discoverLatestRunsCodeReviewResultPath,
+} from "./discover-code-review-result";
 export {
   buildEnvelopeFromCodeReviewResult,
   CODE_REVIEW_FROM,

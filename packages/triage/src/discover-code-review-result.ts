@@ -2,12 +2,22 @@ import { access, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 /**
+ * Latest `result.json` under `.review-agent/runs/code-review-*` only (basename
+ * lexicographic descending). Used for `agents code-review post` auto-discovery
+ * so disposable dry-run artifacts are never selected for GitHub publish.
+ */
+export async function discoverLatestRunsCodeReviewResultPath(
+  workspacePath: string,
+): Promise<string | undefined> {
+  const runsRoot = join(workspacePath, ".review-agent", "runs");
+  const dirs: string[] = [];
+  await appendCodeReviewRunDirs(runsRoot, dirs);
+  return pickLatestAccessibleResult(dirs);
+}
+
+/**
  * Latest `result.json` among `.review-agent/{dry-run,runs}/code-review-*`
  * (basename lexicographic descending; try in that order).
- *
- * Implementation picks the newest-looking `code-review-*` directory first in
- * O(pool) per probe (no eager full sort; typical case resolves in one pass once
- * newest run has a `result.json`).
  *
  * `dry-run` runs are included so `agents triage` without `--result` matches the
  * newest code-review artifact from local dry-runs as well as persisted runs.
@@ -22,32 +32,20 @@ export async function discoverLatestCodeReviewResultPath(
   const dirs: string[] = [];
   await appendCodeReviewRunDirs(dryRunRoot, dirs);
   await appendCodeReviewRunDirs(runsRoot, dirs);
+  return pickLatestAccessibleResult(dirs);
+}
 
-  let pool = dirs;
-  while (pool.length > 0) {
-    const head = pool[0];
-    if (head === undefined) {
-      break;
-    }
-    let bestIdx = 0;
-    let bestBase = basename(head);
-    for (let i = 1; i < pool.length; i++) {
-      const dirEntry = pool[i];
-      if (dirEntry === undefined) {
-        continue;
-      }
-      const candidateBase = basename(dirEntry);
-      if (candidateBase > bestBase) {
-        bestBase = candidateBase;
-        bestIdx = i;
-      }
-    }
-    const chosen = pool[bestIdx];
-    if (chosen === undefined) {
-      break;
-    }
-    pool = pool.filter((_, i) => i !== bestIdx);
-    const candidate = join(chosen, "result.json");
+async function pickLatestAccessibleResult(
+  dirs: readonly string[],
+): Promise<string | undefined> {
+  if (dirs.length === 0) {
+    return undefined;
+  }
+  const sorted = [...dirs].sort((a, b) =>
+    basename(b).localeCompare(basename(a)),
+  );
+  for (const dir of sorted) {
+    const candidate = join(dir, "result.json");
     try {
       await access(candidate);
       return candidate;
