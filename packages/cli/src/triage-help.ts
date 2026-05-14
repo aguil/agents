@@ -81,7 +81,7 @@ Examples:
   agents code-review --workspace /repo
   agents triage --from code-review --workspace /repo
 
-This repository’s `.gitignore` already ignores `.agents-triage/` so local queue files stay untracked.
+This repository ignores .agents-triage/ queues via .gitignore so local artifacts stay untracked.
 
 (Accepts legacy spelling: agents triage ingest --from … → same behavior.)
 `;
