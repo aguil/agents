@@ -3,11 +3,15 @@ name: review-fix-loop
 description: >-
   Manual-testing playbook for the agents monorepo: code-review / agents triage,
   focused fixes, one commit per actionable finding, and local gates before push.
+  Runs must use the operator's merged code-review config — do not substitute a
+  bundled adapter or model in examples or automation.
 ---
 
 # Review / fix loop (manual testing playbook)
 
 Use this playbook for exercising this repo’s agent harnesses and keeping changes honest before you push.
+
+**Agents following this skill:** Do **not** invent or override adapter or model settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever the merged CLI resolution already applies: harness defaults, then user **`~/.config/agents/code-review/config.json`**, optional copied **`review-agent.config.example.json`** → **`.review-agent/config.json`** (repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied them**. Mirrors real operator workflow; see `harnesses/code-review/README.md` (merge order).
 
 ## What “the loop” is
 
@@ -35,7 +39,9 @@ bun run agents triage --help
 
 ### Run or replay code review
 
-Typical dry shape (adapter and flags depend on your machine and config):
+Adapter, model, and launch flags come from merged config and env — **omit** them here unless you are reproducing a user-provided command verbatim.
+
+Typical **dry run** (writes under `.review-agent/dry-run/`; still uses your configured adapter unless you change config):
 
 ```bash
 bun run agents code-review --workspace . --dry-run
@@ -106,7 +112,7 @@ When you **change** the repo in response to a review finding (production code, t
 ## A tight manual loop (checklist)
 
 - [ ] **Baseline:** `bun run check && bun test` green on your branch.
-- [ ] **Review:** run `code-review` (or replay) with a realistic workspace; note `result.json` path.
+- [ ] **Review:** run `code-review` (or replay) with a realistic workspace **using merged config** (no skill-invented `--adapter` / `--model`); note `result.json` path.
 - [ ] **Triage:** `agents triage` into `.agents-triage/...` or a scratch `--output` dir; skim `triage-queue.json` (or TOON if you prefer dense logs).
 - [ ] **Fix:** address findings one at a time; **each** fix that touches the tree gets **its own commit** (see [One commit per actionable finding](#one-commit-per-actionable-finding-required)); keep each diff minimal.
 - [ ] **Verify:** `bun run check && bun test` again; rerun review if the change is large or touches harness contracts.
@@ -123,6 +129,7 @@ These live outside this repo; open the `SKILL.md` when you want a structured wor
 
 ## Gotchas worth remembering
 
+- **Code-review automation:** Agents executing this loop must **not** inject their own adapter or model defaults (e.g. `fake`). Only honor merged config/env and CLI flags the user actually passed.
 - **`agents triage` phase 1** only supports `--from code-review` in this snapshot; other producers would be future work. (Legacy: `agents triage ingest …` is accepted but unnecessary.)
 - **`--stdout`** requires `--format json` or `--format toon` (dual file writes are the default when `--format` is omitted).
 - **Path-based fingerprint:** the default output slug hashes the **normalized absolute path** to `result.json`, so moving the file changes the slug directory.

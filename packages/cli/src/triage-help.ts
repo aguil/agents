@@ -78,10 +78,10 @@ Default files (omit --stdout):
 
 Examples:
 
-  agents code-review --workspace /repo --adapter fake
+  agents code-review --workspace /repo
   agents triage --from code-review --workspace /repo
 
-Add .agents-triage/ to .gitignore when artifacts are local-only.
+This repository’s `.gitignore` already ignores `.agents-triage/` so local queue files stay untracked.
 
 (Accepts legacy spelling: agents triage ingest --from … → same behavior.)
 `;
