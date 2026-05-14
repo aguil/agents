@@ -1,6 +1,6 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   CODE_REVIEW_ROLE_IDS,
@@ -736,6 +736,20 @@ interface StoredReviewResult {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
+async function resolvedResultPathIsUnderReviewAgentDryRun(
+  workspacePath: string,
+  resultPath: string,
+): Promise<boolean> {
+  try {
+    const wsReal = await realpath(workspacePath);
+    const resReal = await realpath(resultPath);
+    const dryRoot = join(wsReal, ".review-agent", "dry-run");
+    return resReal === dryRoot || resReal.startsWith(`${dryRoot}${sep}`);
+  } catch {
+    return false;
+  }
+}
+
 async function runPostOnly(options: CliOptions): Promise<number> {
   if (options.pendingReview) {
     console.warn(
@@ -771,6 +785,18 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   if (resultPath === undefined) {
     console.error(
       "Could not auto-discover a prior run result. Pass --result <path>.",
+    );
+    return 1;
+  }
+  if (
+    options.result !== undefined &&
+    (await resolvedResultPathIsUnderReviewAgentDryRun(
+      workspacePath,
+      resultPath,
+    ))
+  ) {
+    console.error(
+      "Refusing to post a dry-run result.json. Use .review-agent/runs/… or omit --result for auto-discovery.",
     );
     return 1;
   }
