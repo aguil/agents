@@ -12,7 +12,7 @@ const TRIAGE_TOON = "triage-queue.toon";
 function toLosslessPlainObject(
   envelope: TriageEnvelopeV1,
 ): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(envelope)) as Record<string, unknown>;
+  return structuredClone(envelope) as Record<string, unknown>;
 }
 
 /** Write serialized triage envelopes to disk or stdout. */
