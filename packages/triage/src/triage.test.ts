@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Finding } from "@aguil/agents-core";
+import { discoverLatestCodeReviewResultPath } from "./discover-code-review-result";
 import { canonicalKeyForCodeReviewArtifact } from "./ingest-code-review";
 import { computeOutputSlug, fingerprint12 } from "./output-slug";
+import { assertOutputDirectoryWillResolveInsideWorkspace } from "./safe-path";
 import { sortReviewFindings } from "./sort-items";
 
 test("fingerprint12 is stable hex12 over utf8 ingress key", () => {
@@ -32,6 +37,51 @@ test("canonicalKeyForCodeReviewArtifact normalizes to absolute path", () => {
   const k = canonicalKeyForCodeReviewArtifact("/tmp/./x/../y/result.json");
   expect(k).toContain("y");
   expect(k.startsWith("/")).toBe(true);
+});
+
+test("discoverLatestCodeReviewResultPath merges dry-run + runs newest id", async () => {
+  const base = await mkdtemp(join(tmpdir(), "agents-triage-discover-"));
+  const ws = join(base, "ws");
+  await mkdir(join(ws, ".review-agent", "runs", "code-review-AAA-result"), {
+    recursive: true,
+  });
+  await mkdir(join(ws, ".review-agent", "dry-run", "code-review-ZZZ-result"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(ws, ".review-agent", "runs", "code-review-AAA-result", "result.json"),
+    "{}",
+    "utf8",
+  );
+  await writeFile(
+    join(
+      ws,
+      ".review-agent",
+      "dry-run",
+      "code-review-ZZZ-result",
+      "result.json",
+    ),
+    "{}",
+    "utf8",
+  );
+  const p = await discoverLatestCodeReviewResultPath(ws);
+  expect(
+    typeof p === "string" && p.includes(join(".review-agent", "dry-run")),
+  ).toBe(true);
+  expect(typeof p === "string" && p.includes("code-review-ZZZ-result")).toBe(
+    true,
+  );
+});
+
+test("assertOutputDirectoryWillResolveInsideWorkspace rejects escape before mkdir", async () => {
+  const base = await mkdtemp(join(tmpdir(), "agents-triage-safe-"));
+  await mkdir(join(base, "ws", "nested"), { recursive: true });
+  await expect(
+    assertOutputDirectoryWillResolveInsideWorkspace(
+      join(base, "ws"),
+      join(base, "escape-target"),
+    ),
+  ).rejects.toThrow(/outside workspace/u);
 });
 
 test("sortReviewFindings orders by severity then fingerprint then id", () => {

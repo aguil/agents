@@ -66,7 +66,7 @@ Required:
 Optional:
 
   --workspace <dir>         Repo scope (default: cwd)
-  --result <path>           Explicit code-review result.json (default: newest under .review-agent/runs)
+  --result <path>           Explicit code-review result.json (default: newest under .review-agent/dry-run or …/runs)
   --format json|toon|both   Output mode (default: both → dual files)
   --output <dir>            Target directory (default: <workspace>/.agents-triage/<outputSlug>/)
   --stdout                  Print exactly one format (--format json|toon required)
