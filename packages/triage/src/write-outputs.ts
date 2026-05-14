@@ -42,6 +42,10 @@ export async function writeTriageOutputs(options: {
     outputAbs,
   );
   await mkdir(outputAbs, { recursive: true });
+  await assertOutputDirectoryWillResolveInsideWorkspace(
+    workspacePath,
+    outputAbs,
+  );
 
   const firstResolved = await assertResolvedPathInsideWorkspace(
     workspacePath,
