@@ -12,11 +12,13 @@ description: >-
 
 Use this playbook for exercising this repo’s agent harnesses and keeping changes honest before you push.
 
-**Agents following this skill:** Do **not** invent or override adapter or model settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever the merged CLI resolution already applies: harness defaults, then user **`~/.config/agents/code-review/config.json`**, optional copied **`review-agent.config.example.json`** → **`.review-agent/config.json`** (repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied them**. Mirrors real operator workflow; see `harnesses/code-review/README.md` (merge order).
+**Agents following this skill:** Do **not** invent or override adapter or model settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever the merged CLI resolution already applies: harness defaults, then user **`~/.config/agents/code-review/config.json`**, optional copied **`review-agent.config.example.json`** → **`.review-agent/config.json`** (repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied them**. **Do **not** add **`--dry-run`** (or drop it) on your own**—mirror whatever the operator specified for this session (normal **`runs/`** output vs **`--dry-run`** scratch). Mirrors real operator workflow; see `harnesses/code-review/README.md` (merge order).
 
 ## Goal
 
-Run **`bun run check`** and **`bun test`** (or tighter subsets only when the checkout’s docs permit) before you treat the repo as trusted. Run **`bun run agents code-review`** (typically **`--workspace . --dry-run`**, merged adapter/model from config) so the harness writes **`result.json`**.
+Run **`bun run check`** and **`bun test`** (or tighter subsets only when the checkout’s docs permit) before you treat the repo as trusted. Run **`bun run agents code-review --workspace .`** so the harness writes **`result.json`** under **`.review-agent/runs/`** (default). Add **`--dry-run`** only when you deliberately want **`result.json`** under **`.review-agent/dry-run/`** instead—not as an assumed default.
+
+Adapter and model come from merged config; this playbook does **not** prescribe **`--dry-run`** unless you choose it.
 
 Produce the downstream queue with **`bun run agents triage --from code-review --workspace .`**, pointing at **`result.json`** (**`--result …`** when you are not relying on workspace default discovery). **You are done when **`items`** in that triage envelope is empty.**
 
@@ -27,7 +29,7 @@ Verify in **`triage-queue.json`** under **`.agents-triage/<producerShort>-<hash1
 Use **one repeatable shape** for status updates (PR replies, Cursor session wrap-ups, checkpoints). Prefer **facts from artifacts** over paraphrase.
 
 1. **Gates:** **`bun run check`** — pass/fail · **`bun test`** — pass/fail (note scope if not full suite).
-2. **Code-review:** Exact command/recording (replay path if replay); **`runId`** from **`result.json`** (or CLI summary line); absolute path to **`result.json`**; **`findings.length`**; enumerate producer findings — at minimum each **`finding.id`** and **`finding.title`** (add **`severity`** if useful). Optionally paste or point to **`report.md`** under the same run directory.
+2. **Code-review:** Exact command/recording (replay path if replay); note whether **`--dry-run`** was used; **`runId`** from **`result.json`** (or CLI summary line); absolute path to **`result.json`**; **`findings.length`**; enumerate producer findings — at minimum each **`finding.id`** and **`finding.title`** (add **`severity`** if useful). Optionally paste or point to **`report.md`** under the same run directory.
 3. **Triage:** Absolute path to **`triage-queue.json`** (and slug dir or **`--stdout`** ingest); **`items.length`**. When **`items.length > 0`**, line up **`items[].id`** + **`items[].title`** with the **`findings`** list (`items` mirror ingested findings for this producer).
 4. **Disposition:** **`items.length === 0`** on the **final** pipeline, **or** for every **`item`/finding left**, state **`false_positive`**, **`accepted_risk`** (+ ADR/issue), or **`deferred`** (+ ticket) in the same report.
 5. **Commits:** For each **code** remediation, **`finding.id`** (or duplicate set) → **revision/bookmark/git SHA** mapping.
@@ -62,7 +64,13 @@ bun run agents triage --help
 
 Adapter, model, and launch flags come from merged config and env — **omit** them here unless you are reproducing a user-provided command verbatim.
 
-Typical **dry run** (writes under `.review-agent/dry-run/`; still uses your configured adapter unless you change config):
+Normal run (persisted **`result.json`** under **`.review-agent/runs/`**):
+
+```bash
+bun run agents code-review --workspace .
+```
+
+Optional **disposable** run — reviewers behave the same, but artifacts land under **`.review-agent/dry-run/`** (fewer **`runs`** entries; good when that is explicitly what you want):
 
 ```bash
 bun run agents code-review --workspace . --dry-run
@@ -74,7 +82,7 @@ Replay when you already have a context bundle:
 bun run agents code-review replay /path/to/context.json --workspace .
 ```
 
-**Final upstream pass:** mirror the invocation you used earlier in the loop (typically **`--dry-run`**, same workspace, merged config) unless you are deliberately reproducing a user-supplied command—so regressions tie to commits, not flag drift.
+**Final upstream pass:** rerun with the same **`--dry-run`** choice (present or absent) and **`--workspace`** as earlier in the loop, merged config untouched—unless you are reproducing a user-supplied command verbatim.
 
 Harness-focused documentation: `harnesses/code-review/README.md`.
 
@@ -180,7 +188,7 @@ These live outside this repo; open the `SKILL.md` when you want a structured wor
 
 ## Gotchas worth remembering
 
-- **Code-review automation:** Agents executing this loop must **not** inject their own adapter or model defaults (e.g. `fake`). Only honor merged config/env and CLI flags the user actually passed.
+- **Code-review automation:** Agents executing this loop must **not** inject their own adapter or model defaults (e.g. `fake`). Only honor merged config/env and CLI flags the user actually passed—including **never silently adding **`--dry-run`**;** use **`agents code-review --workspace …`** as instructed.
 - **`agents triage` phase 1** only supports `--from code-review` in this snapshot; other producers would be future work. (Legacy: `agents triage ingest …` is accepted but unnecessary.)
 - **`--stdout`** requires `--format json` or `--format toon` (dual file writes are the default when `--format` is omitted).
 - **Path-based fingerprint:** the default output slug hashes the **normalized absolute path** to `result.json`, so moving the file changes the slug directory.
