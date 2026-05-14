@@ -1,11 +1,4 @@
-import {
-  access,
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -39,7 +32,6 @@ import {
   resolveTriageHelp,
   triageHelpStderrExtras,
 } from "./triage-help";
-import { runTriageCli } from "./triage-main";
 
 export async function main(
   argv: readonly string[] = Bun.argv.slice(2),
@@ -63,6 +55,7 @@ export async function main(
   }
 
   if (argv[0] === "triage") {
+    const { runTriageCli } = await import("./triage-main");
     return await runTriageCli(argv);
   }
 
@@ -840,28 +833,10 @@ async function runPostOnly(options: CliOptions): Promise<number> {
 export async function discoverLatestResultPath(
   workspacePath: string,
 ): Promise<string | undefined> {
-  const runsRoot = join(workspacePath, ".review-agent", "runs");
-  let entries: readonly (string | Uint8Array)[];
-  try {
-    entries = await readdir(runsRoot);
-  } catch {
-    return undefined;
-  }
-  const runDirectories = entries
-    .map((entry) =>
-      typeof entry === "string" ? entry : Buffer.from(entry).toString("utf8"),
-    )
-    .filter((entry) => entry.startsWith("code-review-"))
-    .sort()
-    .reverse();
-  for (const runDirectory of runDirectories) {
-    const candidate = join(runsRoot, runDirectory, "result.json");
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {}
-  }
-  return undefined;
+  const { discoverLatestCodeReviewResultPath } = await import(
+    "@aguil/agents-triage"
+  );
+  return discoverLatestCodeReviewResultPath(workspacePath);
 }
 
 export async function loadStoredReviewResult(
