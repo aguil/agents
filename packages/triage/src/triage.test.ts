@@ -120,6 +120,24 @@ test("discoverLatestCodeReviewResultPath skips symlinked run directory entries",
   ).toBe(true);
 });
 
+test("discoverLatestRunsCodeReviewResultPath skips symlinked result.json leaf", async () => {
+  const base = await mkdtemp(
+    join(tmpdir(), "agents-triage-skip-symlink-result-"),
+  );
+  const ws = join(base, "ws");
+  const runsRoot = join(ws, ".review-agent", "runs");
+  const older = join(runsRoot, "code-review-20260501000000-older");
+  const newer = join(runsRoot, "code-review-20260502000000-newer");
+  await mkdir(older, { recursive: true });
+  await mkdir(newer, { recursive: true });
+  await writeFile(join(older, "result.json"), "{}", "utf8");
+  await symlink(join(older, "result.json"), join(newer, "result.json"), "file");
+  const p = await discoverLatestRunsCodeReviewResultPath(ws);
+  expect(
+    typeof p === "string" && p.includes("code-review-20260501000000-older"),
+  ).toBe(true);
+});
+
 test("assertOutputDirectoryWillResolveInsideWorkspace rejects escape before mkdir", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-safe-"));
   await mkdir(join(base, "ws", "nested"), { recursive: true });
