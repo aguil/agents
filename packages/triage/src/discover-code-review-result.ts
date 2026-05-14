@@ -2,9 +2,11 @@ import { lstat, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 /**
- * Latest `result.json` under `.review-agent/runs/code-review-*` only (basename
- * lexicographic descending). Used for `agents code-review post` auto-discovery
- * so disposable dry-run artifacts are never selected for GitHub publish.
+ * Latest `result.json` under `.review-agent/runs/code-review-*` only. Picks the
+ * newest accessible `result.json` by **file mtime** (descending), then
+ * `code-review-*` basename lexicographic descending as a stable tie-breaker.
+ * Used for `agents code-review post` auto-discovery so disposable dry-run
+ * artifacts are never selected for GitHub publish.
  */
 export async function discoverLatestRunsCodeReviewResultPath(
   workspacePath: string,
@@ -16,11 +18,10 @@ export async function discoverLatestRunsCodeReviewResultPath(
 }
 
 /**
- * Latest `result.json` among `.review-agent/{dry-run,runs}/code-review-*`
- * (basename lexicographic descending; try in that order).
- *
- * `dry-run` runs are included so `agents triage` without `--result` matches the
- * newest code-review artifact from local dry-runs as well as persisted runs.
+ * Latest `result.json` among `.review-agent/{dry-run,runs}/code-review-*`.
+ * Selection uses **file mtime** on each `result.json` (descending), then
+ * basename lexicographic descending as a stable tie-breaker so same-second run
+ * ids do not pick arbitrarily by random suffix alone.
  */
 export async function discoverLatestCodeReviewResultPath(
   workspacePath: string,
@@ -41,10 +42,12 @@ async function pickLatestAccessibleResult(
   if (dirs.length === 0) {
     return undefined;
   }
-  const sorted = [...dirs].sort((a, b) =>
-    basename(b).localeCompare(basename(a)),
-  );
-  for (const dir of sorted) {
+  const scored: {
+    readonly path: string;
+    readonly mtimeMs: number;
+    readonly tie: string;
+  }[] = [];
+  for (const dir of dirs) {
     const candidate = join(dir, "result.json");
     try {
       const st = await lstat(candidate);
@@ -54,10 +57,23 @@ async function pickLatestAccessibleResult(
       if (!st.isFile()) {
         continue;
       }
-      return candidate;
+      scored.push({
+        path: candidate,
+        mtimeMs: st.mtimeMs,
+        tie: basename(dir),
+      });
     } catch {}
   }
-  return undefined;
+  if (scored.length === 0) {
+    return undefined;
+  }
+  scored.sort((a, b) => {
+    if (b.mtimeMs !== a.mtimeMs) {
+      return b.mtimeMs - a.mtimeMs;
+    }
+    return b.tie.localeCompare(a.tie);
+  });
+  return scored[0].path;
 }
 
 async function appendCodeReviewRunDirs(

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Finding } from "@aguil/agents-core";
@@ -74,6 +74,26 @@ test("discoverLatestCodeReviewResultPath merges dry-run + runs newest id", async
   expect(typeof p === "string" && p.includes("code-review-ZZZ-result")).toBe(
     true,
   );
+});
+
+test("discoverLatestRunsCodeReviewResultPath prefers newer mtime over lex tie-break", async () => {
+  const base = await mkdtemp(join(tmpdir(), "agents-triage-discover-mtime-"));
+  const ws = join(base, "ws");
+  const runsRoot = join(ws, ".review-agent", "runs");
+  const lexHigh = join(runsRoot, "code-review-20991202000000-high-lex");
+  const lexLow = join(runsRoot, "code-review-20991201000000-low-lex");
+  await mkdir(lexHigh, { recursive: true });
+  await mkdir(lexLow, { recursive: true });
+  const highPath = join(lexHigh, "result.json");
+  const lowPath = join(lexLow, "result.json");
+  await writeFile(highPath, "{}", "utf8");
+  await writeFile(lowPath, "{}", "utf8");
+  await utimes(highPath, new Date(2020, 0, 1), new Date(2020, 0, 1));
+  await utimes(lowPath, new Date(2040, 0, 1), new Date(2040, 0, 1));
+  const p = await discoverLatestRunsCodeReviewResultPath(ws);
+  expect(
+    typeof p === "string" && p.includes("code-review-20991201000000-low-lex"),
+  ).toBe(true);
 });
 
 test("discoverLatestRunsCodeReviewResultPath only considers runs/", async () => {
