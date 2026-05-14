@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { constants as fsc } from "node:fs";
+import { mkdir, open } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { encode } from "@toon-format/toon";
 import {
@@ -16,6 +17,23 @@ function toLosslessPlainObject(
   envelope: TriageEnvelopeV1,
 ): Record<string, unknown> {
   return structuredClone(envelope) as unknown as Record<string, unknown>;
+}
+
+async function writeUtf8FileNoFollow(
+  path: string,
+  body: string,
+): Promise<void> {
+  const nofollow = fsc.O_NOFOLLOW ?? 0;
+  const fh = await open(
+    path,
+    fsc.O_WRONLY | fsc.O_CREAT | fsc.O_TRUNC | nofollow,
+    0o644,
+  );
+  try {
+    await fh.writeFile(body, "utf8");
+  } finally {
+    await fh.close().catch(() => {});
+  }
 }
 
 /** Write serialized triage envelopes to disk or stdout. */
@@ -58,12 +76,12 @@ export async function writeTriageOutputs(options: {
   if (options.format === "json" || options.format === "both") {
     const jsonPath = join(candidateReal, TRIAGE_JSON);
     writes.push(
-      writeFile(jsonPath, `${JSON.stringify(plain, null, 2)}\n`, "utf8"),
+      writeUtf8FileNoFollow(jsonPath, `${JSON.stringify(plain, null, 2)}\n`),
     );
   }
   if (options.format === "toon" || options.format === "both") {
     const toonPath = join(candidateReal, TRIAGE_TOON);
-    writes.push(writeFile(toonPath, `${encode(plain)}\n`, "utf8"));
+    writes.push(writeUtf8FileNoFollow(toonPath, `${encode(plain)}\n`));
   }
   await Promise.all(writes);
 }
