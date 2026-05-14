@@ -97,9 +97,7 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
     parsed === null ||
     !Array.isArray((parsed as { findings?: unknown }).findings)
   ) {
-    throw new Error(
-      `Invalid result envelope at ${candidateReal}.`,
-    );
+    throw new Error(`Invalid result envelope at ${candidateReal}.`);
   }
   const doc = parsed as StoredHarnessResult;
   const sorted = sortReviewFindings(doc.findings);
