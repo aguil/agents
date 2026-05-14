@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Finding } from "@aguil/agents-core";
 import {
   discoverLatestCodeReviewResultPath,
@@ -136,6 +136,22 @@ test("discoverLatestRunsCodeReviewResultPath skips symlinked result.json leaf", 
   expect(
     typeof p === "string" && p.includes("code-review-20260501000000-older"),
   ).toBe(true);
+});
+
+test("discoverLatestRunsCodeReviewResultPath skips symlinked runs root", async () => {
+  const base = await mkdtemp(
+    join(tmpdir(), "agents-triage-skip-symlink-runs-root-"),
+  );
+  const ws = join(base, "ws");
+  const stolen = join(ws, "stolen");
+  const fakeRun = join(stolen, "code-review-20991231000000-fake");
+  await mkdir(fakeRun, { recursive: true });
+  await writeFile(join(fakeRun, "result.json"), "{}", "utf8");
+  const runsLink = join(ws, ".review-agent", "runs");
+  await mkdir(dirname(runsLink), { recursive: true });
+  await symlink(stolen, runsLink, "dir");
+  const p = await discoverLatestRunsCodeReviewResultPath(ws);
+  expect(p).toBeUndefined();
 });
 
 test("assertOutputDirectoryWillResolveInsideWorkspace rejects escape before mkdir", async () => {

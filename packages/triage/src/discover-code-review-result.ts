@@ -64,6 +64,17 @@ async function appendCodeReviewRunDirs(
   parent: string,
   acc: string[],
 ): Promise<void> {
+  try {
+    const rootSt = await lstat(parent);
+    if (rootSt.isSymbolicLink()) {
+      return;
+    }
+    if (!rootSt.isDirectory()) {
+      return;
+    }
+  } catch {
+    return;
+  }
   let entries: readonly (string | Uint8Array)[];
   try {
     entries = await readdir(parent);
