@@ -11,7 +11,7 @@ description: >-
 
 Use this playbook while the PR is still **Draft**: exercise agent harnesses, clear or document review/triage output, and only then mark the PR **Ready for review** (not merge).
 
-**Agents following this skill:** Do **not** invent or override adapter or model settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever the merged CLI resolution already applies: harness defaults, then user **code-review config** under the XDG config directory (typically **`~/.config/agents/code-review/config.json`** on Unix, **`%USERPROFILE%\.config\agents\code-review\config.json`** on Windows), optional copied **`review-agent.config.example.json`** → **`.review-agent/config.json`** (repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied them**. **Do **not** add **`--dry-run`** (or drop it) on your own**—mirror whatever the operator specified for this session (normal **`runs/`** output vs **`--dry-run`** scratch). Mirrors real operator workflow; see `harnesses/code-review/README.md` (merge order).
+**Agents following this skill:** Do **not** invent or override adapter or model settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever the merged CLI resolution already applies: harness defaults, then user **code-review config** under the XDG config directory (typically **`~/.config/agents/code-review/config.json`** on Unix, **`%USERPROFILE%\.config\agents\code-review\config.json`** on Windows), optional copied **`review-agent.config.example.json`** → **`.review-agent/config.json`** (repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied them**. **Do **not** add **`--dry-run`** (or drop it) on your own**—mirror whatever the operator specified for this session (normal **`runs/`** output vs **`--dry-run`** scratch). Mirrors real operator workflow; see the published Agents **code-review** documentation for configuration merge order.
 
 ## Goal
 
@@ -27,7 +27,7 @@ Verify in **`triage-queue.json`** under **`.agents-triage/<producerShort>-<hash1
 
 Use **one repeatable shape** for status updates (PR replies, agent session wrap-ups, checkpoints). Prefer **facts from artifacts** over paraphrase.
 
-1. **Gates:** **`bun run check`** — pass/fail · **`bun test`** — pass/fail (note scope if not full suite).
+1. **Gates:** Each verification step the checkout documents (README, `AGENTS.md`, `CONTRIBUTING.md`, CI config, or scripts you were told to run) — pass/fail per step, and whether the scope was the full documented suite or an intentional narrower pass (say which).
 2. **Code-review:** Exact command/recording (replay path if replay); note whether **`--dry-run`** was used; **`runId`** from **`result.json`** (or CLI summary line); absolute path to **`result.json`**; **`findings.length`**; enumerate producer findings — at minimum each **`finding.id`** and **`finding.title`** (add **`severity`** if useful). Optionally paste or point to **`report.md`** under the same run directory.
 3. **Triage:** Absolute path to **`triage-queue.json`** (and slug dir or **`--stdout`** ingest); **`items.length`**. When **`items.length > 0`**, line up **`items[].id`** + **`items[].title`** with the **`findings`** list (`items` mirror ingested findings for this producer).
 4. **Disposition:** **`items.length === 0`** on the **final** pipeline, **or** for every **`item`/finding left**, state **`false_positive`**, **`accepted_risk`** (+ ADR/issue), or **`deferred`** (+ ticket) in the same report.
@@ -40,7 +40,7 @@ Intermediate checkpoints (baseline, mid-fix) should still cite **§2–3** (**`f
 1. Run an automated review (or replay) and capture artifacts.
 2. Normalize what needs attention into a stable queue you can scan or diff.
 3. For **each** review finding that actually needs a code or test change, implement the fix and **record it as its own commit** (never batch unrelated findings into one commit).
-4. Re-run the same gates the repo expects (`typecheck`, `lint`, `test`) after each fix or before pushing.
+4. Re-run the same verification the project documents after each fix or before pushing.
 5. Repeat until a final **code-review → triage ingest** pass yields **`items: []`** on the envelope and your gates stay green, then finalize [Reporting work done](#reporting-work-done) **§§1–5** from that pipeline.
 
 ## Prerequisites
@@ -81,16 +81,16 @@ When you **change** the repo in response to a review finding (production code, t
 - **Exactly one commit** should contain the changes that address **one** such finding. Do not mix fixes for multiple findings in the same commit. Commits remediate **`code-review` producer findings**; the recomputed triage **`items`** list only goes empty afterward when those producer rows were fixed or explicitly documented.
 - If you skip a finding (false positive, out of scope, ticket filed), **no commit** is required for it; document the reason in the PR or your notes.
 - If two findings collapse to the **same** minimal fix (true duplicate), one commit is allowed; state both finding identifiers in the commit body so reviewers can see the mapping.
-- Use a message that makes the mapping obvious (conventional commits as in repo `AGENTS.md` when applicable), and when rewriting or refining a fix commit message include the finding `id` or title, what is being addressed, how it is being addressed, and the full text of the finding in the body.
+- Use a message that makes the mapping obvious (follow the checkout’s documented commit conventions when applicable), and when rewriting or refining a fix commit message include the finding `id` or title, what is being addressed, how it is being addressed, and the full text of the finding in the body.
 - Version control particulars (`jj`, `git`, bookmarks, describe flags) follow the **checkout’s** `AGENTS.md` and your usual workflow; the rule above is independent of tooling.
 
 ## A tight manual checklist
 
-- [ ] **Baseline:** `bun run check && bun test` green on your branch; note pass/fail in your **work report §1**.
+- [ ] **Baseline:** Project-documented verification (build, lint, tests, etc.) green on your branch; note pass/fail in your **work report §1**.
 - [ ] **Review:** run `agents code-review` (or replay) with a realistic workspace **using merged config** (no skill-invented `--adapter` / `--model`); capture **`runId`**, **`result.json`** path, and full **`findings`** list (**`id`**, **`title`**, **`severity`**) → **§2**.
 - [ ] **Triage:** `agents triage` into `.agents-triage/...` or a scratch **`--output`** dir; capture **`triage-queue.json`** path and **`items.length`** (**`items`** should mirror **`findings`**) → **§3**.
 - [ ] **Fix:** address **`findings`** / **`items`** one at a time; **each** fix that touches the tree gets **its own commit** (see [One commit per actionable finding](#one-commit-per-actionable-finding-required)); keep each diff minimal; extend **§5** after each remediation commit.
-- [ ] **Verify gates:** `bun run check && bun test` again after fixes; refresh **§1**; rerun **`agents code-review`** when edits are broad or touch harness contracts.
+- [ ] **Verify gates:** Re-run the same documented verification after fixes; refresh **§1**; rerun **`agents code-review`** when edits are broad or touch harness contracts.
 - [ ] **Final pipeline:** rerun **`agents code-review`** then **`agents triage --from code-review`** (add **`--result …`** when not using workspace default **`result.json`**); record fresh **§2** (**`findings`**) + **§3** (**`items`**); **`items.length === 0`** on final ingest — read **`items`** from **`.agents-triage/<slug>/triage-queue.json`**, scratch **`--output`**, or parse **`items`** from **`--stdout --format json`** the same way.
 - [ ] **Closed-out report:** finalize **§4** (done or documented exits); confirm **§5** covers every code change vs **`finding.id`** (or duplicated ids in one commit body).
 - [ ] **Safeguards:** [Stopping endless churn](#stopping-endless-churn) — round cap / no item churn / documented exits validated; if stopping early, §2–§4 still reflects residual **`findings`** / **`items`**.
@@ -111,7 +111,7 @@ Agents and humans chasing noisy LLM output can spin; cap the churn explicitly.
 
 Compose the **five-part work report** from [Reporting work done](#reporting-work-done):
 
-- §1 Gates green — **`bun run check`** and **`bun test`** (unless your checkout deliberately scoped narrower tests—say so).
+- §1 Gates green — every verification step you cite in §1 passed (or call out deliberate narrower scope and why).
 - §2 Final **`result.json`** with **`findings`** enumerated — if **`findings.length === 0`**, say so explicitly; otherwise list **`id` + title** (and note **`report.md`** path when handy).
 - §3 Final **`triage-queue.json`** (or stdout ingest) — **`items.length === 0`** is the automation bar; **`items`** should match **`findings`** on fresh ingest for this producer.
 - §4 **Disposition** — **`items`/findings drained by code**, or each remainder tagged **`false_positive`**, **`accepted_risk`** (ADR/issue link), **`deferred`** (ticket)—in the report text, not only in stray chat.
@@ -126,7 +126,7 @@ If you maintain other Agent Skills elsewhere, wire them by **role**—do not har
 - **PR merge readiness** (comments, conflicts, CI loop): install a “babysit PR” style skill from your skills collection or dotfiles; open that skill’s `SKILL.md` when you need that workflow.
 - **CI failure triage** (GitHub Actions logs → local repro): install a “CI triage” style skill from your skills collection or internal docs; open its `SKILL.md` when Actions is red.
 
-Discover skills with your host’s usual mechanism (for example Cursor’s [Agent Skills](https://cursor.com/docs/skills) directories or Claude Code’s [skills](https://docs.anthropic.com/en/docs/claude-code/skills)); use **`agents doctor`** after installing **`@aguil/agents`** to verify CLI semver against [skills.json](../skills.json).
+Discover skills with your host’s usual mechanism (for example Cursor’s [Agent Skills](https://cursor.com/docs/skills) directories or Claude Code’s [skills](https://docs.anthropic.com/en/docs/claude-code/skills)); use **`agents doctor`** after installing the Agents CLI to verify semver against the skills manifest you installed from (for example [skills.json](../skills.json) when this skill ships beside that file).
 
 ## Gotchas worth remembering
 
