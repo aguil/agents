@@ -125,7 +125,7 @@ If you maintain other Agent Skills elsewhere, wire them by **role**—do not har
 - **PR merge readiness** (comments, conflicts, CI loop): install a “babysit PR” style skill from your skills collection or dotfiles; open that skill’s `SKILL.md` when you need that workflow.
 - **CI failure triage** (GitHub Actions logs → local repro): install a “CI triage” style skill from your skills collection or internal docs; open its `SKILL.md` when Actions is red.
 
-Discover skills with your host’s usual mechanism (for example Cursor’s [Agent Skills](https://cursor.com/docs/skills) directories or Claude Code’s [skills](https://docs.anthropic.com/en/docs/claude-code/skills)); use **`agents skills doctor`** after installing **`@aguil/agents`** to verify CLI semver against [skills.json](skills.json).
+Discover skills with your host’s usual mechanism (for example Cursor’s [Agent Skills](https://cursor.com/docs/skills) directories or Claude Code’s [skills](https://docs.anthropic.com/en/docs/claude-code/skills)); use **`agents doctor`** after installing **`@aguil/agents`** to verify CLI semver against [skills.json](skills.json).
 
 ## Gotchas worth remembering
 

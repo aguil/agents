@@ -67,7 +67,7 @@ test("agents triage --help documents --from", async () => {
   }
 });
 
-test("agents skills doctor exits 0 in this monorepo", async () => {
+test("agents doctor exits 0 in this monorepo", async () => {
   const prevLog = console.log;
   const prevErr = console.error;
   let out = "";
@@ -76,11 +76,26 @@ test("agents skills doctor exits 0 in this monorepo", async () => {
   };
   console.error = () => {};
   try {
-    const code = await agentsMain(["skills", "doctor"]);
+    const code = await agentsMain(["doctor"]);
     expect(code).toBe(0);
     expect(out).toContain("review-fix-loop");
   } finally {
     console.log = prevLog;
+    console.error = prevErr;
+  }
+});
+
+test("agents skills doctor points to agents doctor", async () => {
+  const prevErr = console.error;
+  let err = "";
+  console.error = (...args: unknown[]) => {
+    err += `${args.join(" ")}\n`;
+  };
+  try {
+    const code = await agentsMain(["skills", "doctor"]);
+    expect(code).toBe(1);
+    expect(err).toContain("agents doctor");
+  } finally {
     console.error = prevErr;
   }
 });

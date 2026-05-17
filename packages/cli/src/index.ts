@@ -46,6 +46,30 @@ export async function main(
     return 0;
   }
 
+  if (argv[0] === "doctor") {
+    const {
+      resolveDoctorHelp,
+      renderDoctorHelp,
+      doctorHelpStderrExtras,
+      runAgentsDoctor,
+    } = await import("./doctor-main");
+    const doctorHelpReq = resolveDoctorHelp(argv);
+    if (doctorHelpReq !== null) {
+      console.log(renderDoctorHelp(doctorHelpReq));
+      for (const line of doctorHelpStderrExtras(doctorHelpReq)) {
+        console.error(line);
+      }
+      return 0;
+    }
+    if (argv.length > 1) {
+      console.error(
+        "agents doctor does not accept arguments (try: agents doctor --help).",
+      );
+      return 1;
+    }
+    return await runAgentsDoctor();
+  }
+
   if (argv[0] === "skills") {
     const {
       resolveSkillsHelp,

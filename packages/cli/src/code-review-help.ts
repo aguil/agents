@@ -168,7 +168,8 @@ Getting help (context-specific option lists):
 
   agents triage --help                     Normalize triage queues from producer output
 
-  agents skills --help                     List, doctor, or install Agent Skills playbooks (docs/skills/)
+  agents doctor --help                     Check agents semver vs bundled docs/skills playbooks
+  agents skills --help                     List or install Agent Skills playbooks (docs/skills/)
 
 Deprecated spelling (shows help anyway):
 
@@ -180,7 +181,8 @@ Commands:
   code-review replay [path] [options]   Replay with optional bundle path (-> --context-bundle)
   code-review post [options]            Publish pending PR review from result.json
   triage [options]                       Build triage-queue files (--from producer; code-review today)
-  skills <command>                       List, doctor, or install playbooks from docs/skills/`;
+  doctor                                 Verify agents --version vs docs/skills minAgentsVersion
+  skills <command>                       List or install playbooks from docs/skills/`;
 }
 
 function legacyRunReminderLine(include: boolean): string {

@@ -1,48 +1,11 @@
 /**
- * `agents skills` — list manifest, doctor against `agents --version`, install playbooks to ~/.agents/skills/.
+ * `agents skills` — list manifest, install playbooks to ~/.agents/skills/.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const CLI_SRC_DIR = dirname(fileURLToPath(import.meta.url));
-
-function findDocsSkillsAnchorDir(): string {
-  let dir = CLI_SRC_DIR;
-  for (let i = 0; i < 10; i += 1) {
-    const marker = join(dir, "docs", "skills", "skills.json");
-    if (existsSync(marker)) {
-      return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) {
-      break;
-    }
-    dir = parent;
-  }
-  throw new Error(
-    "Could not locate docs/skills/skills.json (run from aguil/agents checkout or use an installed @aguil/agents layout that ships docs/skills/).",
-  );
-}
-
-const REPO_ROOT = findDocsSkillsAnchorDir();
-const DOCS_SKILLS_ROOT = join(REPO_ROOT, "docs", "skills");
-const MANIFEST_PATH = join(DOCS_SKILLS_ROOT, "skills.json");
-
-type SkillManifestEntry = {
-  readonly id: string;
-  readonly path: string;
-  readonly summary: string;
-  readonly minAgentsVersion: string;
-  readonly tags?: readonly string[];
-};
-
-type SkillsManifest = {
-  readonly schemaVersion: number;
-  readonly skills: readonly SkillManifestEntry[];
-};
+import { join } from "node:path";
+import { DOCS_SKILLS_ROOT, loadSkillsManifest } from "./skills-pack";
 
 export type SkillsHelpRequest =
   | { readonly kind: "overview" }
@@ -67,7 +30,7 @@ export function resolveSkillsHelp(
     return { kind: "overview" };
   }
   const sub = rest[0];
-  if (sub === "list" || sub === "doctor" || sub === "install") {
+  if (sub === "list" || sub === "install" || sub === "doctor") {
     return { kind: "overview" };
   }
   return { kind: "overview", unknownSubcommand: sub };
@@ -82,13 +45,14 @@ export function renderSkillsHelp(req: SkillsHelpRequest): string {
 
 Commands:
   list                 Print docs/skills/skills.json
-  doctor               Verify agents --version satisfies each skill's minAgentsVersion
   install <skill-id>   Copy SKILL.md into ~/.agents/skills/<id>/ (--dry-run to preview commands only)
 
 Environment:
-  AGENTS_CLI           Path to agents launcher for doctor (optional; default: PATH lookup)
+  AGENTS_CLI           Optional; used by agents doctor (see agents doctor --help)
 
 Canonical playbooks live under docs/skills/<id>/ in the aguil/agents repository.
+
+Verify CLI semver vs bundled skills: agents doctor
 `;
 }
 
@@ -98,134 +62,20 @@ export function skillsHelpStderrExtras(
   if ("unknownSubcommand" in req && req.unknownSubcommand !== undefined) {
     return [
       `Unknown skills subcommand '${req.unknownSubcommand}'.`,
-      "Expected list, doctor, or install — see 'agents skills --help'.",
+      "Expected list or install — see 'agents skills --help'.",
     ];
   }
   return [];
 }
 
-async function loadManifest(): Promise<SkillsManifest> {
-  const url = Bun.pathToFileURL(MANIFEST_PATH).href;
-  const mod = (await import(url, { with: { type: "json" } })) as {
-    default: SkillsManifest;
-  };
-  return mod.default;
-}
-
-function parseSemverPrefix(v: string): readonly [number, number, number] {
-  const m = /^v?(\d+)\.(\d+)\.(\d+)/u.exec(v.trim());
-  if (m === null) {
-    return [0, 0, 0];
-  }
-  return [
-    Number.parseInt(m[1] ?? "0", 10),
-    Number.parseInt(m[2] ?? "0", 10),
-    Number.parseInt(m[3] ?? "0", 10),
-  ];
-}
-
-function semverGte(candidate: string, minimum: string): boolean {
-  const a = parseSemverPrefix(candidate);
-  const b = parseSemverPrefix(minimum);
-  for (let i = 0; i < 3; i += 1) {
-    if (a[i] !== b[i]) {
-      return a[i] > b[i];
-    }
-  }
-  return true;
-}
-
-function resolveAgentsExecutable(): string | null {
-  const fromEnv = process.env.AGENTS_CLI?.trim();
-  if (fromEnv !== undefined && fromEnv.length > 0) {
-    return fromEnv;
-  }
-  return Bun.which("agents");
-}
-
-function tryMonorepoCliArgv(): readonly string[] | null {
-  const rootPkg = join(REPO_ROOT, "package.json");
-  const cliEntry = join(REPO_ROOT, "packages", "cli", "src", "index.ts");
-  if (!existsSync(rootPkg) || !existsSync(cliEntry)) {
-    return null;
-  }
-  try {
-    const j = JSON.parse(readFileSync(rootPkg, "utf8")) as { name?: string };
-    if (j.name !== "@aguil/agents") {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-  const bun = Bun.which("bun");
-  if (bun === null) {
-    return null;
-  }
-  return [bun, cliEntry];
-}
-
-async function runAgentsVersionArgv(
-  argv: readonly string[],
-): Promise<string | null> {
-  const proc = Bun.spawn([...argv], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const code = await proc.exited;
-  if (code !== 0) {
-    return null;
-  }
-  const out = await new Response(proc.stdout).text();
-  const line = out.trim().split(/\r?\n/u)[0]?.trim();
-  return line ?? null;
-}
-
 async function cmdList(): Promise<number> {
-  const manifest = await loadManifest();
+  const manifest = await loadSkillsManifest();
   console.log(`${JSON.stringify(manifest, null, 2)}\n`);
   return 0;
 }
 
-async function cmdDoctor(): Promise<number> {
-  const manifest = await loadManifest();
-  const exe = resolveAgentsExecutable();
-  const mono = tryMonorepoCliArgv();
-  let versionArgv: readonly string[];
-  let label: string;
-  if (exe !== null) {
-    versionArgv = [exe, "--version"];
-    label = exe;
-  } else if (mono !== null) {
-    versionArgv = [...mono, "--version"];
-    label = versionArgv.join(" ");
-  } else {
-    console.error(
-      "Could not find `agents` on PATH. Install `@aguil/agents` globally or set AGENTS_CLI to your launcher.",
-    );
-    return 1;
-  }
-  const ver = await runAgentsVersionArgv(versionArgv);
-  if (ver === null) {
-    console.error(`Could not read version from: ${label}`);
-    return 1;
-  }
-  console.log(`agents: ${label}`);
-  console.log(`version: ${ver}`);
-  let ok = true;
-  for (const s of manifest.skills) {
-    const pass = semverGte(ver, s.minAgentsVersion);
-    if (!pass) {
-      ok = false;
-    }
-    console.log(
-      `${pass ? "ok" : "FAIL"}  skill=${s.id}  need>=${s.minAgentsVersion}`,
-    );
-  }
-  return ok ? 0 : 1;
-}
-
 async function cmdInstall(skillId: string, dryRun: boolean): Promise<number> {
-  const manifest = await loadManifest();
+  const manifest = await loadSkillsManifest();
   const skill = manifest.skills.find((s) => s.id === skillId);
   if (skill === undefined) {
     console.error(`Unknown skill id: ${skillId}`);
@@ -271,7 +121,6 @@ function printUsage(): void {
 
 Commands:
   list                 Print docs/skills/skills.json
-  doctor               Verify agents --version satisfies minAgentsVersion
   install <skill-id>   Copy into ~/.agents/skills/<id>/ (--dry-run to preview)
 
 Try: agents skills --help
@@ -288,9 +137,6 @@ export async function runSkillsCli(argv: readonly string[]): Promise<number> {
   if (cmd === "list") {
     return await cmdList();
   }
-  if (cmd === "doctor") {
-    return await cmdDoctor();
-  }
   if (cmd === "install") {
     const skillId = argv[1];
     if (skillId === undefined || skillId.length === 0) {
@@ -299,6 +145,12 @@ export async function runSkillsCli(argv: readonly string[]): Promise<number> {
     }
     const dryRun = argv.includes("--dry-run");
     return await cmdInstall(skillId, dryRun);
+  }
+  if (cmd === "doctor") {
+    console.error(
+      "`agents skills doctor` was removed; use `agents doctor` instead.",
+    );
+    return 1;
   }
   console.error(`Unknown skills command: ${cmd}`);
   printUsage();

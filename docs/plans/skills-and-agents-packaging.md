@@ -12,7 +12,7 @@ Skills are **portable playbook documents** (Markdown, optionally with YAML front
 - **`docs/skills/`** (playbooks + [skills.json](../../docs/skills/skills.json)), copied by [scripts/prepare-npm-publish.ts](../../scripts/prepare-npm-publish.ts) into the npm pack alongside `dist/`
 - `README.md` (from [README.npm.md](../../README.npm.md)) and `LICENSE`
 
-Canonical playbooks live under **[`docs/skills/`](../../docs/skills/README.md)** in git. **Supported install path:** **`agents skills install <id>`** (see **`agents skills --help`**) which reads **`docs/skills/skills.json`** and copies into the operator’s global **`~/.agents/skills/<id>/`** by default. **`agents skills list`** and **`agents skills doctor`** validate manifest paths and **`agents --version`** vs **`minAgentsVersion`**.
+Canonical playbooks live under **[`docs/skills/`](../../docs/skills/README.md)** in git. **Supported install path:** **`agents skills install <id>`** (see **`agents skills --help`**) which reads **`docs/skills/skills.json`** and copies into the operator’s global **`~/.agents/skills/<id>/`** by default. **`agents skills list`** prints the manifest; **`agents doctor`** checks **`agents --version`** vs each skill’s **`minAgentsVersion`** (see **`agents doctor --help`**).
 
 There is **no** separate `@aguil/agents-skills` npm package and **no** maintained third-party CLI (e.g. `npx skills add`) install path in this repository’s docs.
 
@@ -42,7 +42,7 @@ flowchart TB
 - **Playbook → CLI:** Commands (`agents code-review`, `agents triage`), flags (`--from`, `--result`, `--stdout`, etc.), and exit semantics.
 - **Playbook → harness docs:** e.g. merged config / no fabricated adapter rules → [harnesses/code-review/README.md](../../harnesses/code-review/README.md).
 - **Playbook → artifact layout:** `.review-agent/`, `.agents-triage/`, `result.json` / `triage-queue.json` (schemas in `@aguil/agents-triage` / `@aguil/agents-core`).
-- **CLI does not depend on playbooks at runtime:** No import of skill bodies for harness execution; **`agents skills`** reads markdown only for install/list/doctor.
+- **CLI does not depend on playbooks at runtime:** No import of skill bodies for harness execution; **`agents skills`** reads markdown only for install/list, and **`agents doctor`** reads **`skills.json`** for semver checks.
 
 **Portability gap:** Embedded references to **one user’s absolute paths** or **one vendor’s skill directory** break cloning and other agents. Prefer **repository-relative paths**, **environment variables**, or **stable documentation URLs**.
 
@@ -110,7 +110,7 @@ Project-relative paths are **unchanged** on Windows; only **user-global** trees 
 ## Recommendations
 
 1. **Canonical path:** **`docs/skills/`** in git; **`.cursor/skills/`** only as an optional local symlink/copy for Cursor discovery.
-2. **Install path:** document **`agents skills install`** only; keep **`minAgentsVersion`** in **`docs/skills/skills.json`** for **`agents skills doctor`**.
+2. **Install path:** document **`agents skills install`** only; keep **`minAgentsVersion`** in **`docs/skills/skills.json`** for **`agents doctor`**.
 3. **Published tarball:** keep **`docs/skills/`** in the npm **`files`** list so global installs retain playbooks.
 
 ## Future playbooks
@@ -120,4 +120,4 @@ Same contract: declare CLI + schema assumptions; avoid host-specific paths; exte
 ## Optional follow-ups
 
 - Add **`agents skills install --target <dir>`** if operators need non-default destinations without hand-editing copies.
-- Expand **`agents skills doctor`** to validate skill markdown mentions only existing CLI flags (deeper contract tests).
+- Expand **`agents doctor`** to validate skill markdown mentions only existing CLI flags (deeper contract tests).

@@ -2977,13 +2977,14 @@ test("agents triage --stdout --format json prints envelope", async () => {
   }
 });
 
-test("code-review overview help mentions agents triage and skills", () => {
+test("code-review overview help mentions agents triage, doctor, and skills", () => {
   const overview = resolveCodeReviewHelp([]);
   expect(overview).not.toBeNull();
   if (overview !== null && overview.kind === "overview") {
     const rendered = renderCodeReviewHelp(overview);
     expect(rendered).toContain("agents triage --help");
     expect(rendered).toContain("triage [options]");
+    expect(rendered).toContain("agents doctor --help");
     expect(rendered).toContain("agents skills --help");
     expect(rendered).toContain("skills <command>");
   }
