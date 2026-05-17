@@ -8,4 +8,4 @@ Portable Markdown playbooks for workflows that use the **`agents`** CLI (for exa
 
 **Check CLI vs playbooks:** **`agents doctor`** (see **`agents doctor --help`**). **Install (supported path):** from a checkout or after `npm install -g @aguil/agents`, run **`agents skills install <id>`** (see **`agents skills --help`**). Manifest: [skills.json](skills.json).
 
-For host-specific locations (Cursor, Claude Code, OpenCode), see [plans/skills-and-agents-packaging.md](../plans/skills-and-agents-packaging.md).
+For where hosts load skills from, see vendor docs (paths are on the operator’s machine or workspace): [Cursor Agent Skills](https://cursor.com/docs/skills), [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills), [OpenCode config](https://open-code.ai/en/docs/config).
