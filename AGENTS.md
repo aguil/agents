@@ -10,3 +10,4 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
 - Prefer deterministic code for lifecycle, logging, scratchpads, validation gates, and reporting; reserve LLM calls for review reasoning.
 - Conventional commits: use `!` after the scope in the title when the change is breaking (for example `feat(cli)!:`), and spell out specifics in the body or a `BREAKING CHANGE:` footer when useful.
 - Store design notes and product requirements under `docs/`.
+- Store portable Agent Skills playbooks under `docs/skills/`; install with **`agents skills install`** (see `agents skills --help`).

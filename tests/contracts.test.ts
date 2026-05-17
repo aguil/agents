@@ -296,13 +296,13 @@ test("resolveCodeReviewHelp maps contextual help scopes", () => {
 
 test("codeReviewHelpStderrExtras surfaces unknown command hints", () => {
   const top = resolveCodeReviewHelp(["nope", "-h"]);
-  if (top === undefined) {
+  if (top === null) {
     throw new Error("expected code review help context");
   }
   expect(codeReviewHelpStderrExtras(top)).toHaveLength(2);
 
   const badCr = resolveCodeReviewHelp(["code-review", "nope-sub", "--help"]);
-  if (badCr === undefined) {
+  if (badCr === null) {
     throw new Error("expected code-review subcommand help context");
   }
   expect(badCr).toMatchObject({
@@ -2655,7 +2655,7 @@ test("sanitizeRepoAdapterExecutablePartial strips repo-managed steering knobs", 
     scratchpad: "/evil/sp",
     cursorArgs: ["--trust"],
   });
-  expect(strippedKeys.sort()).toEqual([
+  expect([...strippedKeys].sort()).toEqual([
     "adapter",
     "claude",
     "claudeArgs",
@@ -2977,12 +2977,14 @@ test("agents triage --stdout --format json prints envelope", async () => {
   }
 });
 
-test("code-review overview help mentions agents triage", () => {
+test("code-review overview help mentions agents triage and skills", () => {
   const overview = resolveCodeReviewHelp([]);
   expect(overview).not.toBeNull();
   if (overview !== null && overview.kind === "overview") {
     const rendered = renderCodeReviewHelp(overview);
     expect(rendered).toContain("agents triage --help");
     expect(rendered).toContain("triage [options]");
+    expect(rendered).toContain("agents skills --help");
+    expect(rendered).toContain("skills <command>");
   }
 });

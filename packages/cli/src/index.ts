@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   CODE_REVIEW_ROLE_IDS,
@@ -36,6 +38,32 @@ import {
 export async function main(
   argv: readonly string[] = Bun.argv.slice(2),
 ): Promise<number> {
+  if (
+    argv.length === 1 &&
+    (argv[0] === "--version" || argv[0] === "-V" || argv[0] === "-v")
+  ) {
+    console.log(readAgentsMonorepoVersion());
+    return 0;
+  }
+
+  if (argv[0] === "skills") {
+    const {
+      resolveSkillsHelp,
+      renderSkillsHelp,
+      runSkillsCli,
+      skillsHelpStderrExtras,
+    } = await import("./skills-main");
+    const skillsHelpReq = resolveSkillsHelp(argv);
+    if (skillsHelpReq !== null) {
+      console.log(renderSkillsHelp(skillsHelpReq));
+      for (const line of skillsHelpStderrExtras(skillsHelpReq)) {
+        console.error(line);
+      }
+      return 0;
+    }
+    return await runSkillsCli(argv.slice(1));
+  }
+
   const triageHelpReq = resolveTriageHelp(argv);
   if (triageHelpReq !== null) {
     console.log(renderTriageHelp(triageHelpReq));
@@ -2625,6 +2653,21 @@ function extractRightSideHunkPositions(
     }
   }
   return positions;
+}
+
+function readAgentsMonorepoVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const rootPkg = join(here, "..", "..", "package.json");
+  try {
+    const raw = readFileSync(rootPkg, "utf8");
+    const j = JSON.parse(raw) as { version?: string };
+    if (typeof j.version === "string" && j.version.length > 0) {
+      return j.version;
+    }
+  } catch {
+    // ignore missing or invalid package.json
+  }
+  return "0.0.0";
 }
 
 if (import.meta.main) {

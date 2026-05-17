@@ -23,6 +23,11 @@
       "@aguil/agents-telemetry": ["packages/telemetry/src/index.ts"]
     }
   },
-  "include": ["packages/**/*.ts", "harnesses/**/*.ts", "scripts/**/*.ts"],
+  "include": [
+    "packages/**/*.ts",
+    "harnesses/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

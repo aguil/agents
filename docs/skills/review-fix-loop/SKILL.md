@@ -12,7 +12,7 @@ description: >-
 
 Use this playbook for exercising this repo’s agent harnesses and keeping changes honest before you push.
 
-**Agents following this skill:** Do **not** invent or override adapter or model settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever the merged CLI resolution already applies: harness defaults, then user **`~/.config/agents/code-review/config.json`**, optional copied **`review-agent.config.example.json`** → **`.review-agent/config.json`** (repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied them**. **Do **not** add **`--dry-run`** (or drop it) on your own**—mirror whatever the operator specified for this session (normal **`runs/`** output vs **`--dry-run`** scratch). Mirrors real operator workflow; see `harnesses/code-review/README.md` (merge order).
+**Agents following this skill:** Do **not** invent or override adapter or model settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever the merged CLI resolution already applies: harness defaults, then user **code-review config** under the XDG config directory (typically **`~/.config/agents/code-review/config.json`** on Unix, **`%USERPROFILE%\.config\agents\code-review\config.json`** on Windows), optional copied **`review-agent.config.example.json`** → **`.review-agent/config.json`** (repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied them**. **Do **not** add **`--dry-run`** (or drop it) on your own**—mirror whatever the operator specified for this session (normal **`runs/`** output vs **`--dry-run`** scratch). Mirrors real operator workflow; see `harnesses/code-review/README.md` (merge order).
 
 ## Goal
 
@@ -24,7 +24,7 @@ Verify in **`triage-queue.json`** under **`.agents-triage/<producerShort>-<hash1
 
 ## Reporting work done
 
-Use **one repeatable shape** for status updates (PR replies, Cursor session wrap-ups, checkpoints). Prefer **facts from artifacts** over paraphrase.
+Use **one repeatable shape** for status updates (PR replies, agent session wrap-ups, checkpoints). Prefer **facts from artifacts** over paraphrase.
 
 1. **Gates:** **`bun run check`** — pass/fail · **`bun test`** — pass/fail (note scope if not full suite).
 2. **Code-review:** Exact command/recording (replay path if replay); note whether **`--dry-run`** was used; **`runId`** from **`result.json`** (or CLI summary line); absolute path to **`result.json`**; **`findings.length`**; enumerate producer findings — at minimum each **`finding.id`** and **`finding.title`** (add **`severity`** if useful). Optionally paste or point to **`report.md`** under the same run directory.
@@ -118,14 +118,14 @@ Compose the **five-part work report** from [Reporting work done](#reporting-work
 
 Artifacts (`.agents-triage/…`) are disposable after you excerpt paths and counts into the report.
 
-## Optional Cursor skills (if you use them)
+## Related playbooks (optional)
 
-These live outside this repo; open the `SKILL.md` when you want a structured workflow instead of ad-hoc clicking.
+If you maintain other Agent Skills elsewhere, wire them by **role**—do not hard-code machine-specific paths:
 
-| Situation                                                 | Skill path                                            |
-| --------------------------------------------------------- | ----------------------------------------------------- |
-| Keep a PR merge-ready (comments, conflicts, CI loop)      | `/home/jasona/.cursor/skills-cursor/babysit/SKILL.md` |
-| Triage a red GitHub Actions check with logs → local repro | `/home/jasona/.agents/skills/ci-triage/SKILL.md`      |
+- **PR merge readiness** (comments, conflicts, CI loop): install a “babysit PR” style skill from your skills collection or dotfiles; open that skill’s `SKILL.md` when you need that workflow.
+- **CI failure triage** (GitHub Actions logs → local repro): install a “CI triage” style skill from your skills collection or internal docs; open its `SKILL.md` when Actions is red.
+
+Discover skills with your host’s usual mechanism (for example Cursor’s [Agent Skills](https://cursor.com/docs/skills) directories or Claude Code’s [skills](https://docs.anthropic.com/en/docs/claude-code/skills)); use **`agents skills doctor`** after installing **`@aguil/agents`** to verify CLI semver against [skills.json](skills.json).
 
 ## Gotchas worth remembering
 
