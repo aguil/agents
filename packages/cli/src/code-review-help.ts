@@ -166,6 +166,11 @@ Getting help (context-specific option lists):
   agents code-review replay --help         Replay synopsis and shortcuts
   agents code-review post --help           Publish from stored result.json
 
+  agents triage --help                     Normalize triage queues from producer output
+
+  agents doctor --help                     Check agents semver vs bundled docs/skills playbooks
+  agents skills --help                     List or install Agent Skills playbooks (docs/skills/)
+
 Deprecated spelling (shows help anyway):
 
   agents run code-review [--help]
@@ -174,7 +179,10 @@ Commands:
 
   code-review [options]                 Run reviewers and write artifacts
   code-review replay [path] [options]   Replay with optional bundle path (-> --context-bundle)
-  code-review post [options]            Publish pending PR review from result.json`;
+  code-review post [options]            Publish pending PR review from result.json
+  triage [options]                       Build triage-queue files (--from producer; code-review today)
+  doctor                                 Verify agents --version vs docs/skills minAgentsVersion
+  skills <command>                       List or install playbooks from docs/skills/`;
 }
 
 function legacyRunReminderLine(include: boolean): string {
@@ -246,7 +254,7 @@ Post-only publishes from result.json — adapter/model/consensus/context collect
 
 Posting flags:
 
-  --result <path>        Stored result JSON (omit to auto-discover latest under <workspace>/.review-agent/runs/)
+  --result <path>        Stored result JSON (omit to auto-discover latest under <workspace>/.review-agent/runs/ only; dry-run artifacts are never posted)
   --pr <number>          Explicit posting/metadata PR when inferred values are insufficient
   --post-pr <number>     Alternate posting PR when differing from inferred/--pr pairing (rare)
   --pending-review       Accepted but ignored (post implies pending review semantics)

@@ -29,6 +29,7 @@
         "@aguil/agents-code-review": "workspace:*",
         "@aguil/agents-core": "workspace:*",
         "@aguil/agents-reporting": "workspace:*",
+        "@aguil/agents-triage": "workspace:*",
       },
     },
     "packages/context": {
@@ -72,6 +73,17 @@
         "@aguil/agents-core": "workspace:*",
       },
     },
+    "packages/triage": {
+      "name": "@aguil/agents-triage",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-core": "workspace:*",
+        "@aguil/agents-reporting": "workspace:*",
+      },
+      "optionalDependencies": {
+        "@toon-format/toon": "^2.2.0",
+      },
+    },
   },
   "packages": {
     "@aguil/agents-cli": ["@aguil/agents-cli@workspace:packages/cli"],
@@ -89,6 +101,8 @@
     "@aguil/agents-reporting": ["@aguil/agents-reporting@workspace:packages/reporting"],
 
     "@aguil/agents-telemetry": ["@aguil/agents-telemetry@workspace:packages/telemetry"],
+
+    "@aguil/agents-triage": ["@aguil/agents-triage@workspace:packages/triage"],
 
     "@biomejs/biome": ["@biomejs/biome@2.4.15", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.4.15", "@biomejs/cli-darwin-x64": "2.4.15", "@biomejs/cli-linux-arm64": "2.4.15", "@biomejs/cli-linux-arm64-musl": "2.4.15", "@biomejs/cli-linux-x64": "2.4.15", "@biomejs/cli-linux-x64-musl": "2.4.15", "@biomejs/cli-win32-arm64": "2.4.15", "@biomejs/cli-win32-x64": "2.4.15" }, "bin": { "biome": "bin/biome" } }, "sha512-j5VH3a/h/HXTKBM50MDMxRCzkeLv9S2XJcW2WgnZT1+xyisi+0bISrXR82gCX+8S9lvK0skEvHJRN+3Ktr2hlw=="],
 
@@ -109,6 +123,9 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.4.15", "", { "os": "win32", "cpu": "x64" }, "sha512-zBrGq5mx5wwpnow4+2BxUvleDM+GNd4sLbPaMapsSLQLD0NGRCquqPBTgN+7XkUteHvj7M+BstuI8tmnV7+HgQ=="],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
+    "@toon-format/toon": ["@toon-format/toon@2.2.0", "", {}, "sha512-FMYqrlZnMN72YIT9KVt7Kxc41gat+RgMIzDmvRRPHw0J7pqW/FeBGDY/4BIWjT71Y+EdI9fCJip90uXuGuYhjw=="],
+
+    "@types/bun": ["@types/bun@1.3.13", "", { "dependencies": { "bun-types": "1.3.13" } }, "sha512-9fqXWk5YIHGGnUau9TEi+qdlTYDAnOj+xLCmSTwXfAIqXr2x4tytJb43E9uCvt09zJURKXwAtkoH4nLQfzeTXw=="],
 
     "@types/node": ["@types/node@25.6.0", "", { "dependencies": { "undici-types": "~7.19.0" } }, "sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ=="],
 

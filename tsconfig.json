@@ -19,9 +19,15 @@
       "@aguil/agents-execution": ["packages/execution/src/index.ts"],
       "@aguil/agents-orchestration": ["packages/orchestration/src/index.ts"],
       "@aguil/agents-reporting": ["packages/reporting/src/index.ts"],
+      "@aguil/agents-triage": ["packages/triage/src/index.ts"],
       "@aguil/agents-telemetry": ["packages/telemetry/src/index.ts"]
     }
   },
-  "include": ["packages/**/*.ts", "harnesses/**/*.ts", "scripts/**/*.ts"],
+  "include": [
+    "packages/**/*.ts",
+    "harnesses/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

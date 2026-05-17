@@ -8,7 +8,8 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   CODE_REVIEW_ROLE_IDS,
@@ -57,6 +58,11 @@ import {
 } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
 import {
+  canonicalKeyForCodeReviewArtifact,
+  computeOutputSlug,
+  isToonEncodeAvailable,
+} from "@aguil/agents-triage";
+import {
   extractConfigDocument,
   mergeFlatConfigLayers,
   mergePresetMaps,
@@ -66,6 +72,7 @@ import {
 } from "../packages/cli/src/code-review-config";
 import {
   codeReviewHelpStderrExtras,
+  renderCodeReviewHelp,
   resolveCodeReviewHelp,
 } from "../packages/cli/src/code-review-help";
 import {
@@ -84,6 +91,10 @@ import {
   peelCodeReviewSubcommand,
   resolveEffectivePostOnly,
 } from "../packages/cli/src/parse-code-review-argv";
+import { parseTriageArgv } from "../packages/cli/src/parse-triage-argv";
+import { runTriageCli } from "../packages/cli/src/triage-main";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => {
   expect(peelCodeReviewSubcommand([])).toEqual({
@@ -285,13 +296,13 @@ test("resolveCodeReviewHelp maps contextual help scopes", () => {
 
 test("codeReviewHelpStderrExtras surfaces unknown command hints", () => {
   const top = resolveCodeReviewHelp(["nope", "-h"]);
-  if (top === undefined) {
+  if (top === null) {
     throw new Error("expected code review help context");
   }
   expect(codeReviewHelpStderrExtras(top)).toHaveLength(2);
 
   const badCr = resolveCodeReviewHelp(["code-review", "nope-sub", "--help"]);
-  if (badCr === undefined) {
+  if (badCr === null) {
     throw new Error("expected code-review subcommand help context");
   }
   expect(badCr).toMatchObject({
@@ -1102,6 +1113,37 @@ test("discovers latest run result path", async () => {
     const discovered = await discoverLatestResultPath(workspace);
     expect(discovered).toBe(
       join(runsRoot, "code-review-20260502120000-bbbb", "result.json"),
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("discoverLatestResultPath ignores dry-run when selecting post artifact", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-post-disc-over-"));
+  try {
+    const runsRoot = join(workspace, ".review-agent", "runs");
+    const dryRoot = join(workspace, ".review-agent", "dry-run");
+    await mkdir(join(runsRoot, "code-review-20260501120000-aaaa"), {
+      recursive: true,
+    });
+    await mkdir(join(dryRoot, "code-review-20260503120000-zzzz"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(runsRoot, "code-review-20260501120000-aaaa", "result.json"),
+      "{}\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dryRoot, "code-review-20260503120000-zzzz", "result.json"),
+      "{}\n",
+      "utf8",
+    );
+
+    const discovered = await discoverLatestResultPath(workspace);
+    expect(discovered).toBe(
+      join(runsRoot, "code-review-20260501120000-aaaa", "result.json"),
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -2613,7 +2655,7 @@ test("sanitizeRepoAdapterExecutablePartial strips repo-managed steering knobs", 
     scratchpad: "/evil/sp",
     cursorArgs: ["--trust"],
   });
-  expect(strippedKeys.sort()).toEqual([
+  expect([...strippedKeys].sort()).toEqual([
     "adapter",
     "claude",
     "claudeArgs",
@@ -2708,5 +2750,242 @@ test("resolveCodeReviewCliOptions uses harness packaged adapter below empty conf
     } else {
       process.env.XDG_CONFIG_HOME = prevXdg;
     }
+  }
+});
+
+test("parseTriageArgv defaults format to both and requires --from", () => {
+  expect(parseTriageArgv([]).ok).toBe(false);
+  const parsed = parseTriageArgv(["--from", "code-review"]);
+  expect(parsed.ok).toBe(true);
+  if (parsed.ok) {
+    expect(parsed.options.format).toBe("both");
+    expect(parsed.options.formatExplicit).toBe(false);
+    expect(parsed.options.stdout).toBeUndefined();
+  }
+});
+
+test("parseTriageArgv sets formatExplicit when --format is passed", () => {
+  const implicit = parseTriageArgv(["--from", "code-review"]);
+  expect(implicit.ok).toBe(true);
+  if (implicit.ok) {
+    expect(implicit.options.formatExplicit).toBe(false);
+  }
+  const explicit = parseTriageArgv([
+    "--from",
+    "code-review",
+    "--format",
+    "json",
+  ]);
+  expect(explicit.ok).toBe(true);
+  if (explicit.ok) {
+    expect(explicit.options.formatExplicit).toBe(true);
+    expect(explicit.options.format).toBe("json");
+  }
+});
+
+test("parseTriageArgv rejects --stdout unless format is json or toon", () => {
+  const bad = parseTriageArgv(["--from", "code-review", "--stdout"]);
+  expect(bad.ok).toBe(false);
+  const okJson = parseTriageArgv([
+    "--from",
+    "code-review",
+    "--stdout",
+    "--format",
+    "json",
+  ]);
+  expect(okJson.ok).toBe(true);
+  if (okJson.ok) {
+    expect(okJson.options.formatExplicit).toBe(true);
+  }
+});
+
+test("runTriageCli accepts legacy leading ingest token", async () => {
+  const workspace = await mkdtemp(
+    join(tmpdir(), "agents-triage-legacy-ingest-"),
+  );
+  try {
+    const resultRel = "result.json";
+    await writeFile(
+      join(workspace, resultRel),
+      JSON.stringify({ runId: "legacy", findings: [] }),
+      "utf8",
+    );
+    expect(
+      await runTriageCli([
+        "triage",
+        "ingest",
+        "--from",
+        "code-review",
+        "--workspace",
+        workspace,
+        "--result",
+        resultRel,
+        "--format",
+        "json",
+      ]),
+    ).toBe(0);
+    const slug = computeOutputSlug(
+      "code-review",
+      canonicalKeyForCodeReviewArtifact(join(workspace, resultRel)),
+    );
+    await readFile(
+      join(workspace, ".agents-triage", slug, "triage-queue.json"),
+      "utf8",
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("runTriageCli writes triage-queue.json and triage-queue.toon under slug dir", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-triage-ingest-"));
+  try {
+    const resultRel = join("custom", "result.json");
+    const resultAbs = join(workspace, resultRel);
+    await mkdir(dirname(resultAbs), { recursive: true });
+    await writeFile(
+      resultAbs,
+      JSON.stringify({
+        runId: "stored-run",
+        findings: [
+          {
+            id: "finding-1",
+            severity: "warning",
+            title: "Example",
+            description: "Detail line.",
+            evidence: "Evidence line.",
+            sourceRole: "quality",
+            validation: { status: "verified", details: "ok" },
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const slug = computeOutputSlug(
+      "code-review",
+      canonicalKeyForCodeReviewArtifact(resultAbs),
+    );
+    const outDir = join(workspace, ".agents-triage", slug);
+
+    expect(
+      await runTriageCli([
+        "triage",
+        "--from",
+        "code-review",
+        "--workspace",
+        workspace,
+        "--result",
+        resultRel,
+      ]),
+    ).toBe(0);
+
+    const jsonRaw = await readFile(join(outDir, "triage-queue.json"), "utf8");
+    const envelope = JSON.parse(jsonRaw) as { outputSlug?: string };
+    expect(envelope.outputSlug).toBe(slug);
+    expect(jsonRaw.length).toBeGreaterThan(0);
+    const toonInstalled = await isToonEncodeAvailable();
+    if (toonInstalled) {
+      expect(
+        (await readFile(join(outDir, "triage-queue.toon"), "utf8")).length,
+      ).toBeGreaterThan(0);
+    } else {
+      await expect(
+        readFile(join(outDir, "triage-queue.toon"), "utf8"),
+      ).rejects.toThrow();
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("runTriageCli respects --output without extra slug segment", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-triage-output-"));
+  try {
+    const resultRel = "result.json";
+    const resultAbs = join(workspace, resultRel);
+    await writeFile(
+      resultAbs,
+      JSON.stringify({
+        runId: "r2",
+        findings: [],
+      }),
+      "utf8",
+    );
+    const explicit = join(workspace, "my-queue");
+    expect(
+      await runTriageCli([
+        "triage",
+        "--from",
+        "code-review",
+        "--workspace",
+        workspace,
+        "--result",
+        resultRel,
+        "--output",
+        "my-queue",
+        "--format",
+        "json",
+      ]),
+    ).toBe(0);
+    await readFile(join(explicit, "triage-queue.json"), "utf8");
+    await expect(
+      readFile(join(explicit, "triage-queue.toon"), "utf8"),
+    ).rejects.toThrow();
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("agents triage --stdout --format json prints envelope", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-triage-stdout-"));
+  try {
+    const resultRel = "result.json";
+    await writeFile(
+      join(workspace, resultRel),
+      JSON.stringify({
+        runId: "r3",
+        findings: [],
+      }),
+      "utf8",
+    );
+    const proc = Bun.spawnSync(
+      [
+        process.execPath,
+        "run",
+        "packages/cli/src/index.ts",
+        "triage",
+        "--from",
+        "code-review",
+        "--workspace",
+        workspace,
+        "--result",
+        resultRel,
+        "--stdout",
+        "--format",
+        "json",
+      ],
+      { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" },
+    );
+    expect(proc.exitCode).toBe(0);
+    const envelope = JSON.parse(proc.stdout.toString().trim()) as {
+      schemaId?: string;
+    };
+    expect(envelope.schemaId).toBeDefined();
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("code-review overview help mentions agents triage, doctor, and skills", () => {
+  const overview = resolveCodeReviewHelp([]);
+  expect(overview).not.toBeNull();
+  if (overview !== null && overview.kind === "overview") {
+    const rendered = renderCodeReviewHelp(overview);
+    expect(rendered).toContain("agents triage --help");
+    expect(rendered).toContain("triage [options]");
+    expect(rendered).toContain("agents doctor --help");
+    expect(rendered).toContain("agents skills --help");
+    expect(rendered).toContain("skills <command>");
   }
 });

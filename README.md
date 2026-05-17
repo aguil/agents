@@ -4,6 +4,10 @@ Reusable Bun/TypeScript harnesses for running specialized coding-agent workflows
 
 The repository starts with a code-review harness and shared runtime boundaries. Specialized harnesses should build on the shared packages instead of embedding process execution, context collection, reporting, or telemetry logic directly.
 
+## Agent playbooks (optional)
+
+Portable **Agent Skills** playbooks for `agents code-review` / `agents triage` workflows live under [`docs/skills/`](docs/skills/README.md). Use **`agents doctor`** (see **`agents doctor --help`**) to confirm your CLI semver satisfies bundled playbooks, then **`agents skills install <id>`** (see **`agents skills --help`**) to copy a playbook into your host’s skills directory (for example **`~/.agents/skills/<id>/`**) when you want that guidance in Cursor, Claude Code, or another compatible client. Published **`@aguil/agents`** tarballs include **`docs/skills/`** so the same commands work after `npm install -g`.
+
 ## Layout
 
 ```text

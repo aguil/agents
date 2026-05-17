@@ -1,0 +1,10 @@
+{
+  "log": "summary",
+  "reviewSummary": "impact",
+  "presets": {
+    "ci": {
+      "dryRun": true,
+      "log": "summary"
+    }
+  }
+}
