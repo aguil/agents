@@ -6,7 +6,7 @@ import { main as agentsMain } from "../packages/cli/src/index";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 const MANIFEST_PATH = join(REPO_ROOT, "docs/skills/skills.json");
-const DOC_SKILL = join(REPO_ROOT, "docs/skills/review-fix-loop/SKILL.md");
+const DOC_SKILL = join(REPO_ROOT, "docs/skills/self-review-checks/SKILL.md");
 
 test("skills manifest paths exist on disk", async () => {
   const raw = await readFile(MANIFEST_PATH, "utf8");
@@ -20,7 +20,7 @@ test("skills manifest paths exist on disk", async () => {
   expect(existsSync(DOC_SKILL)).toBe(true);
 });
 
-test("agents skills list exits 0 and prints review-fix-loop", async () => {
+test("agents skills list exits 0 and prints self-review-checks", async () => {
   const prev = console.log;
   let buf = "";
   console.log = (...args: unknown[]) => {
@@ -29,7 +29,7 @@ test("agents skills list exits 0 and prints review-fix-loop", async () => {
   try {
     const code = await agentsMain(["skills", "list"]);
     expect(code).toBe(0);
-    expect(buf).toContain("review-fix-loop");
+    expect(buf).toContain("self-review-checks");
     expect(buf).toContain("minAgentsVersion");
   } finally {
     console.log = prev;
@@ -78,7 +78,7 @@ test("agents doctor exits 0 in this monorepo", async () => {
   try {
     const code = await agentsMain(["doctor"]);
     expect(code).toBe(0);
-    expect(out).toContain("review-fix-loop");
+    expect(out).toContain("self-review-checks");
   } finally {
     console.log = prevLog;
     console.error = prevErr;

@@ -4,7 +4,7 @@ Portable Markdown playbooks for workflows that use the **`agents`** CLI (for exa
 
 | Playbook | Directory |
 | --- | --- |
-| Review / fix loop | [review-fix-loop/SKILL.md](review-fix-loop/SKILL.md) |
+| Self-review checks (draft → ready) | [self-review-checks/SKILL.md](self-review-checks/SKILL.md) |
 
 **Check CLI vs playbooks:** **`agents doctor`** (see **`agents doctor --help`**). **Install (supported path):** from a checkout or after `npm install -g @aguil/agents`, run **`agents skills install <id>`** (see **`agents skills --help`**). Manifest: [skills.json](skills.json).
 

@@ -127,7 +127,7 @@ Try: agents skills --help
 `);
 }
 
-/** argv after the leading \`skills\` token (e.g. \`["list"]\`, \`["install","review-fix-loop","--dry-run"]\`). */
+/** argv after the leading \`skills\` token (e.g. \`["list"]\`, \`["install","self-review-checks","--dry-run"]\`). */
 export async function runSkillsCli(argv: readonly string[]): Promise<number> {
   const cmd = argv[0];
   if (cmd === undefined || cmd === "--help" || cmd === "-h") {

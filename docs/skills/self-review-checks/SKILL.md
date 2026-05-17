@@ -1,20 +1,21 @@
 ---
-name: review-fix-loop
+name: self-review-checks
 description: >-
-  Manual-testing playbook for `agents code-review` / `agents triage`,
-  focused fixes, one commit per actionable finding, and local gates before push.
-  Completion uses a repeating work-report layout (gates, result.json findings,
-  triage items, disposition, commits) and empty triage items as the downstream
-  consumer bar — merged-config-only code-review; no fabricated adapter overrides.
+  PR author checklist to move a change from Draft to Ready for review: gates,
+  `agents code-review` / `agents triage`, one commit per actionable finding,
+  and a five-part work report. Empty triage `items` is the automation bar —
+  merged-config-only code-review; no fabricated adapter overrides.
 ---
 
-# Review / fix loop (manual testing playbook)
+# Self-review checks (draft → ready for review)
 
-Use this playbook for exercising this repo’s agent harnesses and keeping changes honest before you push.
+Use this playbook while the PR is still **Draft**: exercise agent harnesses, clear or document review/triage output, and only then mark the PR **Ready for review** (not merge).
 
 **Agents following this skill:** Do **not** invent or override adapter or model settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever the merged CLI resolution already applies: harness defaults, then user **code-review config** under the XDG config directory (typically **`~/.config/agents/code-review/config.json`** on Unix, **`%USERPROFILE%\.config\agents\code-review\config.json`** on Windows), optional copied **`review-agent.config.example.json`** → **`.review-agent/config.json`** (repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied them**. **Do **not** add **`--dry-run`** (or drop it) on your own**—mirror whatever the operator specified for this session (normal **`runs/`** output vs **`--dry-run`** scratch). Mirrors real operator workflow; see `harnesses/code-review/README.md` (merge order).
 
 ## Goal
+
+**Primary outcome:** the PR author is satisfied the branch is ready to leave **Draft** for **Ready for review**—local gates green, review/triage artifacts honest, and findings either fixed or explicitly dispositioned.
 
 Run the repository's documented verification gates before you treat the tree as trusted. Then run the repository's configured review harness, ingest the findings into a triage queue, fix the actionable items one at a time, and repeat until the queue is empty or the remaining items are explicitly documented.
 
@@ -34,7 +35,7 @@ Use **one repeatable shape** for status updates (PR replies, agent session wrap-
 
 Intermediate checkpoints (baseline, mid-fix) should still cite **§2–3** (**`findings.length`**, **`items.length`**, paths) even if §4–5 is “in progress.”
 
-## What “the loop” is
+## Repeat until ready for review
 
 1. Run an automated review (or replay) and capture artifacts.
 2. Normalize what needs attention into a stable queue you can scan or diff.
@@ -83,7 +84,7 @@ When you **change** the repo in response to a review finding (production code, t
 - Use a message that makes the mapping obvious (conventional commits as in repo `AGENTS.md` when applicable), and when rewriting or refining a fix commit message include the finding `id` or title, what is being addressed, how it is being addressed, and the full text of the finding in the body.
 - Version control particulars (`jj`, `git`, bookmarks, describe flags) follow the **checkout’s** `AGENTS.md` and your usual workflow; the rule above is independent of tooling.
 
-## A tight manual loop (checklist)
+## A tight manual checklist
 
 - [ ] **Baseline:** `bun run check && bun test` green on your branch; note pass/fail in your **work report §1**.
 - [ ] **Review:** run `agents code-review` (or replay) with a realistic workspace **using merged config** (no skill-invented `--adapter` / `--model`); capture **`runId`**, **`result.json`** path, and full **`findings`** list (**`id`**, **`title`**, **`severity`**) → **§2**.
@@ -92,18 +93,18 @@ When you **change** the repo in response to a review finding (production code, t
 - [ ] **Verify gates:** `bun run check && bun test` again after fixes; refresh **§1**; rerun **`agents code-review`** when edits are broad or touch harness contracts.
 - [ ] **Final pipeline:** rerun **`agents code-review`** then **`agents triage --from code-review`** (add **`--result …`** when not using workspace default **`result.json`**); record fresh **§2** (**`findings`**) + **§3** (**`items`**); **`items.length === 0`** on final ingest — read **`items`** from **`.agents-triage/<slug>/triage-queue.json`**, scratch **`--output`**, or parse **`items`** from **`--stdout --format json`** the same way.
 - [ ] **Closed-out report:** finalize **§4** (done or documented exits); confirm **§5** covers every code change vs **`finding.id`** (or duplicated ids in one commit body).
-- [ ] **Safeguards:** [Stopping endless loops](#stopping-endless-loops-agent--human-safeguards) — round cap / no item churn / documented exits validated; if stopping early, §2–§4 still reflects residual **`findings`** / **`items`**.
+- [ ] **Safeguards:** [Stopping endless churn](#stopping-endless-churn) — round cap / no item churn / documented exits validated; if stopping early, §2–§4 still reflects residual **`findings`** / **`items`**.
 - [ ] **Optional PR hygiene:** if this work is on GitHub, use your normal PR workflow (`gh pr checks`, comment threads, etc.).
 
-## Stopping endless loops (agent + human safeguards)
+## Stopping endless churn
 
 Agents and humans chasing noisy LLM output can spin; cap the churn explicitly.
 
 - **Round cap:** Bound full **review + triage ingest** pipelines per session (recommended **three**: baseline → fix pass → final squeeze **after substantive commits**). If **`items`** is still non-empty, stop and escalate to a human unless they extend budget.
 - **No-churn:** Compare serialized **`items`** fingerprints across runs (**`id`**, severity, stable title hash — whatever you routinely diff). Stop if **`items`** is **unchanged** after new commits (**oscillation**).
-- **Diminishing returns:** Two consecutive full pipelines (**`agents code-review` + `agents triage`**) where **`items.length`** is the same or non-decreasing **without** rationale tied to substantive new commits ⇒ stop with a concise delta for human triage outside the loop.
+- **Diminishing returns:** Two consecutive full pipelines (**`agents code-review` + `agents triage`**) where **`items.length`** is the same or non-decreasing **without** rationale tied to substantive new commits ⇒ stop with a concise delta for human triage outside this playbook.
 - **Scope freeze:** Declare the bounded change surface beforehand; forbid drive‑by refactors enlarging reviewer context.
-- **Document exits:** Any remaining **`items`** require categorized human notes (false positive / accepted risk / deferred with link)—not silent loop continuation.
+- **Document exits:** Any remaining **`items`** require categorized human notes (false positive / accepted risk / deferred with link)—not silent continuation without rationale.
 - **Time/token budget:** If wall‑clock exceeds a human-declared ceiling, halt with a snapshot of residual **`findings`** / **`items`** (ids + titles) and the **`result.json`** plus **`triage-queue.json`** paths — same **§2–§3** shape as [Reporting work done](#reporting-work-done).
 
 ## Suggested “done for this round”
@@ -125,11 +126,11 @@ If you maintain other Agent Skills elsewhere, wire them by **role**—do not har
 - **PR merge readiness** (comments, conflicts, CI loop): install a “babysit PR” style skill from your skills collection or dotfiles; open that skill’s `SKILL.md` when you need that workflow.
 - **CI failure triage** (GitHub Actions logs → local repro): install a “CI triage” style skill from your skills collection or internal docs; open its `SKILL.md` when Actions is red.
 
-Discover skills with your host’s usual mechanism (for example Cursor’s [Agent Skills](https://cursor.com/docs/skills) directories or Claude Code’s [skills](https://docs.anthropic.com/en/docs/claude-code/skills)); use **`agents doctor`** after installing **`@aguil/agents`** to verify CLI semver against [skills.json](skills.json).
+Discover skills with your host’s usual mechanism (for example Cursor’s [Agent Skills](https://cursor.com/docs/skills) directories or Claude Code’s [skills](https://docs.anthropic.com/en/docs/claude-code/skills)); use **`agents doctor`** after installing **`@aguil/agents`** to verify CLI semver against [skills.json](../skills.json).
 
 ## Gotchas worth remembering
 
-- **Code-review automation:** Agents executing this loop must **not** inject their own adapter or model defaults (e.g. `fake`). Only honor merged config/env and CLI flags the user actually passed—including **never silently adding **`--dry-run`**;** use **`agents code-review --workspace …`** as instructed.
+- **Code-review automation:** Agents following this playbook must **not** inject their own adapter or model defaults (e.g. `fake`). Only honor merged config/env and CLI flags the user actually passed—including **never silently adding **`--dry-run`**;** use **`agents code-review --workspace …`** as instructed.
 - **`agents triage` phase 1** only supports `--from code-review` in this snapshot; other producers would be future work. (Legacy: `agents triage ingest …` is accepted but unnecessary.)
 - **`--stdout`** requires `--format json` or `--format toon` (dual file writes are the default when `--format` is omitted).
 - **Path-based fingerprint:** the default output slug hashes the **normalized absolute path** to `result.json`, so moving the file changes the slug directory.

@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "skills": [
     {
-      "id": "review-fix-loop",
-      "path": "review-fix-loop/SKILL.md",
-      "summary": "Manual-testing loop: gates, agents code-review, agents triage, one commit per finding.",
+      "id": "self-review-checks",
+      "path": "self-review-checks/SKILL.md",
+      "summary": "PR author checklist: gates, agents code-review, agents triage, one commit per finding; draft → ready for review.",
       "minAgentsVersion": "0.0.0",
       "tags": ["code-review", "triage"]
     }

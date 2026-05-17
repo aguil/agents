@@ -20,7 +20,7 @@ There is **no** separate `@aguil/agents-skills` npm package and **no** maintaine
 
 ```mermaid
 flowchart TB
-  subgraph skill [Agent playbooks e.g. review-fix-loop]
+  subgraph skill [Agent playbooks e.g. self-review-checks]
     S[Markdown playbook]
   end
   subgraph agentsNpm ["@aguil/agents npm"]
