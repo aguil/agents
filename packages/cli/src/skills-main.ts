@@ -5,7 +5,11 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DOCS_SKILLS_ROOT, loadSkillsManifest } from "./skills-pack";
+import {
+  DOCS_SKILLS_ROOT,
+  loadSkillsManifest,
+  type SkillManifestEntry,
+} from "./skills-pack";
 
 export type SkillsHelpRequest =
   | { readonly kind: "overview" }
@@ -45,7 +49,7 @@ export function renderSkillsHelp(req: SkillsHelpRequest): string {
 
 Commands:
   list                 Print docs/skills/skills.json
-  install <skill-id>   Copy SKILL.md into ~/.agents/skills/<id>/ (--dry-run to preview commands only)
+  install [skill-id]   Copy SKILL.md(s) into ~/.agents/skills/<id>/; omit id to install all manifest skills (--dry-run to preview)
 
 Environment:
   AGENTS_CLI           Optional; used by agents doctor (see agents doctor --help)
@@ -74,13 +78,10 @@ async function cmdList(): Promise<number> {
   return 0;
 }
 
-async function cmdInstall(skillId: string, dryRun: boolean): Promise<number> {
-  const manifest = await loadSkillsManifest();
-  const skill = manifest.skills.find((s) => s.id === skillId);
-  if (skill === undefined) {
-    console.error(`Unknown skill id: ${skillId}`);
-    return 1;
-  }
+async function installOneSkill(
+  skill: SkillManifestEntry,
+  dryRun: boolean,
+): Promise<number> {
   const src = join(DOCS_SKILLS_ROOT, skill.path);
   if (!existsSync(src)) {
     console.error(`Missing skill file: ${src}`);
@@ -116,12 +117,40 @@ async function cmdInstall(skillId: string, dryRun: boolean): Promise<number> {
   return 0;
 }
 
+async function cmdInstall(skillId: string, dryRun: boolean): Promise<number> {
+  const manifest = await loadSkillsManifest();
+  const skill = manifest.skills.find((s) => s.id === skillId);
+  if (skill === undefined) {
+    console.error(`Unknown skill id: ${skillId}`);
+    return 1;
+  }
+  console.log(`# Skill: ${skill.id}\n`);
+  return await installOneSkill(skill, dryRun);
+}
+
+async function cmdInstallAll(dryRun: boolean): Promise<number> {
+  const manifest = await loadSkillsManifest();
+  if (manifest.skills.length === 0) {
+    console.error("Manifest lists no skills to install.");
+    return 1;
+  }
+  let code = 0;
+  for (const skill of manifest.skills) {
+    console.log(`# Skill: ${skill.id}\n`);
+    const step = await installOneSkill(skill, dryRun);
+    if (step !== 0) {
+      code = 1;
+    }
+  }
+  return code;
+}
+
 function printUsage(): void {
   console.error(`Usage: agents skills <command> [options]
 
 Commands:
   list                 Print docs/skills/skills.json
-  install <skill-id>   Copy into ~/.agents/skills/<id>/ (--dry-run to preview)
+  install [skill-id]   Copy into ~/.agents/skills/<id>/; omit id for all skills (--dry-run to preview)
 
 Try: agents skills --help
 `);
@@ -138,12 +167,30 @@ export async function runSkillsCli(argv: readonly string[]): Promise<number> {
     return await cmdList();
   }
   if (cmd === "install") {
-    const skillId = argv[1];
-    if (skillId === undefined || skillId.length === 0) {
-      console.error("install requires a skill id (see agents skills list).");
+    const dryRun = argv.includes("--dry-run");
+    const positional = argv
+      .slice(1)
+      .filter((a) => a !== "--dry-run" && !a.startsWith("--"));
+    const unknownFlag = argv
+      .slice(1)
+      .find((a) => a.startsWith("--") && a !== "--dry-run");
+    if (unknownFlag !== undefined) {
+      console.error(`Unknown install flag: ${unknownFlag}`);
       return 1;
     }
-    const dryRun = argv.includes("--dry-run");
+    if (positional.length === 0) {
+      return await cmdInstallAll(dryRun);
+    }
+    if (positional.length > 1) {
+      console.error(
+        "install takes at most one skill id (omit for all skills).",
+      );
+      return 1;
+    }
+    const skillId = positional[0];
+    if (skillId === "all") {
+      return await cmdInstallAll(dryRun);
+    }
     return await cmdInstall(skillId, dryRun);
   }
   if (cmd === "doctor") {

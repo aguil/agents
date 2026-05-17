@@ -22,4 +22,4 @@ agents code-review --help
 
 Then follow the canonical docs in the upstream repository [`README.md`](https://github.com/aguil/agents/blob/main/README.md) for harness-specific workflows, adapters, models, and configuration (including `.review-agent` semantics).
 
-Agent Skills playbooks for review/triage workflows live under [`docs/skills/`](https://github.com/aguil/agents/blob/main/docs/skills/README.md). After installing **`@aguil/agents`**, run **`agents doctor`**, then **`agents skills list`** / **`agents skills install <id>`** (see **`agents doctor --help`** and **`agents skills --help`**); the publish tarball ships **`docs/skills/`** next to the bundled CLI.
+Agent Skills playbooks for review/triage workflows live under [`docs/skills/`](https://github.com/aguil/agents/blob/main/docs/skills/README.md). After installing **`@aguil/agents`**, run **`agents doctor`**, then **`agents skills list`** / **`agents skills install`** or **`agents skills install <id>`** (see **`agents doctor --help`** and **`agents skills --help`**); the publish tarball ships **`docs/skills/`** next to the bundled CLI.

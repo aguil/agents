@@ -85,6 +85,22 @@ test("agents doctor exits 0 in this monorepo", async () => {
   }
 });
 
+test("agents skills install --dry-run without id installs all manifest skills", async () => {
+  const prev = console.log;
+  let buf = "";
+  console.log = (...args: unknown[]) => {
+    buf += `${args.join(" ")}\n`;
+  };
+  try {
+    const code = await agentsMain(["skills", "install", "--dry-run"]);
+    expect(code).toBe(0);
+    expect(buf).toContain("# Skill: self-review-checks");
+    expect(buf).toContain("(dry-run: no files written)");
+  } finally {
+    console.log = prev;
+  }
+});
+
 test("agents skills doctor points to agents doctor", async () => {
   const prevErr = console.error;
   let err = "";
