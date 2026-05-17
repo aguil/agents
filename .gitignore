@@ -6,6 +6,8 @@ distribution/npm/release-tag-message.local
 coverage/
 .npm-publish-pack/
 .review-agent/
+.agents-triage/
+
 .env
 .env.*
 !.env.example

@@ -23,5 +23,11 @@
   "bin": {
     "agents": "./dist/agents"
   },
-  "files": ["dist/agents", "dist/index.js", "README.md", "LICENSE"]
+  "files": [
+    "dist/agents",
+    "dist/index.js",
+    "docs/skills",
+    "README.md",
+    "LICENSE"
+  ]
 }

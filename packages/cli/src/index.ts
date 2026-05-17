@@ -1,13 +1,8 @@
-import {
-  access,
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   CODE_REVIEW_ROLE_IDS,
@@ -34,10 +29,74 @@ import {
   peelCodeReviewSubcommand,
   resolveEffectivePostOnly,
 } from "./parse-code-review-argv";
+import {
+  renderTriageHelp,
+  resolveTriageHelp,
+  triageHelpStderrExtras,
+} from "./triage-help";
 
 export async function main(
   argv: readonly string[] = Bun.argv.slice(2),
 ): Promise<number> {
+  if (
+    argv.length === 1 &&
+    (argv[0] === "--version" || argv[0] === "-V" || argv[0] === "-v")
+  ) {
+    console.log(readAgentsMonorepoVersion());
+    return 0;
+  }
+
+  if (argv[0] === "doctor") {
+    const {
+      resolveDoctorHelp,
+      renderDoctorHelp,
+      doctorHelpStderrExtras,
+      runAgentsDoctor,
+    } = await import("./doctor-main");
+    const doctorHelpReq = resolveDoctorHelp(argv);
+    if (doctorHelpReq !== null) {
+      console.log(renderDoctorHelp(doctorHelpReq));
+      for (const line of doctorHelpStderrExtras(doctorHelpReq)) {
+        console.error(line);
+      }
+      return 0;
+    }
+    if (argv.length > 1) {
+      console.error(
+        "agents doctor does not accept arguments (try: agents doctor --help).",
+      );
+      return 1;
+    }
+    return await runAgentsDoctor();
+  }
+
+  if (argv[0] === "skills") {
+    const {
+      resolveSkillsHelp,
+      renderSkillsHelp,
+      runSkillsCli,
+      skillsHelpStderrExtras,
+    } = await import("./skills-main");
+    const skillsHelpReq = resolveSkillsHelp(argv);
+    if (skillsHelpReq !== null) {
+      console.log(renderSkillsHelp(skillsHelpReq));
+      for (const line of skillsHelpStderrExtras(skillsHelpReq)) {
+        console.error(line);
+      }
+      return 0;
+    }
+    return await runSkillsCli(argv.slice(1));
+  }
+
+  const triageHelpReq = resolveTriageHelp(argv);
+  if (triageHelpReq !== null) {
+    console.log(renderTriageHelp(triageHelpReq));
+    for (const line of triageHelpStderrExtras(triageHelpReq)) {
+      console.error(line);
+    }
+    return 0;
+  }
+
   const helpReq = resolveCodeReviewHelp(argv);
   if (helpReq !== null) {
     console.log(renderCodeReviewHelp(helpReq));
@@ -45,6 +104,11 @@ export async function main(
       console.error(line);
     }
     return 0;
+  }
+
+  if (argv[0] === "triage") {
+    const { runTriageCli } = await import("./triage-main");
+    return await runTriageCli(argv);
   }
 
   if (argv[0] === "code-review") {
@@ -724,6 +788,20 @@ interface StoredReviewResult {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
+async function resolvedResultPathIsUnderReviewAgentDryRun(
+  workspacePath: string,
+  resultPath: string,
+): Promise<boolean> {
+  try {
+    const wsReal = await realpath(workspacePath);
+    const resReal = await realpath(resultPath);
+    const dryRoot = join(wsReal, ".review-agent", "dry-run");
+    return resReal === dryRoot || resReal.startsWith(`${dryRoot}${sep}`);
+  } catch {
+    return false;
+  }
+}
+
 async function runPostOnly(options: CliOptions): Promise<number> {
   if (options.pendingReview) {
     console.warn(
@@ -759,6 +837,18 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   if (resultPath === undefined) {
     console.error(
       "Could not auto-discover a prior run result. Pass --result <path>.",
+    );
+    return 1;
+  }
+  if (
+    options.result !== undefined &&
+    (await resolvedResultPathIsUnderReviewAgentDryRun(
+      workspacePath,
+      resultPath,
+    ))
+  ) {
+    console.error(
+      "Refusing to post a dry-run result.json. Use .review-agent/runs/… or omit --result for auto-discovery.",
     );
     return 1;
   }
@@ -821,28 +911,10 @@ async function runPostOnly(options: CliOptions): Promise<number> {
 export async function discoverLatestResultPath(
   workspacePath: string,
 ): Promise<string | undefined> {
-  const runsRoot = join(workspacePath, ".review-agent", "runs");
-  let entries: readonly (string | Uint8Array)[];
-  try {
-    entries = await readdir(runsRoot);
-  } catch {
-    return undefined;
-  }
-  const runDirectories = entries
-    .map((entry) =>
-      typeof entry === "string" ? entry : Buffer.from(entry).toString("utf8"),
-    )
-    .filter((entry) => entry.startsWith("code-review-"))
-    .sort()
-    .reverse();
-  for (const runDirectory of runDirectories) {
-    const candidate = join(runsRoot, runDirectory, "result.json");
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {}
-  }
-  return undefined;
+  const { discoverLatestRunsCodeReviewResultPath } = await import(
+    "@aguil/agents-triage"
+  );
+  return discoverLatestRunsCodeReviewResultPath(workspacePath);
 }
 
 export async function loadStoredReviewResult(
@@ -2605,6 +2677,21 @@ function extractRightSideHunkPositions(
     }
   }
   return positions;
+}
+
+function readAgentsMonorepoVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const rootPkg = join(here, "..", "..", "package.json");
+  try {
+    const raw = readFileSync(rootPkg, "utf8");
+    const j = JSON.parse(raw) as { version?: string };
+    if (typeof j.version === "string" && j.version.length > 0) {
+      return j.version;
+    }
+  } catch {
+    // ignore missing or invalid package.json
+  }
+  return "0.0.0";
 }
 
 if (import.meta.main) {

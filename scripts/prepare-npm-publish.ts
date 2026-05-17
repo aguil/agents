@@ -5,6 +5,7 @@ import {
   access,
   chmod,
   copyFile,
+  cp,
   mkdir,
   readFile,
   rm,
@@ -169,6 +170,19 @@ async function main(): Promise<void> {
     return;
   }
   await copyFile(licenseSource, join(outDir, "LICENSE"));
+
+  const docsSkillsSource = join(REPO_ROOT, "docs", "skills");
+  if (await pathExists(docsSkillsSource)) {
+    await cp(docsSkillsSource, join(outDir, "docs", "skills"), {
+      recursive: true,
+    });
+  } else {
+    console.error(
+      `Missing docs/skills at ${docsSkillsSource}; agents skills requires this tree in the publish pack.`,
+    );
+    process.exitCode = 2;
+    return;
+  }
 
   console.log(`Prepared npm publish tarball contents at ${outDir}`);
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@aguil/agents-cli",
+  "name": "@aguil/agents-triage",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,9 +7,10 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@aguil/agents-code-review": "workspace:*",
     "@aguil/agents-core": "workspace:*",
-    "@aguil/agents-reporting": "workspace:*",
-    "@aguil/agents-triage": "workspace:*"
+    "@aguil/agents-reporting": "workspace:*"
+  },
+  "optionalDependencies": {
+    "@toon-format/toon": "^2.2.0"
   }
 }
