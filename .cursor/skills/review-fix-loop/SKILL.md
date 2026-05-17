@@ -1,7 +1,7 @@
 ---
 name: review-fix-loop
 description: >-
-  Manual-testing playbook for the agents monorepo: code-review / agents triage,
+  Manual-testing playbook for `agents code-review` / `agents triage`,
   focused fixes, one commit per actionable finding, and local gates before push.
   Completion uses a repeating work-report layout (gates, result.json findings,
   triage items, disposition, commits) and empty triage items as the downstream
@@ -16,11 +16,9 @@ Use this playbook for exercising this repo’s agent harnesses and keeping chang
 
 ## Goal
 
-Run **`bun run check`** and **`bun test`** (or tighter subsets only when the checkout’s docs permit) before you treat the repo as trusted. Run **`bun run agents code-review --workspace .`** so the harness writes **`result.json`** under **`.review-agent/runs/`** (default). Add **`--dry-run`** only when you deliberately want **`result.json`** under **`.review-agent/dry-run/`** instead—not as an assumed default.
+Run the repository's documented verification gates before you treat the tree as trusted. Then run the repository's configured review harness, ingest the findings into a triage queue, fix the actionable items one at a time, and repeat until the queue is empty or the remaining items are explicitly documented.
 
-Adapter and model come from merged config; this playbook does **not** prescribe **`--dry-run`** unless you choose it.
-
-Produce the downstream queue with **`bun run agents triage --from code-review --workspace .`**, pointing at **`result.json`** (**`--result …`** when you are not relying on workspace default discovery). **You are done when **`items`** in that triage envelope is empty.**
+Produce the downstream queue with **`agents triage --from code-review --workspace .`**, pointing at **`result.json`** (**`--result …`** when you are not relying on workspace default discovery). **You are done when **`items`** in that triage envelope is empty.**
 
 Verify in **`triage-queue.json`** under **`.agents-triage/<producerShort>-<hash12>/`**, a scratch **`--output`**, or **`--stdout --format json`** (same **`items`** field everywhere). **`agents code-review`** persists **`findings`** in **`result.json`**; ingest copies them into triage **`items`** (typically 1:1) that you drain via fixes or explicitly sign off in notes.
 
@@ -46,91 +44,34 @@ Intermediate checkpoints (baseline, mid-fix) should still cite **§2–3** (**`f
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) matching `packageManager` in root `package.json`.
-- Shell at this monorepo root (the directory containing the root `package.json`).
-- From the root, the CLI entrypoint is `bun run agents …` (runs `packages/cli/src/index.ts`).
+- Shell at the repository root.
+- The repository's documented build, test, lint, and review commands.
+- Whatever review harness/configuration the repository already uses; do not invent adapter, model, or dry-run defaults.
 
 ## Commands you will actually use
 
-### Help
+### Repo verification gates
 
-```bash
-bun run agents --help
-bun run agents code-review --help
-bun run agents triage --help
-```
+Run the repository's documented verification commands in the order that best matches the checkout's guidance. Typical examples include:
+
+- typecheck / compile
+- lint / formatting
+- unit tests
+- a combined `check` or CI-shaped verification command if the repo defines one
+
+If the repository has a narrower, documented scope for the touched files, use that for the first pass, then run the broader gate before considering the work complete.
 
 ### Run or replay code review
 
-Adapter, model, and launch flags come from merged config and env — **omit** them here unless you are reproducing a user-provided command verbatim.
+Use the repository's configured review harness or review command if one exists. Follow the merged configuration and any workspace-local docs; do not invent adapter, model, or dry-run defaults. Use `--strict` for code-review runs unless the user explicitly provided a different invocation, and include `--log summary` so review runs produce concise diagnostics/observability output.
 
-Normal run (persisted **`result.json`** under **`.review-agent/runs/`**):
+Capture the review artifact path and the resulting findings list, then ingest those findings into the repository's triage queue surface.
 
-```bash
-bun run agents code-review --workspace .
-```
+### Build a triage queue from review output
 
-Optional **disposable** run — reviewers behave the same, but artifacts land under **`.review-agent/dry-run/`** (fewer **`runs`** entries; good when that is explicitly what you want):
+Ingest the review output into the triage queue format the repository expects. Use the queue's `items` field as the work surface and treat `items.length === 0` as the acceptance bar.
 
-```bash
-bun run agents code-review --workspace . --dry-run
-```
-
-Replay when you already have a context bundle:
-
-```bash
-bun run agents code-review replay /path/to/context.json --workspace .
-```
-
-**Final upstream pass:** rerun with the same **`--dry-run`** choice (present or absent) and **`--workspace`** as earlier in the loop, merged config untouched—unless you are reproducing a user-supplied command verbatim.
-
-Harness-focused documentation: `harnesses/code-review/README.md`.
-
-### Build a triage queue from a stored `result.json`
-
-After a run, the harness writes **`result.json`** under **`<workspace>/.review-agent/dry-run/…`** (dry run) or **`<workspace>/.review-agent/runs/…`**. Review **`findings`** live in that JSON. Ingest into a **source-neutral** triage envelope (JSON + TOON by default):
-
-```bash
-bun run agents triage --from code-review --workspace .
-```
-
-Optional explicit artifact:
-
-```bash
-bun run agents triage --from code-review --workspace . --result .review-agent/runs/<run-id>/result.json
-```
-
-**Work-queue surface:** Interactive workflows dequeue from the **`items`** field in **`triage-queue.json`** (or **`--stdout --format json`**). Treat **`items.length === 0`** as the acceptance bar—not **`result.json`** alone.
-
-**Default output directory:** `<workspace>/.agents-triage/<producerShort>-<fingerprint12>/` with `triage-queue.json` and `triage-queue.toon`.
-
-**Explicit output directory** (no extra slug segment under it):
-
-```bash
-bun run agents triage --from code-review --workspace . --output ./tmp-triage-queue --format both
-```
-
-**Stdout only** (must narrow format):
-
-```bash
-bun run agents triage --from code-review --workspace . --stdout --format json
-```
-
-### Repo gates (fix / verify)
-
-```bash
-bun run typecheck
-bun run lint
-bun run lint:fix    # when Biome only complains about formatting/organizeImports
-bun test
-bun run check       # typecheck + lint
-```
-
-CI-shaped test run (when you want closer parity to `publish:npm:verify`):
-
-```bash
-bun run test:ci
-```
+Never commit `.review-agent/` contents. Treat `.review-agent/` as disposable review output only; if it becomes tracked or appears in a branch diff, remove it from the tree before committing or pushing.
 
 ## One commit per actionable finding (required)
 
@@ -139,13 +80,13 @@ When you **change** the repo in response to a review finding (production code, t
 - **Exactly one commit** should contain the changes that address **one** such finding. Do not mix fixes for multiple findings in the same commit. Commits remediate **`code-review` producer findings**; the recomputed triage **`items`** list only goes empty afterward when those producer rows were fixed or explicitly documented.
 - If you skip a finding (false positive, out of scope, ticket filed), **no commit** is required for it; document the reason in the PR or your notes.
 - If two findings collapse to the **same** minimal fix (true duplicate), one commit is allowed; state both finding identifiers in the commit body so reviewers can see the mapping.
-- Use a message that makes the mapping obvious (conventional commits as in repo `AGENTS.md` when applicable), for example scope + short fix plus the finding `id` or title in the body.
+- Use a message that makes the mapping obvious (conventional commits as in repo `AGENTS.md` when applicable), and when rewriting or refining a fix commit message include the finding `id` or title, what is being addressed, how it is being addressed, and the full text of the finding in the body.
 - Version control particulars (`jj`, `git`, bookmarks, describe flags) follow the **checkout’s** `AGENTS.md` and your usual workflow; the rule above is independent of tooling.
 
 ## A tight manual loop (checklist)
 
 - [ ] **Baseline:** `bun run check && bun test` green on your branch; note pass/fail in your **work report §1**.
-- [ ] **Review:** run `code-review` (or replay) with a realistic workspace **using merged config** (no skill-invented `--adapter` / `--model`); capture **`runId`**, **`result.json`** path, and full **`findings`** list (**`id`**, **`title`**, **`severity`**) → **§2**.
+- [ ] **Review:** run `agents code-review` (or replay) with a realistic workspace **using merged config** (no skill-invented `--adapter` / `--model`); capture **`runId`**, **`result.json`** path, and full **`findings`** list (**`id`**, **`title`**, **`severity`**) → **§2**.
 - [ ] **Triage:** `agents triage` into `.agents-triage/...` or a scratch **`--output`** dir; capture **`triage-queue.json`** path and **`items.length`** (**`items`** should mirror **`findings`**) → **§3**.
 - [ ] **Fix:** address **`findings`** / **`items`** one at a time; **each** fix that touches the tree gets **its own commit** (see [One commit per actionable finding](#one-commit-per-actionable-finding-required)); keep each diff minimal; extend **§5** after each remediation commit.
 - [ ] **Verify gates:** `bun run check && bun test` again after fixes; refresh **§1**; rerun **`agents code-review`** when edits are broad or touch harness contracts.
@@ -192,4 +133,5 @@ These live outside this repo; open the `SKILL.md` when you want a structured wor
 - **`agents triage` phase 1** only supports `--from code-review` in this snapshot; other producers would be future work. (Legacy: `agents triage ingest …` is accepted but unnecessary.)
 - **`--stdout`** requires `--format json` or `--format toon` (dual file writes are the default when `--format` is omitted).
 - **Path-based fingerprint:** the default output slug hashes the **normalized absolute path** to `result.json`, so moving the file changes the slug directory.
+- **Review artifacts:** `.review-agent/` is local-only output. Never commit it; delete it before finalizing a branch if it shows up in the working tree or diff.
 - **Workspace rules:** this directory is a project workspace in some setups; if you are inside a per-task checkout, also read that checkout’s `AGENTS.md` when present.
