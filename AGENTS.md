@@ -19,6 +19,13 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
 - Conventional commits: use `!` after the scope in the title when the change is
   breaking (for example `feat(cli)!:`), and spell out specifics in the body or a
   `BREAKING CHANGE:` footer when useful.
+- Before any commit: **`bun run lint`**, **`bun run typecheck`**, and
+  **`pre-commit run --all-files`** must all pass; fix failures first. Canonical
+  wording:
+  [`.agents/rules/pre-commit-checks.md`](.agents/rules/pre-commit-checks.md).
+  Cursor loads **`AGENTS.md`** (and optionally `.cursor/rules/*.mdc`); it does
+  not auto-discover `.agents/`—keep the one-line requirement here so IDE agents
+  still see it.
 - Store design notes and product requirements under `docs/`.
 - Store portable Agent Skills playbooks under `docs/skills/`; verify semver with
   **`agents doctor`**, install with **`agents skills install`** (see
