@@ -18,6 +18,7 @@ import type { AgentEvent, Finding } from "@aguil/agents-core";
 import {
   AGENTS_CODE_REVIEW_DIR,
   agentsCodeReviewDryRunRoot,
+  legacyAgentsCodeReviewDryRunRoot,
   resolveGitAwarePath,
 } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
@@ -792,15 +793,23 @@ interface StoredReviewResult {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
-async function resolvedResultPathIsUnderReviewAgentDryRun(
+async function resolvedResultPathIsUnderCodeReviewDryRunRoot(
   workspacePath: string,
   resultPath: string,
 ): Promise<boolean> {
   try {
     const wsReal = await realpath(workspacePath);
     const resReal = await realpath(resultPath);
-    const dryRoot = agentsCodeReviewDryRunRoot(wsReal);
-    return resReal === dryRoot || resReal.startsWith(`${dryRoot}${sep}`);
+    const dryRoots = [
+      agentsCodeReviewDryRunRoot(wsReal),
+      legacyAgentsCodeReviewDryRunRoot(wsReal),
+    ];
+    for (const dryRoot of dryRoots) {
+      if (resReal === dryRoot || resReal.startsWith(`${dryRoot}${sep}`)) {
+        return true;
+      }
+    }
+    return false;
   } catch {
     return false;
   }
@@ -846,13 +855,13 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   }
   if (
     options.result !== undefined &&
-    (await resolvedResultPathIsUnderReviewAgentDryRun(
+    (await resolvedResultPathIsUnderCodeReviewDryRunRoot(
       workspacePath,
       resultPath,
     ))
   ) {
     console.error(
-      "Refusing to post a dry-run result.json. Use .agents-code-review/runs/… or omit --result for auto-discovery.",
+      "Refusing to post a dry-run result.json. Use .agents-code-review/runs/… (or legacy .review-agent/runs/…) or omit --result for auto-discovery.",
     );
     return 1;
   }
