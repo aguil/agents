@@ -1344,32 +1344,55 @@ function legacyFindingCachePath(
   );
 }
 
+function parsePendingFindingCache(
+  raw: string,
+  repo: string,
+  prNumber: number,
+): PendingReviewFindingCache | undefined {
+  try {
+    const parsed = JSON.parse(raw) as Partial<PendingReviewFindingCache>;
+    if (
+      parsed.version !== 1 ||
+      parsed.repo !== repo ||
+      parsed.prNumber !== prNumber ||
+      !Array.isArray(parsed.findings)
+    ) {
+      return undefined;
+    }
+    return parsed as PendingReviewFindingCache;
+  } catch {
+    return undefined;
+  }
+}
+
 async function loadLocalFindingThreadCache(
   workspacePath: string,
   repo: string,
   prNumber: number,
 ): Promise<PendingReviewFindingCache | undefined> {
-  for (const path of [
-    findingCachePath(workspacePath, repo, prNumber),
-    legacyFindingCachePath(workspacePath, repo, prNumber),
-  ]) {
-    try {
-      const raw = await readFile(path, "utf8");
-      const parsed = JSON.parse(raw) as Partial<PendingReviewFindingCache>;
-      if (
-        parsed.version !== 1 ||
-        parsed.repo !== repo ||
-        parsed.prNumber !== prNumber ||
-        !Array.isArray(parsed.findings)
-      ) {
-        continue;
-      }
-      return parsed as PendingReviewFindingCache;
-    } catch {
-      // try next path
+  const primaryPath = findingCachePath(workspacePath, repo, prNumber);
+  let primaryRaw: string | undefined;
+  try {
+    primaryRaw = await readFile(primaryPath, "utf8");
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      return undefined;
     }
+    primaryRaw = undefined;
   }
-  return undefined;
+  if (primaryRaw !== undefined) {
+    return parsePendingFindingCache(primaryRaw, repo, prNumber);
+  }
+  try {
+    const legacyRaw = await readFile(
+      legacyFindingCachePath(workspacePath, repo, prNumber),
+      "utf8",
+    );
+    return parsePendingFindingCache(legacyRaw, repo, prNumber);
+  } catch {
+    return undefined;
+  }
 }
 
 async function writeLocalFindingThreadCache(
