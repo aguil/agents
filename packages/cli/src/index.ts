@@ -2353,14 +2353,55 @@ async function getCurrentPullRequestNumber(
   repo: string,
   workspacePath?: string,
 ): Promise<number> {
-  const view = await runGh<{ readonly number: number }>(
-    ["pr", "view", "--repo", repo, "--json", "number"],
-    workspacePath,
-  );
-  if (!Number.isInteger(view.number)) {
-    throw new Error("Could not resolve current PR number from gh pr view.");
+  const cwdOpts = { gitAware: true } as const;
+
+  const headBranch = (
+    await runCommand(
+      ["git", "symbolic-ref", "-q", "--short", "HEAD"],
+      workspacePath,
+      cwdOpts,
+    )
+  )?.trim();
+
+  if (headBranch !== undefined && headBranch.length > 0) {
+    try {
+      const view = await runGh<{ readonly number: number }>(
+        ["pr", "view", headBranch, "--repo", repo, "--json", "number"],
+        workspacePath,
+      );
+      if (view !== undefined && Number.isInteger(view.number)) {
+        return view.number;
+      }
+    } catch {
+      // Local-only branch or no PR yet — fall through to commit lookup.
+    }
   }
-  return view.number;
+
+  const sha = (
+    await runCommand(["git", "rev-parse", "HEAD"], workspacePath, cwdOpts)
+  )?.trim();
+  if (sha === undefined || sha.length === 0) {
+    throw new Error(
+      "Could not resolve HEAD for PR discovery; pass --pr <number> explicitly.",
+    );
+  }
+
+  const pulls = await ghApi<
+    ReadonlyArray<{ readonly number: number; readonly state?: string }>
+  >(`repos/${repo}/commits/${sha}/pulls`, "GET", undefined, workspacePath);
+
+  if (!Array.isArray(pulls) || pulls.length === 0) {
+    throw new Error(
+      `No pull request found for HEAD (${sha.slice(0, 12)}) in ${repo}. Check out a PR head branch or pass --pr <number>.`,
+    );
+  }
+
+  const open = pulls.find((p) => p.state === "open");
+  const chosen = open ?? pulls[0];
+  if (!Number.isInteger(chosen.number)) {
+    throw new Error("Could not resolve PR number from commit metadata.");
+  }
+  return chosen.number;
 }
 
 async function fetchPullRequestHeadSha(
