@@ -1357,9 +1357,7 @@ async function replacePendingPullRequestReview(input: {
     `repos/${repo}/pulls/${prNumber}/reviews`,
     "POST",
     {
-      ...(currentHeadSha !== undefined
-        ? { commit_id: currentHeadSha }
-        : {}),
+      ...(currentHeadSha !== undefined ? { commit_id: currentHeadSha } : {}),
       body: reviewBody,
       comments: commentsForApi,
     },
