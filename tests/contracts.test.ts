@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   symlink,
@@ -36,7 +37,10 @@ import {
   shouldFetchReferencedUrl,
 } from "@aguil/agents-context";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { resolveGitAwarePath } from "@aguil/agents-core";
+import {
+  AGENTS_CODE_REVIEW_DIR,
+  resolveGitAwarePath,
+} from "@aguil/agents-core";
 import {
   buildClaudeCodeCommand,
   buildCursorCommand,
@@ -57,11 +61,7 @@ import {
   statusForFindings,
 } from "@aguil/agents-reporting";
 import { serializeEvent } from "@aguil/agents-telemetry";
-import {
-  canonicalKeyForCodeReviewArtifact,
-  computeOutputSlug,
-  isToonEncodeAvailable,
-} from "@aguil/agents-triage";
+import { isToonEncodeAvailable } from "@aguil/agents-triage";
 import {
   extractConfigDocument,
   mergeFlatConfigLayers,
@@ -628,7 +628,7 @@ test("prefers explicit PR patch diff when review PR is provided", async () => {
       if (cmd.includes("--jq")) {
         return "deadbeefcafebabe\n";
       }
-      return `diff --git a/.review-agent/runs/foo/result.json b/.review-agent/runs/foo/result.json
+      return `diff --git a/${AGENTS_CODE_REVIEW_DIR}/runs/foo/result.json b/${AGENTS_CODE_REVIEW_DIR}/runs/foo/result.json
 +ignored
 diff --git a/src/main.ts b/src/main.ts
 +added`;
@@ -642,7 +642,9 @@ diff --git a/src/main.ts b/src/main.ts
   expect(result.reviewPr?.headSha).toBe("deadbeefcafebabe");
   expect(result.reviewPr?.reviewedAt).toBeTruthy();
   expect(result.diff).toContain("diff --git a/src/main.ts b/src/main.ts");
-  expect(result.diff).not.toContain(".review-agent/runs/foo/result.json");
+  expect(result.diff).not.toContain(
+    `${AGENTS_CODE_REVIEW_DIR}/runs/foo/result.json`,
+  );
   expect(commands).toContain(
     "gh api --hostname github.com repos/aguil/agents/pulls/42 --jq .head.sha",
   );
@@ -720,7 +722,7 @@ test("includes explicit PR metadata in diff strategy artifact", async () => {
 
   const artifacts = await provider.collect({
     workspacePath: "/repo",
-    scratchpadPath: "/repo/.review-agent/runs/1",
+    scratchpadPath: `/repo/${AGENTS_CODE_REVIEW_DIR}/runs/1`,
     pullRequestNumber: 42,
   });
   const strategy =
@@ -733,10 +735,10 @@ test("includes explicit PR metadata in diff strategy artifact", async () => {
 });
 
 test("filters harness artifacts out of review diff", () => {
-  const diff = `diff --git a/.review-agent/runs/foo/result.json b/.review-agent/runs/foo/result.json
+  const diff = `diff --git a/${AGENTS_CODE_REVIEW_DIR}/runs/foo/result.json b/${AGENTS_CODE_REVIEW_DIR}/runs/foo/result.json
 index a..b 100644
---- a/.review-agent/runs/foo/result.json
-+++ b/.review-agent/runs/foo/result.json
+--- a/${AGENTS_CODE_REVIEW_DIR}/runs/foo/result.json
++++ b/${AGENTS_CODE_REVIEW_DIR}/runs/foo/result.json
 @@ -1 +1 @@
 -old
 +new
@@ -750,7 +752,9 @@ index c..d 100644
 
   const filtered = filterReviewDiff(diff);
   expect(filtered).toContain("diff --git a/src/app.ts b/src/app.ts");
-  expect(filtered).not.toContain(".review-agent/runs/foo/result.json");
+  expect(filtered).not.toContain(
+    `${AGENTS_CODE_REVIEW_DIR}/runs/foo/result.json`,
+  );
 });
 
 test("extracts referenced docs from PR descriptions", () => {
@@ -1092,7 +1096,7 @@ test("loads stored review result findings and metadata", async () => {
 test("discovers latest run result path", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "agents-post-only-discover-"));
   try {
-    const runsRoot = join(workspace, ".review-agent", "runs");
+    const runsRoot = join(workspace, AGENTS_CODE_REVIEW_DIR, "runs");
     await mkdir(join(runsRoot, "code-review-20260501120000-aaaa"), {
       recursive: true,
     });
@@ -1122,8 +1126,8 @@ test("discovers latest run result path", async () => {
 test("discoverLatestResultPath ignores dry-run when selecting post artifact", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "agents-post-disc-over-"));
   try {
-    const runsRoot = join(workspace, ".review-agent", "runs");
-    const dryRoot = join(workspace, ".review-agent", "dry-run");
+    const runsRoot = join(workspace, AGENTS_CODE_REVIEW_DIR, "runs");
+    const dryRoot = join(workspace, AGENTS_CODE_REVIEW_DIR, "dry-run");
     await mkdir(join(runsRoot, "code-review-20260501120000-aaaa"), {
       recursive: true,
     });
@@ -2553,7 +2557,7 @@ test("resolveCodeReviewCliOptions merges configs and applies preset and CLI prec
     const xdg = join(tempRoot, "xdg");
     const ws = join(tempRoot, "ws");
     await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
-    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await mkdir(join(ws, AGENTS_CODE_REVIEW_DIR), { recursive: true });
     await writeFile(
       join(xdg, "agents", "code-review", "config.json"),
       JSON.stringify({
@@ -2562,7 +2566,7 @@ test("resolveCodeReviewCliOptions merges configs and applies preset and CLI prec
       }),
     );
     await writeFile(
-      join(ws, ".review-agent", "config.json"),
+      join(ws, AGENTS_CODE_REVIEW_DIR, "config.json"),
       JSON.stringify({
         adapter: "opencode",
         presets: { ci: { dryRun: true, adapter: "cursor" } },
@@ -2619,7 +2623,7 @@ test("resolveCodeReviewCliOptions preserves comma-containing tokens in JSON curs
     const ws = join(tempRoot, "ws");
     process.env.XDG_CONFIG_HOME = xdg;
     await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
-    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await mkdir(join(ws, AGENTS_CODE_REVIEW_DIR), { recursive: true });
     await writeFile(
       join(xdg, "agents", "code-review", "config.json"),
       JSON.stringify({
@@ -2690,7 +2694,7 @@ test("resolveCodeReviewCliOptions drops repo-supplied executable paths and keeps
     const ws = join(tempRoot, "ws");
     process.env.XDG_CONFIG_HOME = xdg;
     await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
-    await mkdir(join(ws, ".review-agent"), { recursive: true });
+    await mkdir(join(ws, AGENTS_CODE_REVIEW_DIR), { recursive: true });
     await writeFile(
       join(xdg, "agents", "code-review", "config.json"),
       JSON.stringify({
@@ -2698,7 +2702,7 @@ test("resolveCodeReviewCliOptions drops repo-supplied executable paths and keeps
       }),
     );
     await writeFile(
-      join(ws, ".review-agent", "config.json"),
+      join(ws, AGENTS_CODE_REVIEW_DIR, "config.json"),
       JSON.stringify({
         cursor: "/repo/agent",
         adapter: "cursor",
@@ -2805,8 +2809,9 @@ test("runTriageCli accepts legacy leading ingest token", async () => {
   );
   try {
     const resultRel = "result.json";
+    const resultAbs = resolve(workspace, resultRel);
     await writeFile(
-      join(workspace, resultRel),
+      resultAbs,
       JSON.stringify({ runId: "legacy", findings: [] }),
       "utf8",
     );
@@ -2824,14 +2829,13 @@ test("runTriageCli accepts legacy leading ingest token", async () => {
         "json",
       ]),
     ).toBe(0);
-    const slug = computeOutputSlug(
-      "code-review",
-      canonicalKeyForCodeReviewArtifact(join(workspace, resultRel)),
+    const triageRoot = join(workspace, ".agents-triage");
+    const slugDirs = (await readdir(triageRoot)).filter((name) =>
+      name.startsWith("code-review-"),
     );
-    await readFile(
-      join(workspace, ".agents-triage", slug, "triage-queue.json"),
-      "utf8",
-    );
+    expect(slugDirs).toHaveLength(1);
+    const slug = slugDirs[0];
+    await readFile(join(triageRoot, slug, "triage-queue.json"), "utf8");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -2841,7 +2845,7 @@ test("runTriageCli writes triage-queue.json and triage-queue.toon under slug dir
   const workspace = await mkdtemp(join(tmpdir(), "agents-triage-ingest-"));
   try {
     const resultRel = join("custom", "result.json");
-    const resultAbs = join(workspace, resultRel);
+    const resultAbs = resolve(workspace, resultRel);
     await mkdir(dirname(resultAbs), { recursive: true });
     await writeFile(
       resultAbs,
@@ -2862,12 +2866,6 @@ test("runTriageCli writes triage-queue.json and triage-queue.toon under slug dir
       "utf8",
     );
 
-    const slug = computeOutputSlug(
-      "code-review",
-      canonicalKeyForCodeReviewArtifact(resultAbs),
-    );
-    const outDir = join(workspace, ".agents-triage", slug);
-
     expect(
       await runTriageCli([
         "triage",
@@ -2879,6 +2877,14 @@ test("runTriageCli writes triage-queue.json and triage-queue.toon under slug dir
         resultRel,
       ]),
     ).toBe(0);
+
+    const triageRoot = join(workspace, ".agents-triage");
+    const slugDirs = (await readdir(triageRoot)).filter((name) =>
+      name.startsWith("code-review-"),
+    );
+    expect(slugDirs).toHaveLength(1);
+    const slug = slugDirs[0];
+    const outDir = join(triageRoot, slug);
 
     const jsonRaw = await readFile(join(outDir, "triage-queue.json"), "utf8");
     const envelope = JSON.parse(jsonRaw) as { outputSlug?: string };

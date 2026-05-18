@@ -62,7 +62,7 @@ export async function resolveCodeReviewResultPath(options: {
   );
   if (discovered === undefined) {
     throw new Error(
-      `No code-review result.json found under ${options.workspacePath}/.review-agent/dry-run or …/runs (use --result <path>).`,
+      `No code-review result.json found under ${options.workspacePath}/.agents-code-review/{dry-run,runs} (or legacy .review-agent/…) (use --result <path>).`,
     );
   }
   return discovered;

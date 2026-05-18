@@ -111,16 +111,16 @@ bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --p
 bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --pr 42 --pending-review --no-confirm
 
 # Replay from captured context for consistency checks
-bun run agents code-review --adapter claude --model claude-sonnet-4 --context-bundle .review-agent/runs/<run-id>/context/bundle.json
+bun run agents code-review --adapter claude --model claude-sonnet-4 --context-bundle .agents-code-review/runs/<run-id>/context/bundle.json
 
 # Equivalent shorthand (positional bundle path injects `--context-bundle`)
-bun run agents code-review replay .review-agent/runs/<run-id>/context/bundle.json --adapter claude --model claude-sonnet-4
+bun run agents code-review replay .agents-code-review/runs/<run-id>/context/bundle.json --adapter claude --model claude-sonnet-4
 
 # Multi-pass consensus run
 bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex --consensus 3
 
 # Publish existing findings without re-running models
-bun run agents code-review post --result .review-agent/runs/<run-id>/result.json
+bun run agents code-review post --result .agents-code-review/runs/<run-id>/result.json
 ```
 
 ### Logging (`--log`)
@@ -138,10 +138,12 @@ bun run agents code-review --adapter fake --dry-run --log summary
 
 ## Configuration files and presets
 
-**Breaking change:** older releases allowed **`.review-agent/config.json`**
-inside the repo to set **`workspace`**, **`scratchpad`**, **`adapter`**, adapter
-host-binary paths, and **`cursorArgs`** / **`claudeArgs`** (including inside
-**`presets`**). Current releases **ignore those keys when they come from
+**Breaking change:** older releases used **`.review-agent/config.json`** in the
+repo for merged settings; current releases read repo config from
+**`.agents-code-review/config.json`** (same merge rules). Older releases also
+allowed that file to set **`workspace`**, **`scratchpad`**, **`adapter`**,
+adapter host-binary paths, and **`cursorArgs`** / **`claudeArgs`** (including
+inside **`presets`**). Current releases **ignore those keys when they come from
 repo-managed JSON** — use the **user** config file (**`~/.config/...`**),
 **`AGENTS_CODE_REVIEW_*`**, or **CLI** instead. See the next paragraph for the
 exact strip list.
@@ -154,10 +156,11 @@ repo**) → selected **`presets`** entry when you pass **`--preset`** →
 - **User file:** `$XDG_CONFIG_HOME/agents/code-review/config.json` (when
   `XDG_CONFIG_HOME` is set), otherwise
   `~/.config/agents/code-review/config.json`. Omit the file when unused.
-- **Repo file:** `<workspace>/.review-agent/config.json`. The **`workspace`**
-  used to locate this file is `resolve(process.cwd)` or **`--workspace`**
-  **before** any `workspace` value from config is applied (configure one path
-  explicitly if you rely on repo-scoped defaults while running from elsewhere).
+- **Repo file:** `<workspace>/.agents-code-review/config.json`. The
+  **`workspace`** used to locate this file is `resolve(process.cwd)` or
+  **`--workspace`** **before** any `workspace` value from config is applied
+  (configure one path explicitly if you rely on repo-scoped defaults while
+  running from elsewhere).
 
   Repo JSON **cannot steer where / how reviewers run**. Keys **`workspace`**,
   **`scratchpad`**, **`adapter`**, adapter host-binary paths (**`cursor`**,
@@ -172,12 +175,12 @@ don’t care about):
 
 - Strings (**user/config/env/CLI** for **`workspace`**, **`scratchpad`**,
   **`adapter`**, host paths **`opencode` / `claude` / `cursor`**, and
-  **`claudeArgs` / `cursorArgs`** — **repo `.review-agent` JSON omits those via
-  sanitization**, see preceding paragraph): **`workspace`**, **`scratchpad`**,
-  **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**,
-  **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**,
-  **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**,
-  **`reviewSummary`**.
+  **`claudeArgs` / `cursorArgs`** — **repo `.agents-code-review` JSON omits
+  those via sanitization**, see preceding paragraph): **`workspace`**,
+  **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**,
+  **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**,
+  **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**,
+  **`postPr`**, **`reviewSummary`**.
   - **`claudeArgs`** / **`cursorArgs`**: optional string (**`--claude-args` /
     `--cursor-args`** use comma-splitting—tokens cannot reliably contain commas)
     or a JSON **array of strings** (each element is one argv token, including
@@ -199,10 +202,10 @@ don’t care about):
   **`on`** before running the CLI to turn unknown keys into a **fatal error**
   instead.
 
-Example **`.review-agent/config.json`** (set **`workspace`**, **`scratchpad`**,
-**`adapter`**, host binaries, and **`cursorArgs`** / **`claudeArgs`** in
-**user** config or CLI; repo JSON carries only **`model`**, presets, booleans,
-and similarly safe knobs):
+Example **`.agents-code-review/config.json`** (set **`workspace`**,
+**`scratchpad`**, **`adapter`**, host binaries, and **`cursorArgs`** /
+**`claudeArgs`** in **user** config or CLI; repo JSON carries only **`model`**,
+presets, booleans, and similarly safe knobs):
 
 ```json
 {
@@ -263,8 +266,8 @@ which claude && claude --version
 which agent && agent --version
 
 # Inspect raw adapter output for failures/timeouts
-cat .review-agent/runs/<run-id>/roles/<role>/stderr.log
-cat .review-agent/runs/<run-id>/roles/<role>/stdout.log
+cat .agents-code-review/runs/<run-id>/roles/<role>/stderr.log
+cat .agents-code-review/runs/<run-id>/roles/<role>/stdout.log
 
 # Re-run with command/event visibility
 bun run agents code-review --adapter cursor --model sonnet-4 --dry-run --log all
@@ -272,7 +275,7 @@ bun run agents code-review --adapter cursor --model sonnet-4 --dry-run --log all
 
 For Cursor custom templates, keep `--trust` in `--cursor-args` for
 non-interactive runs. When using `--dry-run`, inspect artifacts under
-`.review-agent/dry-run/<run-id>/`.
+`.agents-code-review/dry-run/<run-id>/`.
 
 ## Human-In-The-Loop Workflow
 
@@ -325,7 +328,7 @@ Pending review mode:
 - **`bun run agents code-review post`** publishes findings from an existing
   **`result.json`** without rerunning the review model.
 - By default it auto-discovers the latest
-  **`.review-agent/runs/<run-id>/result.json`** in the workspace.
+  **`.agents-code-review/runs/<run-id>/result.json`** in the workspace.
 - Pass **`--result <path>`** to choose a specific result artifact.
 - Post requires **`pr_number`** and **`pr_reviewed_head_sha`** metadata in the
   stored result (produce them by running the review with **`--pr`** on a
@@ -434,7 +437,8 @@ Deterministic mode:
   PR directly.
 - It reads PR title and description/body into review context.
 - The review diff is built from the PR base branch patch (`<base>...HEAD`), not
-  untracked `.review-agent` artifacts.
+  from ad-hoc harness scratch artifacts (for example under
+  `.agents-code-review/` or legacy `.review-agent/`).
 - It extracts docs/links referenced in the PR description.
 - It auto-fetches referenced docs only when they match the tracked remote's host
   and org.
@@ -443,8 +447,11 @@ Deterministic mode:
 
 ## Expected Output
 
-Each run writes artifacts under `.review-agent/runs/<run-id>/` unless
-`--scratchpad` overrides it.
+Each run writes artifacts under `.agents-code-review/runs/<run-id>/` unless
+`--scratchpad` overrides it. **`agents triage`** and
+**`agents code-review post`** auto-discovery also consider legacy
+**`.review-agent/{runs,dry-run}/`** trees when present so older local runs
+remain addressable until you delete them.
 
 Core artifacts:
 

@@ -19,13 +19,13 @@ the merged CLI resolution already applies: harness defaults, then user
 **code-review config** under the XDG config directory (typically
 **`~/.config/agents/code-review/config.json`** on Unix,
 **`%USERPROFILE%\.config\agents\code-review\config.json`** on Windows), optional
-copied **`review-agent.config.example.json`** → **`.review-agent/config.json`**
-(repo‑allowed knobs only), **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only
-if the user supplied them**. **Do **not** add **`--dry-run`** (or drop it) on
-your own**—mirror whatever the operator specified for this session (normal
-**`runs/`** output vs **`--dry-run`** scratch). Mirrors real operator workflow;
-see the published Agents **code-review** documentation for configuration merge
-order.
+copied **`agents-code-review.config.example.json`** →
+**`.agents-code-review/config.json`** (repo‑allowed knobs only),
+**`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied
+them**. **Do **not** add **`--dry-run`** (or drop it) on your own**—mirror
+whatever the operator specified for this session (normal **`runs/`** output vs
+**`--dry-run`** scratch). Mirrors real operator workflow; see the published
+Agents **code-review** documentation for configuration merge order.
 
 ## Goal
 
@@ -134,9 +134,9 @@ Ingest the review output into the triage queue format the repository expects.
 Use the queue's `items` field as the work surface and treat `items.length === 0`
 as the acceptance bar.
 
-Never commit `.review-agent/` contents. Treat `.review-agent/` as disposable
-review output only; if it becomes tracked or appears in a branch diff, remove it
-from the tree before committing or pushing.
+Never commit `.agents-code-review/` contents (or legacy `.review-agent/`). Treat
+those trees as disposable review output only; if they become tracked or appear
+in a branch diff, remove them from the tree before committing or pushing.
 
 ## One commit per actionable finding (required)
 
@@ -277,7 +277,8 @@ when this skill ships beside that file).
 - **Path-based fingerprint:** the default output slug hashes the **normalized
   absolute path** to `result.json`, so moving the file changes the slug
   directory.
-- **Review artifacts:** `.review-agent/` is local-only output. Never commit it;
+- **Review artifacts:** `.agents-code-review/` is local-only output (legacy
+  `.review-agent/` may still exist from older CLI versions). Never commit it;
   delete it before finalizing a branch if it shows up in the working tree or
   diff.
 - **Workspace rules:** this directory is a project workspace in some setups; if
