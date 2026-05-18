@@ -26,6 +26,9 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
   Cursor loads **`AGENTS.md`** (and optionally `.cursor/rules/*.mdc`); it does
   not auto-discover `.agents/`—keep the one-line requirement here so IDE agents
   still see it.
+- With **Jujutsu**, keep **`git.sign-on-push = true`** in jj config and use
+  **`jj sign`** on any still-unsigned revisions before **`jj git push`** so
+  published commits stay signed (details in the same `.agents` doc).
 - Store design notes and product requirements under `docs/`.
 - Store portable Agent Skills playbooks under `docs/skills/`; verify semver with
   **`agents doctor`**, install with **`agents skills install`** (see
