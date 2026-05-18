@@ -364,7 +364,7 @@ export async function main(
         return 0;
       }
       console.log(
-        `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} inline comments.`,
+        `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} review thread(s).`,
       );
       console.log(`Review URL: ${posted.url}`);
       await updateRunResultMetadata(result.artifacts, {
@@ -913,7 +913,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     return 0;
   }
   console.log(
-    `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} inline comments.`,
+    `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} review thread(s).`,
   );
   console.log(`Review URL: ${posted.url}`);
   if (posted.headDiverged) {
@@ -994,6 +994,32 @@ export function resolveReviewDiffPosition(
   context: PullRequestDiffContext,
 ): number | undefined {
   return context.get(path)?.get(line);
+}
+
+/**
+ * Earliest unified-diff `position` in the first PR changed file that has hunk
+ * mappings. Used to anchor the pending-review summary as an inline comment so
+ * GitHub's "Finish review" UI does not overwrite API-authored review `body`
+ * text with an empty submission.
+ */
+export function firstAnchorableDiffReviewPosition(
+  context: PullRequestDiffContext,
+): { readonly path: string; readonly position: number } | undefined {
+  for (const [path, lineMap] of context) {
+    if (lineMap.size === 0) {
+      continue;
+    }
+    let minPos = Infinity;
+    for (const [, pos] of lineMap) {
+      if (pos < minPos) {
+        minPos = pos;
+      }
+    }
+    if (minPos !== Infinity) {
+      return { path, position: minPos };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -1262,7 +1288,7 @@ async function replacePendingPullRequestReview(input: {
     }
   }
 
-  const body = buildPendingReviewSummaryBody({
+  const summaryBody = buildPendingReviewSummaryBody({
     style: input.reviewSummaryStyle,
     findings,
     postedCommentCount: comments.length,
@@ -1270,6 +1296,21 @@ async function replacePendingPullRequestReview(input: {
     prDiffContext: diffContext,
     runMetadata: input.runMetadata,
   });
+
+  const summaryAnchor = firstAnchorableDiffReviewPosition(diffContext);
+  const commentsForApi: readonly GitHubPendingReviewCommentInput[] =
+    summaryAnchor !== undefined
+      ? [
+          {
+            path: summaryAnchor.path,
+            position: summaryAnchor.position,
+            body: summaryBody,
+          },
+          ...comments,
+        ]
+      : comments;
+  const reviewBody = summaryAnchor !== undefined ? "" : summaryBody;
+
   const created = await ghApi<{
     readonly id: number;
     readonly html_url: string;
@@ -1277,8 +1318,8 @@ async function replacePendingPullRequestReview(input: {
     `repos/${repo}/pulls/${prNumber}/reviews`,
     "POST",
     {
-      body,
-      comments,
+      body: reviewBody,
+      comments: commentsForApi,
     },
     workspacePath,
   );
@@ -1303,7 +1344,7 @@ async function replacePendingPullRequestReview(input: {
   return {
     reviewId: created.id,
     prNumber,
-    commentCount: comments.length,
+    commentCount: commentsForApi.length,
     url: created.html_url,
     currentHeadSha,
     headDiverged,
