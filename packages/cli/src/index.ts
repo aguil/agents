@@ -364,7 +364,7 @@ export async function main(
         return 0;
       }
       console.log(
-        `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} inline comments.`,
+        `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} review thread(s).`,
       );
       console.log(`Review URL: ${posted.url}`);
       await updateRunResultMetadata(result.artifacts, {
@@ -913,7 +913,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     return 0;
   }
   console.log(
-    `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} inline comments.`,
+    `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} review thread(s).`,
   );
   console.log(`Review URL: ${posted.url}`);
   if (posted.headDiverged) {
@@ -994,6 +994,65 @@ export function resolveReviewDiffPosition(
   context: PullRequestDiffContext,
 ): number | undefined {
   return context.get(path)?.get(line);
+}
+
+/**
+ * Earliest unified-diff `position` in the first PR changed file that has hunk
+ * mappings. Used to anchor the pending-review summary as an inline comment so
+ * GitHub's "Finish review" UI does not overwrite API-authored review `body`
+ * text with an empty submission.
+ */
+export function firstAnchorableDiffReviewPosition(
+  context: PullRequestDiffContext,
+): { readonly path: string; readonly position: number } | undefined {
+  for (const [path, lineMap] of context) {
+    if (lineMap.size === 0) {
+      continue;
+    }
+    let minPos = Infinity;
+    for (const [, pos] of lineMap) {
+      if (pos < minPos) {
+        minPos = pos;
+      }
+    }
+    if (minPos !== Infinity) {
+      return { path, position: minPos };
+    }
+  }
+  return undefined;
+}
+
+function anchorKey(path: string, position: number): string {
+  return `${path}\0${position}`;
+}
+
+/**
+ * Like {@link firstAnchorableDiffReviewPosition}, but skips diff positions already
+ * used by inline finding comments. GitHub rejects `POST .../pulls/{n}/reviews` with
+ * HTTP 422 when the same `path` + `position` appears twice in one payload.
+ */
+export function firstNonCollidingAnchorableDiffReviewPosition(
+  context: PullRequestDiffContext,
+  usedPositions: ReadonlySet<string>,
+): { readonly path: string; readonly position: number } | undefined {
+  for (const [path, lineMap] of context) {
+    if (lineMap.size === 0) {
+      continue;
+    }
+    let minPos = Infinity;
+    for (const [, pos] of lineMap) {
+      if (usedPositions.has(anchorKey(path, pos))) {
+        continue;
+      }
+      if (pos < minPos) {
+        minPos = pos;
+      }
+    }
+    if (minPos !== Infinity) {
+      return { path, position: minPos };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -1262,7 +1321,7 @@ async function replacePendingPullRequestReview(input: {
     }
   }
 
-  const body = buildPendingReviewSummaryBody({
+  const summaryBody = buildPendingReviewSummaryBody({
     style: input.reviewSummaryStyle,
     findings,
     postedCommentCount: comments.length,
@@ -1270,6 +1329,27 @@ async function replacePendingPullRequestReview(input: {
     prDiffContext: diffContext,
     runMetadata: input.runMetadata,
   });
+
+  const usedAnchorKeys = new Set(
+    comments.map((c) => anchorKey(c.path, c.position)),
+  );
+  const summaryAnchor = firstNonCollidingAnchorableDiffReviewPosition(
+    diffContext,
+    usedAnchorKeys,
+  );
+  const commentsForApi: readonly GitHubPendingReviewCommentInput[] =
+    summaryAnchor !== undefined
+      ? [
+          {
+            path: summaryAnchor.path,
+            position: summaryAnchor.position,
+            body: summaryBody,
+          },
+          ...comments,
+        ]
+      : comments;
+  const reviewBody = summaryAnchor !== undefined ? "" : summaryBody;
+
   const created = await ghApi<{
     readonly id: number;
     readonly html_url: string;
@@ -1277,8 +1357,9 @@ async function replacePendingPullRequestReview(input: {
     `repos/${repo}/pulls/${prNumber}/reviews`,
     "POST",
     {
-      body,
-      comments,
+      ...(currentHeadSha !== undefined ? { commit_id: currentHeadSha } : {}),
+      body: reviewBody,
+      comments: commentsForApi,
     },
     workspacePath,
   );
@@ -1303,7 +1384,7 @@ async function replacePendingPullRequestReview(input: {
   return {
     reviewId: created.id,
     prNumber,
-    commentCount: comments.length,
+    commentCount: commentsForApi.length,
     url: created.html_url,
     currentHeadSha,
     headDiverged,
@@ -2312,14 +2393,55 @@ async function getCurrentPullRequestNumber(
   repo: string,
   workspacePath?: string,
 ): Promise<number> {
-  const view = await runGh<{ readonly number: number }>(
-    ["pr", "view", "--repo", repo, "--json", "number"],
-    workspacePath,
-  );
-  if (!Number.isInteger(view.number)) {
-    throw new Error("Could not resolve current PR number from gh pr view.");
+  const cwdOpts = { gitAware: true } as const;
+
+  const headBranch = (
+    await runCommand(
+      ["git", "symbolic-ref", "-q", "--short", "HEAD"],
+      workspacePath,
+      cwdOpts,
+    )
+  )?.trim();
+
+  if (headBranch !== undefined && headBranch.length > 0) {
+    try {
+      const view = await runGh<{ readonly number: number }>(
+        ["pr", "view", headBranch, "--repo", repo, "--json", "number"],
+        workspacePath,
+      );
+      if (view !== undefined && Number.isInteger(view.number)) {
+        return view.number;
+      }
+    } catch {
+      // Local-only branch or no PR yet — fall through to commit lookup.
+    }
   }
-  return view.number;
+
+  const sha = (
+    await runCommand(["git", "rev-parse", "HEAD"], workspacePath, cwdOpts)
+  )?.trim();
+  if (sha === undefined || sha.length === 0) {
+    throw new Error(
+      "Could not resolve HEAD for PR discovery; pass --pr <number> explicitly.",
+    );
+  }
+
+  const pulls = await ghApi<
+    ReadonlyArray<{ readonly number: number; readonly state?: string }>
+  >(`repos/${repo}/commits/${sha}/pulls`, "GET", undefined, workspacePath);
+
+  if (!Array.isArray(pulls) || pulls.length === 0) {
+    throw new Error(
+      `No pull request found for HEAD (${sha.slice(0, 12)}) in ${repo}. Check out a PR head branch or pass --pr <number>.`,
+    );
+  }
+
+  const open = pulls.find((p) => p.state === "open");
+  const chosen = open ?? pulls[0];
+  if (!Number.isInteger(chosen.number)) {
+    throw new Error("Could not resolve PR number from commit metadata.");
+  }
+  return chosen.number;
 }
 
 async function fetchPullRequestHeadSha(

@@ -303,6 +303,11 @@ Strict mode:
 Pending review mode:
 
 - `--pending-review` creates an unsubmitted GitHub review on the target PR.
+- When the PR diff has at least one mappable hunk, the harness posts the review
+  summary as the **first** inline review thread and leaves the review-level
+  `body` empty, so finishing the review in the GitHub web UI does not overwrite
+  the summary with an empty submission. If nothing in the diff can be anchored
+  (for example no `patch` hunks), the summary remains on the review `body` only.
 - If you already have an existing pending review on that PR:
   - In interactive runs, the CLI prompts before replacing it.
   - In non-interactive runs, pass `--replace-pending-review` to opt in to
