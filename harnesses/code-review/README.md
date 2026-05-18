@@ -141,9 +141,9 @@ bun run agents code-review --adapter fake --dry-run --log summary
 **Breaking change:** older releases used **`.review-agent/config.json`** in the
 repo for merged settings; current releases read repo config from
 **`.agents-code-review/config.json`** (same merge rules). Older releases also
-allowed that file to set **`workspace`**, **`scratchpad`**, **`adapter`**, adapter
-host-binary paths, and **`cursorArgs`** / **`claudeArgs`** (including inside
-**`presets`**). Current releases **ignore those keys when they come from
+allowed that file to set **`workspace`**, **`scratchpad`**, **`adapter`**,
+adapter host-binary paths, and **`cursorArgs`** / **`claudeArgs`** (including
+inside **`presets`**). Current releases **ignore those keys when they come from
 repo-managed JSON** — use the **user** config file (**`~/.config/...`**),
 **`AGENTS_CODE_REVIEW_*`**, or **CLI** instead. See the next paragraph for the
 exact strip list.
@@ -156,10 +156,11 @@ repo**) → selected **`presets`** entry when you pass **`--preset`** →
 - **User file:** `$XDG_CONFIG_HOME/agents/code-review/config.json` (when
   `XDG_CONFIG_HOME` is set), otherwise
   `~/.config/agents/code-review/config.json`. Omit the file when unused.
-- **Repo file:** `<workspace>/.agents-code-review/config.json`. The **`workspace`**
-  used to locate this file is `resolve(process.cwd)` or **`--workspace`**
-  **before** any `workspace` value from config is applied (configure one path
-  explicitly if you rely on repo-scoped defaults while running from elsewhere).
+- **Repo file:** `<workspace>/.agents-code-review/config.json`. The
+  **`workspace`** used to locate this file is `resolve(process.cwd)` or
+  **`--workspace`** **before** any `workspace` value from config is applied
+  (configure one path explicitly if you rely on repo-scoped defaults while
+  running from elsewhere).
 
   Repo JSON **cannot steer where / how reviewers run**. Keys **`workspace`**,
   **`scratchpad`**, **`adapter`**, adapter host-binary paths (**`cursor`**,
@@ -174,12 +175,12 @@ don’t care about):
 
 - Strings (**user/config/env/CLI** for **`workspace`**, **`scratchpad`**,
   **`adapter`**, host paths **`opencode` / `claude` / `cursor`**, and
-  **`claudeArgs` / `cursorArgs`** — **repo `.agents-code-review` JSON omits those via
-  sanitization**, see preceding paragraph): **`workspace`**, **`scratchpad`**,
-  **`contextBundle`**, **`result`**, **`consensus`**, **`adapter`**,
-  **`model`**, **`variant`**, **`agent`**, **`opencode`**, **`claude`**,
-  **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**, **`postPr`**,
-  **`reviewSummary`**.
+  **`claudeArgs` / `cursorArgs`** — **repo `.agents-code-review` JSON omits
+  those via sanitization**, see preceding paragraph): **`workspace`**,
+  **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**,
+  **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**,
+  **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**,
+  **`postPr`**, **`reviewSummary`**.
   - **`claudeArgs`** / **`cursorArgs`**: optional string (**`--claude-args` /
     `--cursor-args`** use comma-splitting—tokens cannot reliably contain commas)
     or a JSON **array of strings** (each element is one argv token, including
@@ -201,10 +202,10 @@ don’t care about):
   **`on`** before running the CLI to turn unknown keys into a **fatal error**
   instead.
 
-Example **`.agents-code-review/config.json`** (set **`workspace`**, **`scratchpad`**,
-**`adapter`**, host binaries, and **`cursorArgs`** / **`claudeArgs`** in
-**user** config or CLI; repo JSON carries only **`model`**, presets, booleans,
-and similarly safe knobs):
+Example **`.agents-code-review/config.json`** (set **`workspace`**,
+**`scratchpad`**, **`adapter`**, host binaries, and **`cursorArgs`** /
+**`claudeArgs`** in **user** config or CLI; repo JSON carries only **`model`**,
+presets, booleans, and similarly safe knobs):
 
 ```json
 {
@@ -436,8 +437,8 @@ Deterministic mode:
   PR directly.
 - It reads PR title and description/body into review context.
 - The review diff is built from the PR base branch patch (`<base>...HEAD`), not
-  from ad-hoc harness scratch artifacts (for example under `.agents-code-review/`
-  or legacy `.review-agent/`).
+  from ad-hoc harness scratch artifacts (for example under
+  `.agents-code-review/` or legacy `.review-agent/`).
 - It extracts docs/links referenced in the PR description.
 - It auto-fetches referenced docs only when they match the tracked remote's host
   and org.
@@ -447,9 +448,10 @@ Deterministic mode:
 ## Expected Output
 
 Each run writes artifacts under `.agents-code-review/runs/<run-id>/` unless
-`--scratchpad` overrides it. **`agents triage`** and **`agents code-review post`**
-auto-discovery also consider legacy **`.review-agent/{runs,dry-run}/`** trees
-when present so older local runs remain addressable until you delete them.
+`--scratchpad` overrides it. **`agents triage`** and
+**`agents code-review post`** auto-discovery also consider legacy
+**`.review-agent/{runs,dry-run}/`** trees when present so older local runs
+remain addressable until you delete them.
 
 Core artifacts:
 

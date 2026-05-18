@@ -26,7 +26,8 @@ agents code-review --help
 Then follow the canonical docs in the upstream repository
 [`README.md`](https://github.com/aguil/agents/blob/main/README.md) for
 harness-specific workflows, adapters, models, and configuration (including
-`.agents-code-review` semantics; discovery still considers legacy `.review-agent/` trees).
+`.agents-code-review` semantics; discovery still considers legacy
+`.review-agent/` trees).
 
 Agent Skills playbooks for review/triage workflows live under
 [`docs/skills/`](https://github.com/aguil/agents/blob/main/docs/skills/README.md).
