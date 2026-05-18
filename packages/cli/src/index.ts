@@ -1022,6 +1022,39 @@ export function firstAnchorableDiffReviewPosition(
   return undefined;
 }
 
+function anchorKey(path: string, position: number): string {
+  return `${path}\0${position}`;
+}
+
+/**
+ * Like {@link firstAnchorableDiffReviewPosition}, but skips diff positions already
+ * used by inline finding comments. GitHub rejects `POST .../pulls/{n}/reviews` with
+ * HTTP 422 when the same `path` + `position` appears twice in one payload.
+ */
+export function firstNonCollidingAnchorableDiffReviewPosition(
+  context: PullRequestDiffContext,
+  usedPositions: ReadonlySet<string>,
+): { readonly path: string; readonly position: number } | undefined {
+  for (const [path, lineMap] of context) {
+    if (lineMap.size === 0) {
+      continue;
+    }
+    let minPos = Infinity;
+    for (const [, pos] of lineMap) {
+      if (usedPositions.has(anchorKey(path, pos))) {
+        continue;
+      }
+      if (pos < minPos) {
+        minPos = pos;
+      }
+    }
+    if (minPos !== Infinity) {
+      return { path, position: minPos };
+    }
+  }
+  return undefined;
+}
+
 /**
  * When PR diff context is known, explains why a finding will not get an inline review thread.
  * Returns undefined when the finding anchors to a postable PR diff line.
@@ -1297,7 +1330,13 @@ async function replacePendingPullRequestReview(input: {
     runMetadata: input.runMetadata,
   });
 
-  const summaryAnchor = firstAnchorableDiffReviewPosition(diffContext);
+  const usedAnchorKeys = new Set(
+    comments.map((c) => anchorKey(c.path, c.position)),
+  );
+  const summaryAnchor = firstNonCollidingAnchorableDiffReviewPosition(
+    diffContext,
+    usedAnchorKeys,
+  );
   const commentsForApi: readonly GitHubPendingReviewCommentInput[] =
     summaryAnchor !== undefined
       ? [
@@ -1318,6 +1357,9 @@ async function replacePendingPullRequestReview(input: {
     `repos/${repo}/pulls/${prNumber}/reviews`,
     "POST",
     {
+      ...(currentHeadSha !== undefined
+        ? { commit_id: currentHeadSha }
+        : {}),
       body: reviewBody,
       comments: commentsForApi,
     },
