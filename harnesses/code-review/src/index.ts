@@ -18,6 +18,8 @@ import type {
 } from "@aguil/agents-core";
 import {
   type AgentEvent,
+  agentsCodeReviewDryRunRoot,
+  agentsCodeReviewRunsRoot,
   createRunId,
   ensureDirectory,
   writeJsonFile,
@@ -136,8 +138,8 @@ async function writeLatestCodeReviewDiscoveryPointer(options: {
 }): Promise<void> {
   const ws = resolve(options.workspacePath);
   const root = resolve(options.scratchpadRoot);
-  const expectedRuns = resolve(join(ws, ".review-agent", "runs"));
-  const expectedDry = resolve(join(ws, ".review-agent", "dry-run"));
+  const expectedRuns = resolve(agentsCodeReviewRunsRoot(ws));
+  const expectedDry = resolve(agentsCodeReviewDryRunRoot(ws));
   let pointerParent: string | undefined;
   if (root === expectedRuns) {
     pointerParent = expectedRuns;
@@ -161,7 +163,7 @@ export async function runCodeReview(
   const workspacePath = resolve(options.workspacePath ?? process.cwd());
   const runId = options.runId ?? createRunId("code-review");
   const scratchpadRoot = resolve(
-    options.scratchpadRoot ?? join(workspacePath, ".review-agent", "runs"),
+    options.scratchpadRoot ?? agentsCodeReviewRunsRoot(workspacePath),
   );
   const scratchpadPath = join(scratchpadRoot, runId);
   await ensureDirectory(scratchpadPath);

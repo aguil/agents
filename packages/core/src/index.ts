@@ -1,6 +1,15 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
+export {
+  AGENTS_CODE_REVIEW_DIR,
+  agentsCodeReviewDryRunRoot,
+  agentsCodeReviewRunsRoot,
+  LEGACY_AGENTS_CODE_REVIEW_DIR,
+  legacyAgentsCodeReviewDryRunRoot,
+  legacyAgentsCodeReviewRunsRoot,
+} from "./agents-paths";
+
 export type HarnessStatus = "passed" | "warnings" | "failed" | "error";
 export type FindingSeverity = "critical" | "warning";
 export type ValidationStatus = "verified" | "not_reproduced" | "not_run";

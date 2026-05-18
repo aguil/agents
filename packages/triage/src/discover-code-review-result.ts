@@ -1,5 +1,11 @@
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import {
+  agentsCodeReviewDryRunRoot,
+  agentsCodeReviewRunsRoot,
+  legacyAgentsCodeReviewDryRunRoot,
+  legacyAgentsCodeReviewRunsRoot,
+} from "@aguil/agents-core";
 
 /** Must match harness constant (one line: absolute path to result.json). */
 const CODE_REVIEW_LATEST_RESULT_POINTER = ".code-review-latest-result";
@@ -10,9 +16,10 @@ function discoverFullScanEnv(): boolean {
 }
 
 /**
- * Latest result.json under ".review-agent/runs/code-review-*" only. Picks the
- * newest accessible result.json by file mtime (descending), then
- * code-review-* basename lexicographic descending as a stable tie-breaker.
+ * Latest result.json under `.agents-code-review/runs/code-review-*` only
+ * (also considers legacy `.review-agent/runs/`). Picks the newest accessible
+ * result.json by file mtime (descending), then code-review-* basename
+ * lexicographic descending as a stable tie-breaker.
  * When ".code-review-latest-result" exists, its path is merged with a scan of
  * run directories so a stale pointer cannot beat a newer on-disk run.
  * Set AGENTS_CODE_REVIEW_DISCOVER_FULL_SCAN=1 to ignore the pointer entirely.
@@ -22,27 +29,42 @@ function discoverFullScanEnv(): boolean {
 export async function discoverLatestRunsCodeReviewResultPath(
   workspacePath: string,
 ): Promise<string | undefined> {
-  const runsRoot = join(workspacePath, ".review-agent", "runs");
-  return (await bestScoredMergingPointer(runsRoot))?.path;
+  const newRuns = await bestScoredMergingPointer(
+    agentsCodeReviewRunsRoot(workspacePath),
+  );
+  const legacyRuns = await bestScoredMergingPointer(
+    legacyAgentsCodeReviewRunsRoot(workspacePath),
+  );
+  return pickBetterOf(newRuns, legacyRuns)?.path;
 }
 
 /**
- * Latest result.json among ".review-agent/dry-run" and ".review-agent/runs"
- * code-review-* trees. Selection uses file mtime (descending), then basename
- * lexicographic descending as a stable tie-breaker so same-second run ids do
- * not pick arbitrarily by random suffix alone. Per-tree pointers are merged
- * with directory scans (see discoverLatestRunsCodeReviewResultPath).
+ * Latest result.json among `.agents-code-review/{dry-run,runs}` and legacy
+ * `.review-agent/{dry-run,runs}` code-review-* trees. Selection uses file
+ * mtime (descending), then basename lexicographic descending as a stable
+ * tie-breaker so same-second run ids do not pick arbitrarily by random suffix
+ * alone. Per-tree pointers are merged with directory scans (see
+ * discoverLatestRunsCodeReviewResultPath).
  */
 export async function discoverLatestCodeReviewResultPath(
   workspacePath: string,
 ): Promise<string | undefined> {
-  const reviewAgent = join(workspacePath, ".review-agent");
-  const dryRunRoot = join(reviewAgent, "dry-run");
-  const runsRoot = join(reviewAgent, "runs");
-
-  const scoredDry = await bestScoredMergingPointer(dryRunRoot);
-  const scoredRuns = await bestScoredMergingPointer(runsRoot);
-  return pickBetterOf(scoredDry, scoredRuns)?.path;
+  const dryNew = await bestScoredMergingPointer(
+    agentsCodeReviewDryRunRoot(workspacePath),
+  );
+  const runsNew = await bestScoredMergingPointer(
+    agentsCodeReviewRunsRoot(workspacePath),
+  );
+  const dryLegacy = await bestScoredMergingPointer(
+    legacyAgentsCodeReviewDryRunRoot(workspacePath),
+  );
+  const runsLegacy = await bestScoredMergingPointer(
+    legacyAgentsCodeReviewRunsRoot(workspacePath),
+  );
+  return pickBetterOf(
+    pickBetterOf(dryNew, runsNew),
+    pickBetterOf(dryLegacy, runsLegacy),
+  )?.path;
 }
 
 type ScoredResult = {

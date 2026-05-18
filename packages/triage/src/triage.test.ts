@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Finding } from "@aguil/agents-core";
 import {
+  AGENTS_CODE_REVIEW_DIR,
+  LEGACY_AGENTS_CODE_REVIEW_DIR,
+} from "@aguil/agents-core";
+import {
   discoverLatestCodeReviewResultPath,
   discoverLatestRunsCodeReviewResultPath,
 } from "./discover-code-review-result";
@@ -45,21 +49,33 @@ test("canonicalKeyForCodeReviewArtifact normalizes to absolute path", () => {
 test("discoverLatestCodeReviewResultPath merges dry-run + runs newest id", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-discover-"));
   const ws = join(base, "ws");
-  await mkdir(join(ws, ".review-agent", "runs", "code-review-AAA-result"), {
-    recursive: true,
-  });
-  await mkdir(join(ws, ".review-agent", "dry-run", "code-review-ZZZ-result"), {
-    recursive: true,
-  });
+  await mkdir(
+    join(ws, AGENTS_CODE_REVIEW_DIR, "runs", "code-review-AAA-result"),
+    {
+      recursive: true,
+    },
+  );
+  await mkdir(
+    join(ws, AGENTS_CODE_REVIEW_DIR, "dry-run", "code-review-ZZZ-result"),
+    {
+      recursive: true,
+    },
+  );
   await writeFile(
-    join(ws, ".review-agent", "runs", "code-review-AAA-result", "result.json"),
+    join(
+      ws,
+      AGENTS_CODE_REVIEW_DIR,
+      "runs",
+      "code-review-AAA-result",
+      "result.json",
+    ),
     "{}",
     "utf8",
   );
   await writeFile(
     join(
       ws,
-      ".review-agent",
+      AGENTS_CODE_REVIEW_DIR,
       "dry-run",
       "code-review-ZZZ-result",
       "result.json",
@@ -69,7 +85,8 @@ test("discoverLatestCodeReviewResultPath merges dry-run + runs newest id", async
   );
   const p = await discoverLatestCodeReviewResultPath(ws);
   expect(
-    typeof p === "string" && p.includes(join(".review-agent", "dry-run")),
+    typeof p === "string" &&
+      p.includes(join(AGENTS_CODE_REVIEW_DIR, "dry-run")),
   ).toBe(true);
   expect(typeof p === "string" && p.includes("code-review-ZZZ-result")).toBe(
     true,
@@ -79,7 +96,7 @@ test("discoverLatestCodeReviewResultPath merges dry-run + runs newest id", async
 test("discoverLatestRunsCodeReviewResultPath prefers newer mtime over lex tie-break", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-discover-mtime-"));
   const ws = join(base, "ws");
-  const runsRoot = join(ws, ".review-agent", "runs");
+  const runsRoot = join(ws, AGENTS_CODE_REVIEW_DIR, "runs");
   const lexHigh = join(runsRoot, "code-review-20991202000000-high-lex");
   const lexLow = join(runsRoot, "code-review-20991201000000-low-lex");
   await mkdir(lexHigh, { recursive: true });
@@ -99,7 +116,7 @@ test("discoverLatestRunsCodeReviewResultPath prefers newer mtime over lex tie-br
 test("discoverLatestRunsCodeReviewResultPath agrees with valid pointer when sole run", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-pointer-"));
   const ws = join(base, "ws");
-  const runsRoot = join(ws, ".review-agent", "runs");
+  const runsRoot = join(ws, AGENTS_CODE_REVIEW_DIR, "runs");
   const dirA = join(runsRoot, "code-review-20990101000000-a");
   await mkdir(dirA, { recursive: true });
   const resultPath = join(dirA, "result.json");
@@ -116,7 +133,7 @@ test("discoverLatestRunsCodeReviewResultPath agrees with valid pointer when sole
 test("discoverLatestRunsCodeReviewResultPath prefers newer run over stale pointer", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-stale-pointer-"));
   const ws = join(base, "ws");
-  const runsRoot = join(ws, ".review-agent", "runs");
+  const runsRoot = join(ws, AGENTS_CODE_REVIEW_DIR, "runs");
   const dirOld = join(runsRoot, "code-review-20990101000000-old");
   const dirNew = join(runsRoot, "code-review-20990102000000-new");
   await mkdir(dirOld, { recursive: true });
@@ -142,7 +159,7 @@ test("discoverLatestRunsCodeReviewResultPath ignores pointer when AGENTS_CODE_RE
   try {
     const base = await mkdtemp(join(tmpdir(), "agents-triage-pointer-full-"));
     const ws = join(base, "ws");
-    const runsRoot = join(ws, ".review-agent", "runs");
+    const runsRoot = join(ws, AGENTS_CODE_REVIEW_DIR, "runs");
     const dirLo = join(runsRoot, "code-review-20991201000000-lo");
     const dirHi = join(runsRoot, "code-review-20991202000000-hi");
     await mkdir(dirLo, { recursive: true });
@@ -172,33 +189,50 @@ test("discoverLatestRunsCodeReviewResultPath ignores pointer when AGENTS_CODE_RE
 test("discoverLatestRunsCodeReviewResultPath only considers runs/", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-runs-only-"));
   const ws = join(base, "ws");
-  await mkdir(join(ws, ".review-agent", "runs", "code-review-BBB"), {
+  await mkdir(join(ws, AGENTS_CODE_REVIEW_DIR, "runs", "code-review-BBB"), {
     recursive: true,
   });
-  await mkdir(join(ws, ".review-agent", "dry-run", "code-review-ZZZ"), {
+  await mkdir(join(ws, AGENTS_CODE_REVIEW_DIR, "dry-run", "code-review-ZZZ"), {
     recursive: true,
   });
   await writeFile(
-    join(ws, ".review-agent", "runs", "code-review-BBB", "result.json"),
+    join(ws, AGENTS_CODE_REVIEW_DIR, "runs", "code-review-BBB", "result.json"),
     "{}",
     "utf8",
   );
   await writeFile(
-    join(ws, ".review-agent", "dry-run", "code-review-ZZZ", "result.json"),
+    join(
+      ws,
+      AGENTS_CODE_REVIEW_DIR,
+      "dry-run",
+      "code-review-ZZZ",
+      "result.json",
+    ),
     "{}",
     "utf8",
   );
   const p = await discoverLatestRunsCodeReviewResultPath(ws);
   expect(
-    typeof p === "string" && p.includes(join(".review-agent", "runs")),
+    typeof p === "string" && p.includes(join(AGENTS_CODE_REVIEW_DIR, "runs")),
   ).toBe(true);
   expect(typeof p === "string" && p.includes("code-review-BBB")).toBe(true);
+});
+
+test("discoverLatestRunsCodeReviewResultPath finds legacy .review-agent when new tree is empty", async () => {
+  const base = await mkdtemp(join(tmpdir(), "agents-triage-legacy-runs-only-"));
+  const ws = join(base, "ws");
+  const legacyRuns = join(ws, LEGACY_AGENTS_CODE_REVIEW_DIR, "runs");
+  const dir = join(legacyRuns, "code-review-20990101000000-legacy-only");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "result.json"), "{}", "utf8");
+  const p = await discoverLatestRunsCodeReviewResultPath(ws);
+  expect(p).toBe(join(dir, "result.json"));
 });
 
 test("discoverLatestCodeReviewResultPath skips symlinked run directory entries", async () => {
   const base = await mkdtemp(join(tmpdir(), "agents-triage-skip-symlink-run-"));
   const ws = join(base, "ws");
-  const runsRoot = join(ws, ".review-agent", "runs");
+  const runsRoot = join(ws, AGENTS_CODE_REVIEW_DIR, "runs");
   const realDir = join(runsRoot, "code-review-20260501000000-real");
   await mkdir(realDir, { recursive: true });
   await writeFile(join(realDir, "result.json"), "{}", "utf8");
@@ -218,7 +252,7 @@ test("discoverLatestRunsCodeReviewResultPath skips symlinked result.json leaf", 
     join(tmpdir(), "agents-triage-skip-symlink-result-"),
   );
   const ws = join(base, "ws");
-  const runsRoot = join(ws, ".review-agent", "runs");
+  const runsRoot = join(ws, AGENTS_CODE_REVIEW_DIR, "runs");
   const older = join(runsRoot, "code-review-20260501000000-older");
   const newer = join(runsRoot, "code-review-20260502000000-newer");
   await mkdir(older, { recursive: true });
@@ -240,7 +274,7 @@ test("discoverLatestRunsCodeReviewResultPath skips symlinked runs root", async (
   const fakeRun = join(stolen, "code-review-20991231000000-fake");
   await mkdir(fakeRun, { recursive: true });
   await writeFile(join(fakeRun, "result.json"), "{}", "utf8");
-  const runsLink = join(ws, ".review-agent", "runs");
+  const runsLink = join(ws, AGENTS_CODE_REVIEW_DIR, "runs");
   await mkdir(dirname(runsLink), { recursive: true });
   await symlink(stolen, runsLink, "dir");
   const p = await discoverLatestRunsCodeReviewResultPath(ws);

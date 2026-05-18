@@ -16,7 +16,7 @@ the final component cannot be a symlink, but they do **not** retain a directory
 file descriptor across the validation → open boundary.
 
 The harness updates `.code-review-latest-result` via a temp file and `rename(2)`
-on an absolute pathname under `.review-agent/runs` or `dry-run`, with the same
+on an absolute pathname under `.agents-code-review/runs` or `dry-run`, with the same
 ancestor-swap concern.
 
 A hostile or buggy concurrent actor that can flip **ancestor** directories to

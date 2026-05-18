@@ -94,7 +94,7 @@ repo JSON < preset < env < CLI):
 
   Merge order then loads JSON defaults from:
     $XDG_CONFIG_HOME/agents/code-review/config.json (or ~/.config/... when unset),
-    then <workspace>/.review-agent/config.json (workspace = cwd or --workspace before merge).
+    then <workspace>/.agents-code-review/config.json (workspace = cwd or --workspace before merge).
     Each file may declare a top-level "presets" object.
 
   Environment: AGENTS_CODE_REVIEW_* (see harness README); booleans accept true/false/1/0/yes/no.
@@ -204,8 +204,8 @@ See also: agents code-review post --help  (stored result publishing, no rerun)
 Run and replay (shared):
 
   --workspace <path>     Workspace to review (default: cwd)
-  --scratchpad <path>    Scratchpad root (default: <workspace>/.review-agent/runs)
-  --dry-run              Write artifacts under <workspace>/.review-agent/dry-run
+  --scratchpad <path>    Scratchpad root (default: <workspace>/.agents-code-review/runs)
+  --dry-run              Write artifacts under <workspace>/.agents-code-review/dry-run
   --context-bundle <path> Reuse captured context bundle JSON
   --consensus <n>        Run n passes and keep recurring findings (default 1 when --pending-review)
 
@@ -254,7 +254,7 @@ Post-only publishes from result.json — adapter/model/consensus/context collect
 
 Posting flags:
 
-  --result <path>        Stored result JSON (omit to auto-discover latest under <workspace>/.review-agent/runs/ only; dry-run artifacts are never posted)
+  --result <path>        Stored result JSON (omit to auto-discover latest under <workspace>/.agents-code-review/runs/ only; dry-run artifacts are never posted)
   --pr <number>          Explicit posting/metadata PR when inferred values are insufficient
   --post-pr <number>     Alternate posting PR when differing from inferred/--pr pairing (rare)
   --pending-review       Accepted but ignored (post implies pending review semantics)

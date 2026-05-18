@@ -15,7 +15,11 @@ import {
   runCodeReview,
 } from "@aguil/agents-code-review";
 import type { AgentEvent, Finding } from "@aguil/agents-core";
-import { resolveGitAwarePath } from "@aguil/agents-core";
+import {
+  AGENTS_CODE_REVIEW_DIR,
+  agentsCodeReviewDryRunRoot,
+  resolveGitAwarePath,
+} from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
 import type { CliOptions } from "./code-review-cli-models";
 import { resolveCodeReviewCliOptions } from "./code-review-config";
@@ -448,7 +452,7 @@ function resolveScratchpadRoot(options: CliOptions): string | undefined {
     return undefined;
   }
   const workspacePath = resolve(options.workspace ?? process.cwd());
-  return join(workspacePath, ".review-agent", "dry-run");
+  return agentsCodeReviewDryRunRoot(workspacePath);
 }
 
 function printVerboseFindingSummary(findings: readonly Finding[]): void {
@@ -795,7 +799,7 @@ async function resolvedResultPathIsUnderReviewAgentDryRun(
   try {
     const wsReal = await realpath(workspacePath);
     const resReal = await realpath(resultPath);
-    const dryRoot = join(wsReal, ".review-agent", "dry-run");
+    const dryRoot = agentsCodeReviewDryRunRoot(wsReal);
     return resReal === dryRoot || resReal.startsWith(`${dryRoot}${sep}`);
   } catch {
     return false;
@@ -848,7 +852,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     ))
   ) {
     console.error(
-      "Refusing to post a dry-run result.json. Use .review-agent/runs/… or omit --result for auto-discovery.",
+      "Refusing to post a dry-run result.json. Use .agents-code-review/runs/… or omit --result for auto-discovery.",
     );
     return 1;
   }
@@ -1307,7 +1311,7 @@ function findingCachePath(
 ): string {
   return join(
     workspacePath,
-    ".review-agent",
+    AGENTS_CODE_REVIEW_DIR,
     "pr-cache",
     sanitizeRepoForCache(repo),
     `pr-${prNumber}`,

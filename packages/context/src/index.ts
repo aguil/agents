@@ -1375,7 +1375,9 @@ function normalizeReference(value: string | undefined): string | undefined {
 }
 
 function isHarnessArtifactPath(path: string): boolean {
-  return path.startsWith(".review-agent/");
+  return (
+    path.startsWith(".agents-code-review/") || path.startsWith(".review-agent/")
+  );
 }
 
 function isUrl(value: string): boolean {

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { codeReviewHarnessPackageCliDefaults } from "@aguil/agents-code-review";
+import { AGENTS_CODE_REVIEW_DIR } from "@aguil/agents-core";
 import type {
   CliOptions,
   ParsedCodeReviewArgv,
@@ -146,10 +147,10 @@ export function resolveUserCodeReviewConfigPath(): string {
 }
 
 export function resolveRepoCodeReviewConfigPath(workspacePath: string): string {
-  return join(workspacePath, ".review-agent", "config.json");
+  return join(workspacePath, AGENTS_CODE_REVIEW_DIR, "config.json");
 }
 
-/** Host-binary paths plus argv templates must not originate from `.review-agent` JSON alone. */
+/** Host-binary paths plus argv templates must not originate from repo `.agents-code-review` JSON alone. */
 const REPO_BLOCKED_ADAPTER_LAUNCH_KEYS = [
   "claude",
   "claudeArgs",
@@ -158,14 +159,14 @@ const REPO_BLOCKED_ADAPTER_LAUNCH_KEYS = [
   "opencode",
 ] as const satisfies readonly (keyof CliOptions)[];
 
-/** Where / via which harness wiring to run reviews must not be controlled only via repo `.review-agent` JSON. */
+/** Where / via which harness wiring to run reviews must not be controlled only via repo `.agents-code-review` JSON. */
 const REPO_BLOCKED_REVIEW_STEERING_KEYS = [
   "adapter",
   "scratchpad",
   "workspace",
 ] as const satisfies readonly (keyof CliOptions)[];
 
-/** Strip repo-managed steering from workspace `.review-agent` partials before merge (including preset bodies). */
+/** Strip repo-managed steering from workspace `.agents-code-review` partials before merge (including preset bodies). */
 export function sanitizeRepoAdapterExecutablePartial(
   partial: CodeReviewMergedPartial,
 ): {
@@ -578,7 +579,7 @@ export type ResolveCodeReviewCliResult =
 /**
  * Merge order: harness package defaults < user config < repo config < named `--preset`
  * < environment < explicit CLI flags.
- * Repo config is read from `<workspace>/.review-agent/config.json` where workspace is
+ * Repo config is read from `<workspace>/.agents-code-review/config.json` where workspace is
  * `resolve(parsed.options.workspace ?? cwd)` before merge (see README).
  */
 export async function resolveCodeReviewCliOptions(
