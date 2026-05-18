@@ -82,6 +82,7 @@ import {
   findingsToPendingReviewComments,
   findingUsesFileNotInPrChangedFiles,
   firstAnchorableDiffReviewPosition,
+  firstNonCollidingAnchorableDiffReviewPosition,
   formatReviewCoverageSectionLines,
   loadStoredReviewResult,
   parsePrNumber,
@@ -1172,13 +1173,51 @@ test("firstAnchorableDiffReviewPosition skips empty file maps", () => {
 
 test("firstAnchorableDiffReviewPosition uses first non-empty file in map order and minimum position", () => {
   const ctx = new Map<string, ReadonlyMap<number, number>>([
-    ["b.ts", new Map([[2, 100], [3, 2]])],
+    [
+      "b.ts",
+      new Map([
+        [2, 100],
+        [3, 2],
+      ]),
+    ],
     ["a.ts", new Map([[1, 1]])],
   ]);
   expect(firstAnchorableDiffReviewPosition(ctx)).toEqual({
     path: "b.ts",
     position: 2,
   });
+});
+
+test("firstNonCollidingAnchorableDiffReviewPosition skips positions already used", () => {
+  const ctx = new Map<string, ReadonlyMap<number, number>>([
+    [
+      "b.ts",
+      new Map([
+        [2, 2],
+        [3, 5],
+      ]),
+    ],
+    ["a.ts", new Map([[1, 1]])],
+  ]);
+  expect(
+    firstNonCollidingAnchorableDiffReviewPosition(
+      ctx,
+      new Set([`b.ts\u0000${2}`]),
+    ),
+  ).toEqual({ path: "b.ts", position: 5 });
+});
+
+test("firstNonCollidingAnchorableDiffReviewPosition advances to next file when first file is exhausted", () => {
+  const ctx = new Map<string, ReadonlyMap<number, number>>([
+    ["b.ts", new Map([[2, 2]])],
+    ["a.ts", new Map([[1, 1]])],
+  ]);
+  expect(
+    firstNonCollidingAnchorableDiffReviewPosition(
+      ctx,
+      new Set([`b.ts\u0000${2}`]),
+    ),
+  ).toEqual({ path: "a.ts", position: 1 });
 });
 
 test("builds triage review summary body", () => {
