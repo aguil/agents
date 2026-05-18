@@ -29,12 +29,10 @@ function discoverFullScanEnv(): boolean {
 export async function discoverLatestRunsCodeReviewResultPath(
   workspacePath: string,
 ): Promise<string | undefined> {
-  const newRuns = await bestScoredMergingPointer(
-    agentsCodeReviewRunsRoot(workspacePath),
-  );
-  const legacyRuns = await bestScoredMergingPointer(
-    legacyAgentsCodeReviewRunsRoot(workspacePath),
-  );
+  const [newRuns, legacyRuns] = await Promise.all([
+    bestScoredMergingPointer(agentsCodeReviewRunsRoot(workspacePath)),
+    bestScoredMergingPointer(legacyAgentsCodeReviewRunsRoot(workspacePath)),
+  ]);
   return pickBetterOf(newRuns, legacyRuns)?.path;
 }
 
@@ -49,18 +47,12 @@ export async function discoverLatestRunsCodeReviewResultPath(
 export async function discoverLatestCodeReviewResultPath(
   workspacePath: string,
 ): Promise<string | undefined> {
-  const dryNew = await bestScoredMergingPointer(
-    agentsCodeReviewDryRunRoot(workspacePath),
-  );
-  const runsNew = await bestScoredMergingPointer(
-    agentsCodeReviewRunsRoot(workspacePath),
-  );
-  const dryLegacy = await bestScoredMergingPointer(
-    legacyAgentsCodeReviewDryRunRoot(workspacePath),
-  );
-  const runsLegacy = await bestScoredMergingPointer(
-    legacyAgentsCodeReviewRunsRoot(workspacePath),
-  );
+  const [dryNew, runsNew, dryLegacy, runsLegacy] = await Promise.all([
+    bestScoredMergingPointer(agentsCodeReviewDryRunRoot(workspacePath)),
+    bestScoredMergingPointer(agentsCodeReviewRunsRoot(workspacePath)),
+    bestScoredMergingPointer(legacyAgentsCodeReviewDryRunRoot(workspacePath)),
+    bestScoredMergingPointer(legacyAgentsCodeReviewRunsRoot(workspacePath)),
+  ]);
   return pickBetterOf(
     pickBetterOf(dryNew, runsNew),
     pickBetterOf(dryLegacy, runsLegacy),
