@@ -18,6 +18,7 @@ import type { AgentEvent, Finding } from "@aguil/agents-core";
 import {
   AGENTS_CODE_REVIEW_DIR,
   agentsCodeReviewDryRunRoot,
+  LEGACY_AGENTS_CODE_REVIEW_DIR,
   legacyAgentsCodeReviewDryRunRoot,
   resolveGitAwarePath,
 } from "@aguil/agents-core";
@@ -1328,27 +1329,47 @@ function findingCachePath(
   );
 }
 
+function legacyFindingCachePath(
+  workspacePath: string,
+  repo: string,
+  prNumber: number,
+): string {
+  return join(
+    workspacePath,
+    LEGACY_AGENTS_CODE_REVIEW_DIR,
+    "pr-cache",
+    sanitizeRepoForCache(repo),
+    `pr-${prNumber}`,
+    "finding-threads.json",
+  );
+}
+
 async function loadLocalFindingThreadCache(
   workspacePath: string,
   repo: string,
   prNumber: number,
 ): Promise<PendingReviewFindingCache | undefined> {
-  const path = findingCachePath(workspacePath, repo, prNumber);
-  try {
-    const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw) as Partial<PendingReviewFindingCache>;
-    if (
-      parsed.version !== 1 ||
-      parsed.repo !== repo ||
-      parsed.prNumber !== prNumber ||
-      !Array.isArray(parsed.findings)
-    ) {
-      return undefined;
+  for (const path of [
+    findingCachePath(workspacePath, repo, prNumber),
+    legacyFindingCachePath(workspacePath, repo, prNumber),
+  ]) {
+    try {
+      const raw = await readFile(path, "utf8");
+      const parsed = JSON.parse(raw) as Partial<PendingReviewFindingCache>;
+      if (
+        parsed.version !== 1 ||
+        parsed.repo !== repo ||
+        parsed.prNumber !== prNumber ||
+        !Array.isArray(parsed.findings)
+      ) {
+        continue;
+      }
+      return parsed as PendingReviewFindingCache;
+    } catch {
+      // try next path
     }
-    return parsed as PendingReviewFindingCache;
-  } catch {
-    return undefined;
   }
+  return undefined;
 }
 
 async function writeLocalFindingThreadCache(
