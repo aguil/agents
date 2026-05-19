@@ -1,12 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { codeReviewHarnessPackageCliDefaults } from "@aguil/agents-code-review";
 import { AGENTS_CODE_REVIEW_DIR } from "@aguil/agents-core";
 import type {
   CliOptions,
   ParsedCodeReviewArgv,
 } from "./code-review-cli-models";
+import {
+  expandReposRoot,
+  resolveEffectiveWorkspace,
+} from "./code-review-workspace";
 
 const ENV_PREFIX = "AGENTS_CODE_REVIEW_";
 
@@ -15,6 +19,7 @@ export type CodeReviewMergedPartial = Partial<CliOptions>;
 
 const STRING_FIELDS: readonly (keyof CliOptions & string)[] = [
   "workspace",
+  "reposRoot",
   "scratchpad",
   "contextBundle",
   "result",
@@ -110,6 +115,7 @@ function unknownFlatKeys(record: Record<string, unknown>): string[] {
 
 const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
   WORKSPACE: "workspace",
+  REPOS_ROOT: "reposRoot",
   SCRATCHPAD: "scratchpad",
   CONTEXT_BUNDLE: "contextBundle",
   RESULT: "result",
@@ -164,6 +170,7 @@ const REPO_BLOCKED_REVIEW_STEERING_KEYS = [
   "adapter",
   "scratchpad",
   "workspace",
+  "reposRoot",
 ] as const satisfies readonly (keyof CliOptions)[];
 
 /** Strip repo-managed steering from workspace `.agents-code-review` partials before merge (including preset bodies). */
@@ -218,7 +225,7 @@ function sanitizeRepoConfigDocument(
         .sort()
         .join(
           ", ",
-        )}). Repo JSON cannot steer \`workspace\`, \`scratchpad\`, \`adapter\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
+        )}). Repo JSON cannot steer \`workspace\`, \`reposRoot\`, \`scratchpad\`, \`adapter\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
     );
   }
 
@@ -542,6 +549,7 @@ function applyExplicitCliOptions(
 
   return {
     workspace: stringOr("workspace"),
+    reposRoot: stringOr("reposRoot"),
     scratchpad: stringOr("scratchpad"),
     dryRun: boolOr("dryRun", false),
     contextBundle: stringOr("contextBundle"),
@@ -631,4 +639,50 @@ export async function resolveCodeReviewCliOptions(
 
   merged = mergeFlatConfigLayers(merged, readEnvironmentCodeReviewConfig());
   return { ok: true, options: applyExplicitCliOptions(merged, parsed) };
+}
+
+/**
+ * Resolve `--workspace` against {@link expandReposRoot} (including bare `owner/repo`
+ * shorthands) and converge when merged config supplies `reposRoot`.
+ */
+export async function stabilizeMergedWorkspace(
+  parsed: ParsedCodeReviewArgv,
+): Promise<
+  | {
+      readonly ok: true;
+      readonly workspacePath: string;
+      readonly options: CliOptions;
+    }
+  | { readonly ok: false; readonly error: string }
+> {
+  let workspacePath = await resolveEffectiveWorkspace(
+    parsed.options.workspace,
+    expandReposRoot(undefined),
+  );
+
+  for (let iter = 0; iter < 3; iter++) {
+    const merged = await resolveCodeReviewCliOptions(workspacePath, parsed);
+    if (!merged.ok) {
+      return merged;
+    }
+    const reposAbs = expandReposRoot(merged.options.reposRoot);
+    const nextWp = await resolveEffectiveWorkspace(
+      parsed.options.workspace,
+      reposAbs,
+    );
+    if (resolve(nextWp) === resolve(workspacePath)) {
+      return {
+        ok: true,
+        workspacePath: nextWp,
+        options: { ...merged.options, workspace: nextWp },
+      };
+    }
+    workspacePath = nextWp;
+  }
+
+  return {
+    ok: false,
+    error:
+      "Workspace path did not stabilize while resolving reposRoot — check --workspace, reposRoot in ~/.config/agents/code-review/config.json, or AGENTS_CODE_REVIEW_REPOS_ROOT.",
+  };
 }

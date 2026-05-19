@@ -164,6 +164,12 @@ test("peelCodeReviewSubcommand rejects unknown leading token", () => {
   }
 });
 
+test("parseCodeReviewArgv parses repos-root", () => {
+  const parsed = parseCodeReviewArgv(["--repos-root", "/tmp/repos-root"]);
+  expect(parsed.options.reposRoot).toBe("/tmp/repos-root");
+  expect(parsed.explicitKeys.has("reposRoot")).toBe(true);
+});
+
 test("parseCodeReviewArgv never enables postOnly from CLI flags", () => {
   expect(parseCodeReviewArgv([]).options.postOnly).toBe(false);
   expect(parseCodeReviewArgv(["--dry-run"]).options.postOnly).toBe(false);

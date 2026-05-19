@@ -5,6 +5,7 @@ import type {
 
 const STRING_OPTION_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   workspace: "workspace",
+  "repos-root": "reposRoot",
   scratchpad: "scratchpad",
   "context-bundle": "contextBundle",
   result: "result",
@@ -207,6 +208,7 @@ export function parseCodeReviewArgv(
 
   const options: CliOptions = {
     workspace: stringOptions.workspace,
+    reposRoot: stringOptions["repos-root"],
     scratchpad: stringOptions.scratchpad,
     dryRun: flags.has("dry-run"),
     contextBundle: stringOptions["context-bundle"],

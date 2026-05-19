@@ -216,7 +216,8 @@ See also: agents code-review post --help  (stored result publishing, no rerun)
 
 Run and replay (shared):
 
-  --workspace <path>     Workspace to review (default: cwd)
+  --workspace <path>     Workspace to review (default: cwd). Bare owner/repo resolves under repos root.
+  --repos-root <path>    Clone root for owner/repo workspaces (default ~/dev/repos; env AGENTS_CODE_REVIEW_REPOS_ROOT)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.agents-code-review/runs)
   --dry-run              Write artifacts under <workspace>/.agents-code-review/dry-run
   --context-bundle <path> Reuse captured context bundle JSON
@@ -267,13 +268,15 @@ Inbox: pull requests that request your review on GitHub (not automated harness f
 
 Commands:
 
-  list [--format text|json] [--include-team] [--workspace <path>]
-  show --pr <n> [--repo owner/name] [--workspace <path>]
-  draft --pr <n> [--repo owner/name] [--output <path>] [--workspace <path>]
-  submit --draft <path> [--workspace <path>]
+  list [--format text|json] [--include-team] [--workspace <path>] [--repos-root <path>]
+  show --pr <n> [--repo owner/name] [--workspace <path>] [--repos-root <path>]
+  draft --pr <n> [--repo owner/name] [--output <path>] [--workspace <path>] [--repos-root <path>]
+  submit --draft <path> [--workspace <path>] [--repos-root <path>]
 
 Defaults:
   --repo is inferred from \`gh repo view\` in the workspace when omitted.
+  When --repo or the submit draft names owner/repo, clones are resolved under --repos-root
+  (\`<root>/github.com/<owner>/<repo>\` then \`<root>/<owner>/<repo>\`; default ~/dev/repos).
   list defaults to review requests for you; add --include-team to merge team-requested PRs.
 
 Auth: uses the GitHub CLI (\`gh\`) with the same login/cwd behavior as other code-review GitHub commands.
