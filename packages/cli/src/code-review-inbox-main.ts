@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import {
   GitHubReviewInboxSource,
   parseReviewDraftV1,
-  runGhJson,
   templateReviewDraftV1,
 } from "@aguil/agents-code-review-inbox";
 import { writeJsonFile } from "@aguil/agents-core";
@@ -322,18 +321,6 @@ function parseDraftArgs(
   return repo !== undefined ? { pr, repo, output: out } : { pr, output: out };
 }
 
-async function defaultRepo(workspace: string): Promise<string> {
-  const row = await runGhJson<{ readonly nameWithOwner: string }>(
-    ["repo", "view", "--json", "nameWithOwner"],
-    workspace,
-  );
-  const nwo = row?.nameWithOwner?.trim() ?? "";
-  if (nwo.length === 0 || !nwo.includes("/")) {
-    throw new Error("Could not resolve owner/repo (gh repo view).");
-  }
-  return nwo;
-}
-
 async function dispatchInbox(parsed: ParsedInbox): Promise<number> {
   const source = new GitHubReviewInboxSource();
 
@@ -369,25 +356,26 @@ async function dispatchInbox(parsed: ParsedInbox): Promise<number> {
   }
 
   if (parsed.command === SHOW) {
-    const repo = parsed.repo ?? (await defaultRepo(parsed.workspace));
-    const row = await runGhJson<Record<string, unknown>>(
-      [
-        "pr",
-        "view",
-        String(parsed.pr),
-        "--repo",
-        repo,
-        "--json",
-        "title,url,author,state,additions,deletions,changedFiles,updatedAt,reviewRequests",
-      ],
-      parsed.workspace,
-    );
+    const repo =
+      parsed.repo ??
+      (await source.resolveDefaultRepository({
+        workspacePath: parsed.workspace,
+      }));
+    const row = await source.viewPullRequestMetadata({
+      workspacePath: parsed.workspace,
+      repository: repo,
+      pullNumber: parsed.pr,
+    });
     console.log(`${JSON.stringify(row, null, 2)}\n`);
     return 0;
   }
 
   if (parsed.command === DRAFT) {
-    const repo = parsed.repo ?? (await defaultRepo(parsed.workspace));
+    const repo =
+      parsed.repo ??
+      (await source.resolveDefaultRepository({
+        workspacePath: parsed.workspace,
+      }));
     const draft = templateReviewDraftV1({
       repository: repo,
       pullNumber: parsed.pr,

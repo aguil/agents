@@ -39,6 +39,16 @@ export interface ReviewInboxSource {
   listAssignments(
     options: ReviewInboxListOptions,
   ): Promise<readonly ReviewAssignment[]>;
+  /** Host-specific default repository for the workspace (e.g. `gh repo view`). */
+  resolveDefaultRepository(options: {
+    readonly workspacePath: string;
+  }): Promise<string>;
+  /** Host-specific PR metadata for inbox `show` (JSON-shaped for CLI printing). */
+  viewPullRequestMetadata(options: {
+    readonly workspacePath: string;
+    readonly repository: string;
+    readonly pullNumber: number;
+  }): Promise<Record<string, unknown>>;
   submitReview(input: {
     readonly workspacePath: string;
     readonly draft: ReviewDraftV1;

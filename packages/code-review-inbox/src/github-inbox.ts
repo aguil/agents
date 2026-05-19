@@ -103,6 +103,40 @@ function dedupeByRepoNumber(
 }
 
 export class GitHubReviewInboxSource implements ReviewInboxSource {
+  async resolveDefaultRepository(options: {
+    readonly workspacePath: string;
+  }): Promise<string> {
+    const row = await runGhJson<{ readonly nameWithOwner?: string }>(
+      ["repo", "view", "--json", "nameWithOwner"],
+      options.workspacePath,
+    );
+    const nwo = row?.nameWithOwner?.trim() ?? "";
+    if (nwo.length === 0 || !nwo.includes("/")) {
+      throw new Error("Could not resolve owner/repo (gh repo view).");
+    }
+    return nwo;
+  }
+
+  async viewPullRequestMetadata(options: {
+    readonly workspacePath: string;
+    readonly repository: string;
+    readonly pullNumber: number;
+  }): Promise<Record<string, unknown>> {
+    const row = await runGhJson<Record<string, unknown>>(
+      [
+        "pr",
+        "view",
+        String(options.pullNumber),
+        "--repo",
+        options.repository,
+        "--json",
+        "title,url,author,state,additions,deletions,changedFiles,updatedAt,reviewRequests",
+      ],
+      options.workspacePath,
+    );
+    return row ?? {};
+  }
+
   async listAssignments(
     options: ReviewInboxListOptions,
   ): Promise<readonly ReviewAssignment[]> {
@@ -115,19 +149,20 @@ export class GitHubReviewInboxSource implements ReviewInboxSource {
       return dedupeByRepoNumber([...direct]);
     }
     const teams = await listTeamRows(options.workspacePath);
-    const teamResults: ReviewAssignment[] = [];
-    for (const team of teams) {
-      const org = team.organization.login;
-      const slug = team.slug;
-      const tr = `${org}/${slug}`;
-      const found = await searchReviewRequested(
-        options.workspacePath,
-        `is:pr is:open team-review-requested:${tr}`,
-        "team",
-        tr,
-      );
-      teamResults.push(...found);
-    }
+    const teamSlices = await Promise.all(
+      teams.map(async (team) => {
+        const org = team.organization.login;
+        const slug = team.slug;
+        const tr = `${org}/${slug}`;
+        return searchReviewRequested(
+          options.workspacePath,
+          `is:pr is:open team-review-requested:${tr}`,
+          "team",
+          tr,
+        );
+      }),
+    );
+    const teamResults = teamSlices.flat();
     return dedupeByRepoNumber([...direct, ...teamResults]);
   }
 
