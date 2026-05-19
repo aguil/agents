@@ -37,10 +37,12 @@ show options:
 draft options:
   --pr <n>             Pull request number (required)
   --repo <o/r>         owner/repo override (default: gh repo view)
-  --output <path>      Draft file path (default: ./review-draft.<n>.json)
+  --output <path>      Draft file path (default: ./review-draft.<n>.json in cwd)
 
 submit options:
-  --draft <path>       Path to draft JSON (required)
+  --draft <path>       Path to draft JSON (required). Resolved from cwd (not --workspace).
+
+Paths for --draft / --output are resolved from the shell working directory; --workspace only selects where gh runs.
 
 Examples:
   agents code-review inbox list
@@ -200,7 +202,7 @@ function parseInboxSubcommand(
   }
 
   if (sub === DRAFT) {
-    const { pr, repo, output } = parseDraftArgs(tail, workspace);
+    const { pr, repo, output } = parseDraftArgs(tail);
     return { command: DRAFT, workspace, pr, repo, output };
   }
 
@@ -230,7 +232,7 @@ function parseInboxSubcommand(
     return {
       command: SUBMIT,
       workspace,
-      draftPath: resolve(workspace, draftPath.trim()),
+      draftPath: resolve(process.cwd(), draftPath.trim()),
     };
   }
 
@@ -286,10 +288,11 @@ function parsePrAndRepo(tail: readonly string[]): {
   return repo !== undefined ? { pr, repo } : { pr };
 }
 
-function parseDraftArgs(
-  tail: readonly string[],
-  workspace: string,
-): { readonly pr: number; readonly repo?: string; readonly output: string } {
+function parseDraftArgs(tail: readonly string[]): {
+  readonly pr: number;
+  readonly repo?: string;
+  readonly output: string;
+} {
   let output: string | undefined;
   const copied = [...tail];
   const filtered: string[] = [];
@@ -316,8 +319,8 @@ function parseDraftArgs(
   const { pr, repo } = parsePrAndRepo(filtered);
   const out =
     output !== undefined && output.trim().length > 0
-      ? resolve(workspace, output.trim())
-      : resolve(workspace, `review-draft.${pr}.json`);
+      ? resolve(process.cwd(), output.trim())
+      : resolve(process.cwd(), `review-draft.${pr}.json`);
   return repo !== undefined ? { pr, repo, output: out } : { pr, output: out };
 }
 
