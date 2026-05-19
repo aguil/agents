@@ -10,7 +10,10 @@ export interface ReviewAssignment {
   readonly authorLogin: string;
   readonly updatedAt: string;
   readonly assignmentKind: ReviewAssignmentKind;
-  /** Present when `assignmentKind` is `team`. */
+  /**
+   * Present when `assignmentKind` is `team`.
+   * Qualified GitHub team (`owner/login`), matching `team-review-requested:owner/login` search syntax — not a bare team slug alone.
+   */
   readonly teamSlug?: string;
 }
 

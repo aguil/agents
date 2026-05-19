@@ -14,20 +14,12 @@ function resolveWorkspaceCwd(workspacePath: string): string {
   return resolve(workspacePath);
 }
 
-const gitAwareWorkspaceCache = new Map<string, Promise<string>>();
-
 async function resolveGitAwareCwd(workspacePath: string): Promise<string> {
   const cwd = resolveWorkspaceCwd(workspacePath);
-  const cached = gitAwareWorkspaceCache.get(cwd);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const pending = (async () => {
-    const resolved = await resolveGitAwarePath(cwd);
-    return resolved.gitAwarePath;
-  })();
-  gitAwareWorkspaceCache.set(cwd, pending);
-  return pending;
+  // No module-level memoization: repeated resolveGitAwarePath per gh call is cheap vs subprocess + network,
+  // and avoids order-dependent test/cache behavior (see AGENTS.md determinism guidance).
+  const resolved = await resolveGitAwarePath(cwd);
+  return resolved.gitAwarePath;
 }
 
 /**
