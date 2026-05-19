@@ -37,7 +37,7 @@ async function resolveGitAwareCwd(workspacePath: string): Promise<string> {
 export async function runGhJson<T = unknown>(
   args: readonly string[],
   workspacePath: string,
-): Promise<T> {
+): Promise<T | undefined> {
   const gitAware = await resolveGitAwareCwd(workspacePath);
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -56,7 +56,7 @@ export async function runGhJson<T = unknown>(
     ]);
     if (exitCode === 0) {
       if (stdout.trim().length === 0) {
-        return undefined as T;
+        return undefined;
       }
       return JSON.parse(stdout) as T;
     }
