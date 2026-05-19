@@ -924,25 +924,55 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   }
   const metadata = loaded.metadata ?? {};
   const metadataPrNumber = parsePrNumber(metadata.pr_number);
-  const reviewedHeadSha = metadata.pr_reviewed_head_sha?.trim();
-  if (
-    metadataPrNumber === undefined ||
-    reviewedHeadSha === undefined ||
-    reviewedHeadSha.length === 0
-  ) {
-    console.error(
-      "Selected result is missing PR metadata required for stale checks.",
-    );
-    console.error(
-      "Re-run with --pr to capture pr_number and pr_reviewed_head_sha.",
-    );
-    return 1;
+  const reviewedHeadShaFromMetadata =
+    metadata.pr_reviewed_head_sha?.trim() ?? "";
+
+  let prNumber = explicitPrNumber ?? metadataPrNumber;
+  if (prNumber === undefined) {
+    try {
+      const repo = await getRepoNameWithOwner(workspacePath);
+      prNumber = await getCurrentPullRequestNumber(repo, workspacePath);
+    } catch {
+      console.error(
+        "Could not resolve which pull request to post to from stored metadata or the workspace.",
+      );
+      console.error(
+        "Pass --post-pr <number> (or --pr <number>), or re-run code-review with PR-linked context so result.json includes pr_number.",
+      );
+      return 1;
+    }
   }
-  const prNumber = explicitPrNumber ?? metadataPrNumber;
-  if (explicitPrNumber !== undefined && explicitPrNumber !== metadataPrNumber) {
+
+  if (
+    explicitPrNumber !== undefined &&
+    metadataPrNumber !== undefined &&
+    explicitPrNumber !== metadataPrNumber
+  ) {
     console.warn(
       `Warning: posting run from PR #${metadataPrNumber} to PR #${explicitPrNumber}.`,
     );
+  }
+
+  let reviewedHeadSha: string | undefined =
+    reviewedHeadShaFromMetadata.length > 0
+      ? reviewedHeadShaFromMetadata
+      : undefined;
+  if (reviewedHeadSha === undefined) {
+    const localHead = (
+      await runCommand(["git", "rev-parse", "HEAD"], workspacePath, {
+        gitAware: true,
+      })
+    )?.trim();
+    if (localHead !== undefined && localHead.length > 0) {
+      reviewedHeadSha = localHead;
+      console.warn(
+        "Stored result lacks pr_reviewed_head_sha; using workspace HEAD for staleness comparison.",
+      );
+    } else {
+      console.warn(
+        "Stored result lacks pr_reviewed_head_sha; stale-head confirmation will be skipped.",
+      );
+    }
   }
 
   const posted = await replacePendingPullRequestReview({

@@ -310,7 +310,7 @@ Supporting flags:
   --dry-run              Rarely relevant for publishing but keeps parity with harness wiring
   --log <level>          none | summary | commands | all
 
-Stored results must include pr_number and pr_reviewed_head_sha metadata (from --pr runs or implicit gh pr view discovery on the workspace branch).
+Stored results ideally include pr_number and pr_reviewed_head_sha (from --pr runs or implicit gh discovery). If either is missing, the CLI resolves the PR from the workspace (same rules as gh pr view / HEAD) and uses workspace HEAD as a staleness baseline when pr_reviewed_head_sha was not captured.
 
 ${sharedConfigurationHelpBlock()}`;
 }

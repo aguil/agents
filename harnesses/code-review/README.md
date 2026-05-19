@@ -336,12 +336,14 @@ Pending review mode:
 - By default it auto-discovers the latest
   **`.agents-code-review/runs/<run-id>/result.json`** in the workspace.
 - Pass **`--result <path>`** to choose a specific result artifact.
-- Post requires **`pr_number`** and **`pr_reviewed_head_sha`** metadata in the
-  stored result. These are captured when GitHub associates your checkout with a
-  PR: either pass **`--pr`** (isolated worktree) or run without **`--pr`** on a
-  branch where **`gh pr view`** resolves the current PR (implicit discovery). If
-  metadata is missing (no linked PR or **`gh`** unavailable), pass **`--pr`** on
-  a fresh review. Override the posting PR with **`--pr`** or **`--post-pr`**.
+- Post prefers **`pr_number`** and **`pr_reviewed_head_sha`** in the stored
+  result (captured when GitHub associates your checkout with a PR, or from
+  **`--pr`** runs). If metadata is incomplete, **`agents code-review post`**
+  resolves the PR from the workspace (**`gh pr view`** / commit-linked PRs, same
+  as the full command) and uses workspace **`HEAD`** as a staleness baseline
+  when **`pr_reviewed_head_sha`** was not recorded. If the workspace still does
+  not resolve to a PR, pass **`--post-pr`** / **`--pr`**. Override the posting
+  PR with **`--pr`** or **`--post-pr`** when needed.
 - **`agents code-review post`** keeps reviews pending (unsubmitted), same as
   **`--pending-review`** on a full run.
 - Post does not mutate the selected **`result.json`**.
