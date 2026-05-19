@@ -35,7 +35,8 @@ async function runGit(
 }
 
 /**
- * Create a detached git worktree at `FETCH_HEAD` after `git fetch origin pull/<n>/head`.
+ * Fetch PR head into a unique refs/agents-code-review ref and create a detached
+ * git worktree at that commit (avoids races on the shared FETCH_HEAD file).
  * Used for PR-backed harness runs so the primary checkout is not switched.
  * Review artifacts should stay on {@link artifactAnchorWorkspacePath}; only harness file reads use the worktree path.
  */
@@ -60,7 +61,12 @@ export async function createDetachedPullRequestWorktree(input: {
   const worktreePath = join(worktreesRoot, randomUUID());
 
   const pullRef = `pull/${input.pullNumber}/head`;
-  const fetch = await runGit(gitAwarePath, ["fetch", "origin", pullRef]);
+  const scratchRef = `refs/agents-code-review/isolated/${randomUUID()}`;
+  const fetch = await runGit(gitAwarePath, [
+    "fetch",
+    "origin",
+    `${pullRef}:${scratchRef}`,
+  ]);
   if (!fetch.ok) {
     throw new Error(
       `Failed to fetch ${pullRef} for isolated review: ${fetch.stderr || "git fetch failed"}`,
@@ -72,10 +78,11 @@ export async function createDetachedPullRequestWorktree(input: {
     "add",
     "--detach",
     worktreePath,
-    "FETCH_HEAD",
+    scratchRef,
   ]);
   if (!add.ok) {
     await rm(worktreePath, { recursive: true, force: true });
+    await runGit(gitAwarePath, ["update-ref", "-d", scratchRef]);
     throw new Error(
       `Failed to create isolated review worktree: ${add.stderr || "git worktree add failed"}`,
     );
@@ -84,6 +91,7 @@ export async function createDetachedPullRequestWorktree(input: {
   const cleanup = async (): Promise<void> => {
     await runGit(gitAwarePath, ["worktree", "remove", "--force", worktreePath]);
     await rm(worktreePath, { recursive: true, force: true });
+    await runGit(gitAwarePath, ["update-ref", "-d", scratchRef]);
   };
 
   return { worktreePath, cleanup };
