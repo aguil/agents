@@ -200,8 +200,8 @@ export class GitHubReviewInboxSource implements ReviewInboxSource {
       tmpdir(),
       `agents-code-review-inbox-${crypto.randomUUID()}.md`,
     );
-    await writeFile(bodyPath, `${draft.body}\n`, "utf8");
     try {
+      await writeFile(bodyPath, `${draft.body}\n`, "utf8");
       const args: string[] = [
         "pr",
         "review",
@@ -213,24 +213,9 @@ export class GitHubReviewInboxSource implements ReviewInboxSource {
         bodyPath,
       ];
       await runGhText(args, workspacePath);
-      const view = await runGhJson<{ readonly url?: string }>(
-        [
-          "pr",
-          "view",
-          String(draft.pullNumber),
-          "--repo",
-          draft.repository,
-          "--json",
-          "url",
-        ],
-        workspacePath,
-      );
-      const fromGh = view?.url?.trim();
-      const reviewUrl =
-        fromGh !== undefined && fromGh.length > 0
-          ? fromGh
-          : `https://github.com/${draft.repository}/pull/${draft.pullNumber}`;
-      return { reviewUrl };
+      return {
+        reviewUrl: `https://github.com/${draft.repository}/pull/${draft.pullNumber}`,
+      };
     } finally {
       await rm(bodyPath, { force: true });
     }
