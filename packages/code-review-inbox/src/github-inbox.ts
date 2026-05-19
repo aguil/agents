@@ -102,6 +102,32 @@ function dedupeByRepoNumber(
   return out;
 }
 
+/** Bounded parallelism for many gh subprocess calls (avoids search API burst). */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const cap =
+    concurrency > 0 ? Math.min(concurrency, items.length) : items.length;
+  if (cap === 0) {
+    return [];
+  }
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) {
+        return;
+      }
+      results[i] = await mapper(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: cap }, () => worker()));
+  return results;
+}
+
 export class GitHubReviewInboxSource implements ReviewInboxSource {
   async resolveDefaultRepository(options: {
     readonly workspacePath: string;
@@ -149,19 +175,17 @@ export class GitHubReviewInboxSource implements ReviewInboxSource {
       return dedupeByRepoNumber([...direct]);
     }
     const teams = await listTeamRows(options.workspacePath);
-    const teamSlices = await Promise.all(
-      teams.map(async (team) => {
-        const org = team.organization.login;
-        const slug = team.slug;
-        const tr = `${org}/${slug}`;
-        return searchReviewRequested(
-          options.workspacePath,
-          `is:pr is:open team-review-requested:${tr}`,
-          "team",
-          tr,
-        );
-      }),
-    );
+    const teamSlices = await mapWithConcurrency(teams, 5, async (team) => {
+      const org = team.organization.login;
+      const slug = team.slug;
+      const tr = `${org}/${slug}`;
+      return searchReviewRequested(
+        options.workspacePath,
+        `is:pr is:open team-review-requested:${tr}`,
+        "team",
+        tr,
+      );
+    });
     const teamResults = teamSlices.flat();
     return dedupeByRepoNumber([...direct, ...teamResults]);
   }
