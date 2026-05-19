@@ -657,7 +657,7 @@ export async function stabilizeMergedWorkspace(
 > {
   let workspacePath = await resolveEffectiveWorkspace(
     parsed.options.workspace,
-    expandReposRoot(undefined),
+    expandReposRoot(parsed.options.reposRoot),
   );
 
   for (let iter = 0; iter < 3; iter++) {
