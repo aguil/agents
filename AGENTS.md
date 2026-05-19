@@ -14,6 +14,10 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
   [`harnesses/code-review/src/review-contract.ts`](harnesses/code-review/src/review-contract.ts)
   and re-exported from `@aguil/agents-code-review` for the CLI and other
   consumers.
+- Human **PR review assignment** workflows (GitHub first) live in
+  [`packages/code-review-inbox`](packages/code-review-inbox) and are exposed as
+  **`agents code-review inbox`** (separate from harness runs and
+  `agents triage`).
 - Prefer deterministic code for lifecycle, logging, scratchpads, validation
   gates, and reporting; reserve LLM calls for review reasoning.
 - Conventional commits: use `!` after the scope in the title when the change is

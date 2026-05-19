@@ -66,6 +66,11 @@ export type PeeledCodeReviewArgv =
       readonly kind: "replay";
       readonly optionArgv: readonly string[];
     }
+  | {
+      readonly ok: true;
+      readonly kind: "inbox";
+      readonly optionArgv: readonly string[];
+    }
   | { readonly ok: false; readonly error: string };
 
 /**
@@ -94,9 +99,12 @@ export function peelCodeReviewSubcommand(
       bundle !== undefined ? ["--context-bundle", bundle, ...tail] : tail;
     return { ok: true, kind: "replay", optionArgv };
   }
+  if (head === "inbox") {
+    return { ok: true, kind: "inbox", optionArgv: argvTail.slice(1) };
+  }
   return {
     ok: false,
-    error: `Unknown 'code-review' subcommand '${head}'. Expected 'post', 'replay', or options beginning with '-'.`,
+    error: `Unknown 'code-review' subcommand '${head}'. Expected 'post', 'replay', 'inbox', or options beginning with '-'.`,
   };
 }
 
@@ -113,7 +121,13 @@ export function resolveEffectivePostOnly(
   peeledKind: PeeledCodeReviewKind,
   mergedPostOnly: boolean,
 ): boolean {
-  return peeledKind === "post" || (peeledKind !== "replay" && mergedPostOnly);
+  if (peeledKind === "post") {
+    return true;
+  }
+  if (peeledKind === "replay" || peeledKind === "inbox") {
+    return false;
+  }
+  return mergedPostOnly;
 }
 
 /** Parse argv after optional peel (`optionArgv`). */

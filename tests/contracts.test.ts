@@ -144,6 +144,14 @@ test("peelCodeReviewSubcommand injects context-bundle for replay positional path
   );
 });
 
+test("peelCodeReviewSubcommand accepts inbox prefix", () => {
+  expect(peelCodeReviewSubcommand(["inbox", "list"])).toEqual({
+    ok: true,
+    kind: "inbox",
+    optionArgv: ["list"],
+  });
+});
+
 test("peelCodeReviewSubcommand rejects unknown leading token", () => {
   const result = peelCodeReviewSubcommand(["publish"]);
   expect(result.ok).toBe(false);
@@ -151,6 +159,7 @@ test("peelCodeReviewSubcommand rejects unknown leading token", () => {
     expect(result.error).toContain("publish");
     expect(result.error).toContain("replay");
     expect(result.error).toContain("post");
+    expect(result.error).toContain("inbox");
     expect(result.error).toContain("code-review");
   }
 });
@@ -234,6 +243,8 @@ test("resolveEffectivePostOnly ignores merged postOnly for replay subcommand", (
   expect(resolveEffectivePostOnly("run", false)).toBe(false);
   expect(resolveEffectivePostOnly("post", false)).toBe(true);
   expect(resolveEffectivePostOnly("post", true)).toBe(true);
+  expect(resolveEffectivePostOnly("inbox", true)).toBe(false);
+  expect(resolveEffectivePostOnly("inbox", false)).toBe(false);
 });
 
 test("parsePrNumber rejects non-canonical Pull Request number strings", () => {
@@ -281,6 +292,9 @@ test("resolveCodeReviewHelp maps contextual help scopes", () => {
   });
   expect(resolveCodeReviewHelp(["code-review", "replay", "--help"])).toEqual({
     kind: "replay",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "inbox", "--help"])).toEqual({
+    kind: "inbox",
   });
   expect(resolveCodeReviewHelp(["unknown", "--help"])).toEqual({
     kind: "overview",
@@ -3056,6 +3070,7 @@ test("code-review overview help mentions agents triage, doctor, and skills", () 
     const rendered = renderCodeReviewHelp(overview);
     expect(rendered).toContain("agents triage --help");
     expect(rendered).toContain("triage [options]");
+    expect(rendered).toContain("agents code-review inbox --help");
     expect(rendered).toContain("agents doctor --help");
     expect(rendered).toContain("agents skills --help");
     expect(rendered).toContain("skills <command>");

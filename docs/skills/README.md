@@ -8,6 +8,7 @@ so they can be copied or symlinked into tool-specific skill roots.
 | Playbook                           | Directory                                                  |
 | ---------------------------------- | ---------------------------------------------------------- |
 | Self-review checks (draft → ready) | [self-review-checks/SKILL.md](self-review-checks/SKILL.md) |
+| Code review (PR assignment inbox)  | [code-review/SKILL.md](code-review/SKILL.md)               |
 
 **Check CLI vs playbooks:** **`agents doctor`** (see
 **`agents doctor --help`**). **Install (supported path):** from a checkout or

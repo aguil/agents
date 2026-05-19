@@ -30,6 +30,7 @@ test("agents skills list exits 0 and prints self-review-checks", async () => {
     const code = await agentsMain(["skills", "list"]);
     expect(code).toBe(0);
     expect(buf).toContain("self-review-checks");
+    expect(buf).toContain('"id": "code-review"');
     expect(buf).toContain("minAgentsVersion");
   } finally {
     console.log = prev;

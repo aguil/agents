@@ -27,9 +27,17 @@
       "version": "0.0.0",
       "dependencies": {
         "@aguil/agents-code-review": "workspace:*",
+        "@aguil/agents-code-review-inbox": "workspace:*",
         "@aguil/agents-core": "workspace:*",
         "@aguil/agents-reporting": "workspace:*",
         "@aguil/agents-triage": "workspace:*",
+      },
+    },
+    "packages/code-review-inbox": {
+      "name": "@aguil/agents-code-review-inbox",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-core": "workspace:*",
       },
     },
     "packages/context": {
@@ -89,6 +97,8 @@
     "@aguil/agents-cli": ["@aguil/agents-cli@workspace:packages/cli"],
 
     "@aguil/agents-code-review": ["@aguil/agents-code-review@workspace:harnesses/code-review"],
+
+    "@aguil/agents-code-review-inbox": ["@aguil/agents-code-review-inbox@workspace:packages/code-review-inbox"],
 
     "@aguil/agents-context": ["@aguil/agents-context@workspace:packages/context"],
 

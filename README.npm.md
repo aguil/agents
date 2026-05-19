@@ -21,6 +21,7 @@ npm install -g @aguil/agents
 
 ```bash
 agents code-review --help
+agents code-review inbox --help
 ```
 
 Then follow the canonical docs in the upstream repository

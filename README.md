@@ -9,13 +9,15 @@ process execution, context collection, reporting, or telemetry logic directly.
 
 ## Agent playbooks (optional)
 
-Portable **Agent Skills** playbooks for `agents code-review` / `agents triage`
-workflows live under [`docs/skills/`](docs/skills/README.md). Use
-**`agents doctor`** (see **`agents doctor --help`**) to confirm your CLI semver
-satisfies bundled playbooks, then **`agents skills install`** (all skills) or
+Portable **Agent Skills** playbooks for `agents code-review` (including
+**`agents code-review inbox`**) / `agents triage` workflows live under
+[`docs/skills/`](docs/skills/README.md). Use **`agents doctor`** (see
+**`agents doctor --help`**) to confirm your CLI semver satisfies bundled
+playbooks, then **`agents skills install`** (all skills) or
 **`agents skills install <id>`** (see **`agents skills --help`**) to copy
 playbooks into your host’s skills directory (for example
-**`~/.agents/skills/<id>/`**) when you want that guidance in Cursor, Claude
+**`~/.agents/skills/<id>/`** — e.g. **`self-review-checks`**, **`code-review`**)
+when you want that guidance in Cursor, Claude
 Code, or another compatible client. Published **`@aguil/agents`** tarballs
 include **`docs/skills/`** so the same commands work after `npm install -g`.
 

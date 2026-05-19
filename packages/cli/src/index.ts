@@ -123,6 +123,12 @@ export async function main(
       console.error(peeled.error);
       return 1;
     }
+    if (peeled.kind === "inbox") {
+      const { runCodeReviewInboxCli } = await import(
+        "./code-review-inbox-main"
+      );
+      return runCodeReviewInboxCli(peeled.optionArgv);
+    }
     const parsed = parseCodeReviewArgv(peeled.optionArgv);
     const workspaceForConfig = resolve(
       parsed.options.workspace ?? process.cwd(),
