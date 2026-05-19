@@ -5,6 +5,12 @@ example `agents code-review` and `agents triage`). They follow the
 [Agent Skills](https://agentskills.io/) layout (`SKILL.md` per skill directory)
 so they can be copied or symlinked into tool-specific skill roots.
 
+**Install scope:** **`agents skills install <id>`** copies **`SKILL.md` only**
+into **`~/.agents/skills/<id>/`**. Extra files under **`docs/skills/<id>/`**
+(e.g. **`scripts/`**) are **not** installed unless you extend the CLI or symlink
+the whole directory yourself—keep portable snippets in **`SKILL.md`**, or add a
+first-class CLI command for interactive workflows.
+
 | Playbook                           | Directory                                                  |
 | ---------------------------------- | ---------------------------------------------------------- |
 | Self-review checks (draft → ready) | [self-review-checks/SKILL.md](self-review-checks/SKILL.md) |
