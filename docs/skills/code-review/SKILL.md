@@ -20,10 +20,10 @@ automated harness output, **`agents triage`**, or `result.json` findings.
 ## Commands (reference)
 
 ```text
-agents code-review inbox list [--format text|json] [--include-team] [--workspace <path>]
-agents code-review inbox show --pr <n> [--repo owner/name] [--workspace <path>]
-agents code-review inbox draft --pr <n> [--repo owner/name] [--output <path>] [--workspace <path>]
-agents code-review inbox submit --draft <path> [--workspace <path>]
+agents code-review inbox list [--format text|json] [--include-team] [--workspace <path>] [--repos-root <path>]
+agents code-review inbox show --pr <n> [--repo owner/name] [--workspace <path>] [--repos-root <path>]
+agents code-review inbox draft --pr <n> [--repo owner/name] [--output <path>] [--workspace <path>] [--repos-root <path>]
+agents code-review inbox submit --draft <path> [--workspace <path>] [--repos-root <path>]
 ```
 
 - **`list`:** Defaults to PRs with **`review-requested:@me`**. Add
@@ -39,7 +39,11 @@ agents code-review inbox submit --draft <path> [--workspace <path>]
   per invocation.
 
 Omit **`--repo`** when your current repository is the same as the PR’s base
-(inferred via `gh repo view`).
+(inferred via `gh repo view`). With **`--repo owner/name`** (or on **`submit`**,
+from **`draft.repository`**), the CLI can locate your checkout under
+**`--repos-root`** (default **`~/dev/repos`**, or
+**`AGENTS_CODE_REVIEW_REPOS_ROOT`**): try **`repos-root/github.com/owner/repo`**
+then **`repos-root/owner/repo`**.
 
 ## Suggested workflow
 
@@ -73,7 +77,12 @@ and **`draft`**. If **`fzf`** is missing, use the default **text** `list` output
 - Prefer **`agents code-review inbox`** for stable **`list --format json`**
   output over ad-hoc `gh` search strings when automating.
 - Do **not** confuse this inbox flow with **full `agents code-review` harness
-  reviewer runs** or **`agents triage`** remediation queues.
+  reviewer runs** or **`agents triage`** remediation queues. Here **`--pr`**
+  only selects which pull request to show, draft, or submit via **`gh`**. **Full
+  harness** **`agents code-review --pr <n>`** is different: it fetches the PR
+  head into a detached worktree under **`.agents-code-review/worktrees/`** so
+  the harness does not switch your main checkout (artifacts stay on
+  **`--workspace`**).
 
 Install this playbook: **`agents skills install code-review`** (see
 **`agents skills --help`**).
