@@ -6,6 +6,7 @@ import {
   templateReviewDraftV1,
 } from "@aguil/agents-code-review-inbox";
 import { writeJsonFile } from "@aguil/agents-core";
+import { expandReposRoot, findClonePath } from "./code-review-workspace";
 
 const LIST = "list";
 const SHOW = "show";
@@ -24,7 +25,8 @@ Commands:
   submit  Post a review from a draft file (one PR per invocation)
 
 Global options:
-  --workspace <path>   Repository workspace (default: cwd)
+  --workspace <path>   Repository workspace for gh (default: cwd)
+  --repos-root <path>  Resolve clones for --repo / draft.repository (default ~/dev/repos; env AGENTS_CODE_REVIEW_REPOS_ROOT)
 
 list options:
   --format text|json   Output format (default: text)
@@ -47,9 +49,12 @@ Paths for --draft / --output are resolved from the shell working directory; --wo
 Examples:
   agents code-review inbox list
   agents code-review inbox list --format json --include-team
-  agents code-review inbox show --pr 42
-  agents code-review inbox draft --pr 42 --output ./my-review.json
+  agents code-review inbox show --repo org/repo --pr 42
+  agents code-review inbox draft --repo org/repo --pr 42 --output ./my-review.json
   agents code-review inbox submit --draft ./my-review.json
+
+When --repo or the submit draft names owner/repo, the CLI looks for a checkout under
+--repos-root: \`<root>/github.com/<owner>/<repo>\` then \`<root>/<owner>/<repo>\`.
 `);
 }
 
@@ -102,10 +107,26 @@ export async function runCodeReviewInboxCli(
 
   let i = 0;
   let workspace = process.cwd();
+  let reposRootCli: string | undefined;
   const rest: string[] = [];
 
   while (i < argv.length) {
     const t = argv[i];
+    if (t === "--repos-root") {
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith("--")) {
+        console.error("--repos-root expects a path.");
+        return 1;
+      }
+      reposRootCli = v;
+      i += 2;
+      continue;
+    }
+    if (t.startsWith("--repos-root=")) {
+      reposRootCli = t.slice("--repos-root=".length);
+      i += 1;
+      continue;
+    }
     if (t === "--workspace") {
       const v = argv[i + 1];
       if (v === undefined || v.startsWith("--")) {
@@ -150,7 +171,12 @@ export async function runCodeReviewInboxCli(
       printInboxUsage();
       return 1;
     }
-    return await dispatchInbox(parsed);
+    const reposAbs = expandReposRoot(
+      reposRootCli !== undefined && reposRootCli.trim().length > 0
+        ? reposRootCli.trim()
+        : undefined,
+    );
+    return await dispatchInbox(parsed, reposAbs);
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     return 1;
@@ -324,15 +350,38 @@ function parseDraftArgs(tail: readonly string[]): {
   return repo !== undefined ? { pr, repo, output: out } : { pr, output: out };
 }
 
-async function dispatchInbox(parsed: ParsedInbox): Promise<number> {
+async function dispatchInbox(
+  parsed: ParsedInbox,
+  reposAbs: string,
+): Promise<number> {
+  let workspacePath = parsed.workspace;
+  let submitDraft: ReturnType<typeof parseReviewDraftV1> | undefined;
+  if (parsed.command === SHOW || parsed.command === DRAFT) {
+    if (parsed.repo !== undefined) {
+      const hit = await findClonePath(parsed.repo, reposAbs);
+      if (hit !== undefined) {
+        workspacePath = hit;
+      }
+    }
+  } else if (parsed.command === SUBMIT) {
+    const raw = JSON.parse(await readFile(parsed.draftPath, "utf8")) as unknown;
+    submitDraft = parseReviewDraftV1(raw);
+    const hit = await findClonePath(submitDraft.repository, reposAbs);
+    if (hit !== undefined) {
+      workspacePath = hit;
+    }
+  }
+
+  const effective: ParsedInbox = { ...parsed, workspace: workspacePath };
+
   const source = new GitHubReviewInboxSource();
 
-  if (parsed.command === LIST) {
+  if (effective.command === LIST) {
     const items = await source.listAssignments({
-      workspacePath: parsed.workspace,
-      includeTeam: parsed.includeTeam,
+      workspacePath: effective.workspace,
+      includeTeam: effective.includeTeam,
     });
-    if (parsed.format === "json") {
+    if (effective.format === "json") {
       console.log(
         `${JSON.stringify(
           {
@@ -358,44 +407,45 @@ async function dispatchInbox(parsed: ParsedInbox): Promise<number> {
     return 0;
   }
 
-  if (parsed.command === SHOW) {
+  if (effective.command === SHOW) {
     const repo =
-      parsed.repo ??
+      effective.repo ??
       (await source.resolveDefaultRepository({
-        workspacePath: parsed.workspace,
+        workspacePath: effective.workspace,
       }));
     const row = await source.viewPullRequestMetadata({
-      workspacePath: parsed.workspace,
+      workspacePath: effective.workspace,
       repository: repo,
-      pullNumber: parsed.pr,
+      pullNumber: effective.pr,
     });
     console.log(`${JSON.stringify(row, null, 2)}\n`);
     return 0;
   }
 
-  if (parsed.command === DRAFT) {
+  if (effective.command === DRAFT) {
     const repo =
-      parsed.repo ??
+      effective.repo ??
       (await source.resolveDefaultRepository({
-        workspacePath: parsed.workspace,
+        workspacePath: effective.workspace,
       }));
     const draft = templateReviewDraftV1({
       repository: repo,
-      pullNumber: parsed.pr,
+      pullNumber: effective.pr,
     });
-    await writeJsonFile(parsed.output, draft);
-    console.log(`Wrote draft template to ${parsed.output}`);
+    await writeJsonFile(effective.output, draft);
+    console.log(`Wrote draft template to ${effective.output}`);
     console.log(
       "Edit body and event (comment | approve | request_changes), then: agents code-review inbox submit --draft <path>",
     );
     return 0;
   }
 
-  const raw = JSON.parse(await readFile(parsed.draftPath, "utf8")) as unknown;
-  const draft = parseReviewDraftV1(raw);
+  if (submitDraft === undefined) {
+    throw new Error("submitDraft missing");
+  }
   const result = await source.submitReview({
-    workspacePath: parsed.workspace,
-    draft,
+    workspacePath: effective.workspace,
+    draft: submitDraft,
   });
   console.log(`Submitted review on ${result.reviewUrl}`);
   return 0;
