@@ -18,18 +18,20 @@ import type { AgentEvent, Finding } from "@aguil/agents-core";
 import {
   AGENTS_CODE_REVIEW_DIR,
   agentsCodeReviewDryRunRoot,
+  agentsCodeReviewRunsRoot,
   LEGACY_AGENTS_CODE_REVIEW_DIR,
   legacyAgentsCodeReviewDryRunRoot,
   resolveGitAwarePath,
 } from "@aguil/agents-core";
 import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
 import type { CliOptions } from "./code-review-cli-models";
-import { resolveCodeReviewCliOptions } from "./code-review-config";
+import { stabilizeMergedWorkspace } from "./code-review-config";
 import {
   codeReviewHelpStderrExtras,
   renderCodeReviewHelp,
   resolveCodeReviewHelp,
 } from "./code-review-help";
+import { createDetachedPullRequestWorktree } from "./isolate-git-review-worktree";
 import {
   parseCodeReviewArgv,
   peelCodeReviewSubcommand,
@@ -123,23 +125,23 @@ export async function main(
       console.error(peeled.error);
       return 1;
     }
+    if (peeled.kind === "inbox") {
+      const { runCodeReviewInboxCli } = await import(
+        "./code-review-inbox-main"
+      );
+      return runCodeReviewInboxCli(peeled.optionArgv);
+    }
     const parsed = parseCodeReviewArgv(peeled.optionArgv);
-    const workspaceForConfig = resolve(
-      parsed.options.workspace ?? process.cwd(),
-    );
-    const resolvedCli = await resolveCodeReviewCliOptions(
-      workspaceForConfig,
-      parsed,
-    );
-    if (!resolvedCli.ok) {
-      console.error(resolvedCli.error);
+    const stabilized = await stabilizeMergedWorkspace(parsed);
+    if (!stabilized.ok) {
+      console.error(stabilized.error);
       return 1;
     }
     const options: CliOptions = {
-      ...resolvedCli.options,
+      ...stabilized.options,
       postOnly: resolveEffectivePostOnly(
         peeled.kind,
-        resolvedCli.options.postOnly,
+        stabilized.options.postOnly,
       ),
     };
 
@@ -221,159 +223,197 @@ export async function main(
       return 1;
     }
 
-    if (logShowsSummary(logLevel)) {
-      console.log(`Starting code review with adapter '${adapterName}'.`);
-      if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
-        console.log(
-          "Using default consensus=1 for --pending-review (override with --consensus <n>).",
-        );
+    const artifactAnchorWorkspacePath = resolve(
+      options.workspace ?? process.cwd(),
+    );
+    let reviewWorkspacePath = artifactAnchorWorkspacePath;
+    let isolateCleanup: (() => Promise<void>) | undefined;
+    if (reviewPrNumber !== undefined) {
+      try {
+        const isolated = await createDetachedPullRequestWorktree({
+          artifactAnchorWorkspacePath,
+          pullNumber: reviewPrNumber,
+        });
+        reviewWorkspacePath = isolated.worktreePath;
+        isolateCleanup = isolated.cleanup;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(message);
+        return 1;
       }
-    }
-
-    const result = await runCodeReview({
-      workspacePath: options.workspace,
-      scratchpadRoot: resolveScratchpadRoot(options),
-      contextBundlePath: options.contextBundle,
-      reviewPrNumber,
-      consensusRuns,
-      strict: options.strict,
-      metadata: await buildDeterminismMetadata(
-        adapterName,
-        effectiveAdapter,
-        options,
-        deterministicEnabled,
-      ),
-      adapter,
-      onEvent: createRunEventLogger(logLevel),
-    });
-    let verbosePrDiffContext: PullRequestDiffContext | undefined;
-    if (logShowsSummary(logLevel)) {
-      printVerboseFindingSummary(result.findings);
-      const summaryStyle =
-        parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
-      const rawCommentCandidates = findingsToPendingReviewComments(
-        result.findings,
-      );
-      let prDiffContext: PullRequestDiffContext | undefined;
-      let postedInlineCount = rawCommentCandidates.length;
-      let skippedUnanchorable = 0;
-      if (reviewPrNumber !== undefined) {
-        try {
-          const workspacePath = resolve(options.workspace ?? process.cwd());
-          const repo = await getRepoNameWithOwner(workspacePath);
-          const loadedDiff = await loadPullRequestDiffContext(
-            repo,
-            reviewPrNumber,
-            workspacePath,
-          );
-          prDiffContext = loadedDiff;
-          verbosePrDiffContext = loadedDiff;
-          warnPrAnchorIssues(result.findings, loadedDiff);
-          postedInlineCount = rawCommentCandidates.filter(
-            (candidate) =>
-              candidateToComment(candidate, loadedDiff) !== undefined,
-          ).length;
-          skippedUnanchorable = rawCommentCandidates.length - postedInlineCount;
-        } catch {
-          prDiffContext = undefined;
-          postedInlineCount = rawCommentCandidates.length;
-          skippedUnanchorable = 0;
-        }
-      } else {
-        skippedUnanchorable =
-          result.findings.length - rawCommentCandidates.length;
-      }
-      console.log("");
-      console.log(
-        buildPendingReviewSummaryBody({
-          style: summaryStyle,
-          findings: result.findings,
-          postedCommentCount: postedInlineCount,
-          skippedUnanchorable,
-          prDiffContext,
-          runMetadata: result.metadata,
-        }),
-      );
-      console.log("");
-      console.log(`Code review ${result.status}.`);
-      console.log(`Report: ${result.reportPath}`);
-    } else if (options.dryRun) {
-      console.log(`Dry-run ${result.status}. Report: ${result.reportPath}`);
-    } else {
-      console.log(`Code review ${result.status}. Report: ${result.reportPath}`);
     }
 
     try {
-      const staleCheck = await checkReviewPullRequestDivergence(
-        result.metadata,
-        options.workspace,
-      );
-      if (staleCheck.status === "diverged") {
-        console.warn(
-          `Warning: reviewed PR #${staleCheck.prNumber} is stale (${staleCheck.reviewedHeadSha.slice(0, 12)} -> ${staleCheck.currentHeadSha.slice(0, 12)}).`,
-        );
-      }
-    } catch {
-      // Non-fatal: staleness checks should not block review runs.
-    }
-
-    if (pendingReviewEnabled) {
-      if (
-        options.postPr !== undefined &&
-        parsePrNumber(options.postPr) === undefined
-      ) {
-        console.error(`Invalid --post-pr value: ${options.postPr}`);
-        return 1;
-      }
-      const postingPrNumber =
-        parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
-      const reviewSummaryStyle = parseReviewSummaryStyle(options.reviewSummary);
-      if (
-        options.reviewSummary !== undefined &&
-        reviewSummaryStyle === undefined
-      ) {
-        console.error(
-          `Invalid --review-summary value: ${options.reviewSummary}`,
-        );
-        console.error("Expected one of: triage, impact, evidence.");
-        return 1;
+      if (logShowsSummary(logLevel)) {
+        console.log(`Starting code review with adapter '${adapterName}'.`);
+        if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
+          console.log(
+            "Using default consensus=1 for --pending-review (override with --consensus <n>).",
+          );
+        }
+        if (isolateCleanup !== undefined) {
+          console.log(
+            `Reviewing PR #${reviewPrNumber} in a detached git worktree (primary checkout unchanged): ${reviewWorkspacePath}`,
+          );
+        }
       }
 
-      const posted = await replacePendingPullRequestReview({
-        findings: result.findings,
-        prNumber: postingPrNumber,
-        reviewSummaryStyle: reviewSummaryStyle ?? "impact",
-        reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
-        noConfirm: options.noConfirm,
-        replacePendingReview: options.replacePendingReview,
-        workspacePath: options.workspace,
-        preloadedPrDiffContext:
-          logShowsSummary(logLevel) &&
-          reviewPrNumber !== undefined &&
-          postingPrNumber !== undefined &&
-          postingPrNumber === reviewPrNumber
-            ? verbosePrDiffContext
-            : undefined,
-        runMetadata: result.metadata,
+      const result = await runCodeReview({
+        workspacePath: reviewWorkspacePath,
+        scratchpadRoot: resolveScratchpadRootForRun(
+          options,
+          reviewWorkspacePath,
+          artifactAnchorWorkspacePath,
+        ),
+        contextBundlePath: options.contextBundle,
+        reviewPrNumber,
+        consensusRuns,
+        strict: options.strict,
+        metadata: await buildDeterminismMetadata(
+          adapterName,
+          effectiveAdapter,
+          options,
+          deterministicEnabled,
+        ),
+        adapter,
+        onEvent: createRunEventLogger(logLevel),
       });
-      if (posted.cancelled === true) {
+      let verbosePrDiffContext: PullRequestDiffContext | undefined;
+      if (logShowsSummary(logLevel)) {
+        printVerboseFindingSummary(result.findings);
+        const summaryStyle =
+          parseReviewSummaryStyle(options.reviewSummary) ?? "impact";
+        const rawCommentCandidates = findingsToPendingReviewComments(
+          result.findings,
+        );
+        let prDiffContext: PullRequestDiffContext | undefined;
+        let postedInlineCount = rawCommentCandidates.length;
+        let skippedUnanchorable = 0;
+        if (reviewPrNumber !== undefined) {
+          try {
+            const workspacePath = artifactAnchorWorkspacePath;
+            const repo = await getRepoNameWithOwner(workspacePath);
+            const loadedDiff = await loadPullRequestDiffContext(
+              repo,
+              reviewPrNumber,
+              workspacePath,
+            );
+            prDiffContext = loadedDiff;
+            verbosePrDiffContext = loadedDiff;
+            warnPrAnchorIssues(result.findings, loadedDiff);
+            postedInlineCount = rawCommentCandidates.filter(
+              (candidate) =>
+                candidateToComment(candidate, loadedDiff) !== undefined,
+            ).length;
+            skippedUnanchorable =
+              rawCommentCandidates.length - postedInlineCount;
+          } catch {
+            prDiffContext = undefined;
+            postedInlineCount = rawCommentCandidates.length;
+            skippedUnanchorable = 0;
+          }
+        } else {
+          skippedUnanchorable =
+            result.findings.length - rawCommentCandidates.length;
+        }
+        console.log("");
+        console.log(
+          buildPendingReviewSummaryBody({
+            style: summaryStyle,
+            findings: result.findings,
+            postedCommentCount: postedInlineCount,
+            skippedUnanchorable,
+            prDiffContext,
+            runMetadata: result.metadata,
+          }),
+        );
+        console.log("");
+        console.log(`Code review ${result.status}.`);
+        console.log(`Report: ${result.reportPath}`);
+      } else if (options.dryRun) {
+        console.log(`Dry-run ${result.status}. Report: ${result.reportPath}`);
+      } else {
+        console.log(
+          `Code review ${result.status}. Report: ${result.reportPath}`,
+        );
+      }
+
+      try {
+        const staleCheck = await checkReviewPullRequestDivergence(
+          result.metadata,
+          options.workspace,
+        );
+        if (staleCheck.status === "diverged") {
+          console.warn(
+            `Warning: reviewed PR #${staleCheck.prNumber} is stale (${staleCheck.reviewedHeadSha.slice(0, 12)} -> ${staleCheck.currentHeadSha.slice(0, 12)}).`,
+          );
+        }
+      } catch {
+        // Non-fatal: staleness checks should not block review runs.
+      }
+
+      if (pendingReviewEnabled) {
+        if (
+          options.postPr !== undefined &&
+          parsePrNumber(options.postPr) === undefined
+        ) {
+          console.error(`Invalid --post-pr value: ${options.postPr}`);
+          return 1;
+        }
+        const postingPrNumber =
+          parsePrNumber(options.postPr) ?? parsePrNumber(options.pr);
+        const reviewSummaryStyle = parseReviewSummaryStyle(
+          options.reviewSummary,
+        );
+        if (
+          options.reviewSummary !== undefined &&
+          reviewSummaryStyle === undefined
+        ) {
+          console.error(
+            `Invalid --review-summary value: ${options.reviewSummary}`,
+          );
+          console.error("Expected one of: triage, impact, evidence.");
+          return 1;
+        }
+
+        const posted = await replacePendingPullRequestReview({
+          findings: result.findings,
+          prNumber: postingPrNumber,
+          reviewSummaryStyle: reviewSummaryStyle ?? "impact",
+          reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
+          noConfirm: options.noConfirm,
+          replacePendingReview: options.replacePendingReview,
+          workspacePath: options.workspace,
+          preloadedPrDiffContext:
+            logShowsSummary(logLevel) &&
+            reviewPrNumber !== undefined &&
+            postingPrNumber !== undefined &&
+            postingPrNumber === reviewPrNumber
+              ? verbosePrDiffContext
+              : undefined,
+          runMetadata: result.metadata,
+        });
+        if (posted.cancelled === true) {
+          await updateRunResultMetadata(result.artifacts, {
+            pr_posting_head_sha: posted.currentHeadSha ?? "",
+            pr_head_diverged: posted.headDiverged ? "true" : "false",
+          });
+          return 0;
+        }
+        console.log(
+          `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} review thread(s).`,
+        );
+        console.log(`Review URL: ${posted.url}`);
         await updateRunResultMetadata(result.artifacts, {
           pr_posting_head_sha: posted.currentHeadSha ?? "",
           pr_head_diverged: posted.headDiverged ? "true" : "false",
         });
-        return 0;
       }
-      console.log(
-        `Created pending review #${posted.reviewId} on PR #${posted.prNumber} with ${posted.commentCount} review thread(s).`,
-      );
-      console.log(`Review URL: ${posted.url}`);
-      await updateRunResultMetadata(result.artifacts, {
-        pr_posting_head_sha: posted.currentHeadSha ?? "",
-        pr_head_diverged: posted.headDiverged ? "true" : "false",
-      });
-    }
 
-    return result.status === "error" ? 1 : 0;
+      return result.status === "error" ? 1 : 0;
+    } finally {
+      await isolateCleanup?.();
+    }
   }
 
   if (argv[0] === "run" && argv[1] === "code-review") {
@@ -446,15 +486,21 @@ interface EffectiveAdapterOptions {
   };
 }
 
-function resolveScratchpadRoot(options: CliOptions): string | undefined {
+function resolveScratchpadRootForRun(
+  options: CliOptions,
+  reviewWorkspacePath: string,
+  artifactAnchorWorkspacePath: string,
+): string | undefined {
   if (options.scratchpad !== undefined) {
     return options.scratchpad;
   }
-  if (!options.dryRun) {
-    return undefined;
+  if (options.dryRun) {
+    return agentsCodeReviewDryRunRoot(artifactAnchorWorkspacePath);
   }
-  const workspacePath = resolve(options.workspace ?? process.cwd());
-  return agentsCodeReviewDryRunRoot(workspacePath);
+  if (resolve(reviewWorkspacePath) !== resolve(artifactAnchorWorkspacePath)) {
+    return agentsCodeReviewRunsRoot(artifactAnchorWorkspacePath);
+  }
+  return undefined;
 }
 
 function printVerboseFindingSummary(findings: readonly Finding[]): void {
@@ -878,25 +924,55 @@ async function runPostOnly(options: CliOptions): Promise<number> {
   }
   const metadata = loaded.metadata ?? {};
   const metadataPrNumber = parsePrNumber(metadata.pr_number);
-  const reviewedHeadSha = metadata.pr_reviewed_head_sha?.trim();
-  if (
-    metadataPrNumber === undefined ||
-    reviewedHeadSha === undefined ||
-    reviewedHeadSha.length === 0
-  ) {
-    console.error(
-      "Selected result is missing PR metadata required for stale checks.",
-    );
-    console.error(
-      "Re-run with --pr to capture pr_number and pr_reviewed_head_sha.",
-    );
-    return 1;
+  const reviewedHeadShaFromMetadata =
+    metadata.pr_reviewed_head_sha?.trim() ?? "";
+
+  let prNumber = explicitPrNumber ?? metadataPrNumber;
+  if (prNumber === undefined) {
+    try {
+      const repo = await getRepoNameWithOwner(workspacePath);
+      prNumber = await getCurrentPullRequestNumber(repo, workspacePath);
+    } catch {
+      console.error(
+        "Could not resolve which pull request to post to from stored metadata or the workspace.",
+      );
+      console.error(
+        "Pass --post-pr <number> (or --pr <number>), or re-run code-review with PR-linked context so result.json includes pr_number.",
+      );
+      return 1;
+    }
   }
-  const prNumber = explicitPrNumber ?? metadataPrNumber;
-  if (explicitPrNumber !== undefined && explicitPrNumber !== metadataPrNumber) {
+
+  if (
+    explicitPrNumber !== undefined &&
+    metadataPrNumber !== undefined &&
+    explicitPrNumber !== metadataPrNumber
+  ) {
     console.warn(
       `Warning: posting run from PR #${metadataPrNumber} to PR #${explicitPrNumber}.`,
     );
+  }
+
+  let reviewedHeadSha: string | undefined =
+    reviewedHeadShaFromMetadata.length > 0
+      ? reviewedHeadShaFromMetadata
+      : undefined;
+  if (reviewedHeadSha === undefined) {
+    const localHead = (
+      await runCommand(["git", "rev-parse", "HEAD"], workspacePath, {
+        gitAware: true,
+      })
+    )?.trim();
+    if (localHead !== undefined && localHead.length > 0) {
+      reviewedHeadSha = localHead;
+      console.warn(
+        "Stored result lacks pr_reviewed_head_sha; using workspace HEAD for staleness comparison.",
+      );
+    } else {
+      console.warn(
+        "Stored result lacks pr_reviewed_head_sha; stale-head confirmation will be skipped.",
+      );
+    }
   }
 
   const posted = await replacePendingPullRequestReview({

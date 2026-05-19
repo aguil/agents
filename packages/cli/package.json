@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@aguil/agents-code-review": "workspace:*",
+    "@aguil/agents-code-review-inbox": "workspace:*",
     "@aguil/agents-core": "workspace:*",
     "@aguil/agents-reporting": "workspace:*",
     "@aguil/agents-triage": "workspace:*"

@@ -157,30 +157,30 @@ repo**) → selected **`presets`** entry when you pass **`--preset`** →
   `XDG_CONFIG_HOME` is set), otherwise
   `~/.config/agents/code-review/config.json`. Omit the file when unused.
 - **Repo file:** `<workspace>/.agents-code-review/config.json`. The
-  **`workspace`** used to locate this file is `resolve(process.cwd)` or
-  **`--workspace`** **before** any `workspace` value from config is applied
-  (configure one path explicitly if you rely on repo-scoped defaults while
-  running from elsewhere).
+  **`workspace`** used to locate this file starts as `resolve(process.cwd)` or
+  **`--workspace`**, then expands bare **`owner/repo`** against **`reposRoot`**
+  (default **`~/dev/repos`**, overridden by **`reposRoot`** in user JSON or
+  **`AGENTS_CODE_REVIEW_REPOS_ROOT`**) before repo JSON is merged.
 
   Repo JSON **cannot steer where / how reviewers run**. Keys **`workspace`**,
-  **`scratchpad`**, **`adapter`**, adapter host-binary paths (**`cursor`**,
-  **`claude`**, **`opencode`**), and argv templates (**`cursorArgs`**,
-  **`claudeArgs`**) — including inside **`presets`** — are stripped with a
-  **`console.warn`** when present; set paths, adapters, and subprocess argv
-  templates only via the **user** config file above, **`AGENTS_CODE_REVIEW_*`**,
-  or **CLI**.
+  **`reposRoot`**, **`scratchpad`**, **`adapter`**, adapter host-binary paths
+  (**`cursor`**, **`claude`**, **`opencode`**), and argv templates
+  (**`cursorArgs`**, **`claudeArgs`**) — including inside **`presets`** — are
+  stripped with a **`console.warn`** when present; set paths, adapters, and
+  subprocess argv templates only via the **user** config file above,
+  **`AGENTS_CODE_REVIEW_*`**, or **CLI**.
 
 Optional JSON keys use **camelCase** and mirror stable CLI knobs (omit keys you
 don’t care about):
 
-- Strings (**user/config/env/CLI** for **`workspace`**, **`scratchpad`**,
-  **`adapter`**, host paths **`opencode` / `claude` / `cursor`**, and
-  **`claudeArgs` / `cursorArgs`** — **repo `.agents-code-review` JSON omits
-  those via sanitization**, see preceding paragraph): **`workspace`**,
-  **`scratchpad`**, **`contextBundle`**, **`result`**, **`consensus`**,
-  **`adapter`**, **`model`**, **`variant`**, **`agent`**, **`opencode`**,
-  **`claude`**, **`cursor`**, **`cursorMode`**, **`log`**, **`pr`**,
-  **`postPr`**, **`reviewSummary`**.
+- Strings (**user/config/env/CLI** for **`workspace`**, **`reposRoot`**,
+  **`scratchpad`**, **`adapter`**, host paths **`opencode` / `claude` /
+  `cursor`**, and **`claudeArgs` / `cursorArgs`** — **repo `.agents-code-review`
+  JSON omits those via sanitization**, see preceding paragraph):
+  **`workspace`**, **`reposRoot`**, **`scratchpad`**, **`contextBundle`**,
+  **`result`**, **`consensus`**, **`adapter`**, **`model`**, **`variant`**,
+  **`agent`**, **`opencode`**, **`claude`**, **`cursor`**, **`cursorMode`**,
+  **`log`**, **`pr`**, **`postPr`**, **`reviewSummary`**.
   - **`claudeArgs`** / **`cursorArgs`**: optional string (**`--claude-args` /
     `--cursor-args`** use comma-splitting—tokens cannot reliably contain commas)
     or a JSON **array of strings** (each element is one argv token, including
@@ -229,6 +229,7 @@ bun run agents code-review --preset ci
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `AGENTS_CODE_REVIEW_CONFIG_STRICT`          | When true/1/yes/on, unknown JSON keys in config files are errors (default: warn only)            |
 | `AGENTS_CODE_REVIEW_WORKSPACE`              | `--workspace`                                                                                    |
+| `AGENTS_CODE_REVIEW_REPOS_ROOT`             | `--repos-root` (clone lookup root for bare `owner/repo` workspaces)                              |
 | `AGENTS_CODE_REVIEW_SCRATCHPAD`             | `--scratchpad`                                                                                   |
 | `AGENTS_CODE_REVIEW_CONTEXT_BUNDLE`         | `--context-bundle`                                                                               |
 | `AGENTS_CODE_REVIEW_RESULT`                 | `--result`                                                                                       |
@@ -335,10 +336,14 @@ Pending review mode:
 - By default it auto-discovers the latest
   **`.agents-code-review/runs/<run-id>/result.json`** in the workspace.
 - Pass **`--result <path>`** to choose a specific result artifact.
-- Post requires **`pr_number`** and **`pr_reviewed_head_sha`** metadata in the
-  stored result (produce them by running the review with **`--pr`** on a
-  PR-backed context). Override the posting PR with **`--pr`** or
-  **`--post-pr`**.
+- Post prefers **`pr_number`** and **`pr_reviewed_head_sha`** in the stored
+  result (captured when GitHub associates your checkout with a PR, or from
+  **`--pr`** runs). If metadata is incomplete, **`agents code-review post`**
+  resolves the PR from the workspace (**`gh pr view`** / commit-linked PRs, same
+  as the full command) and uses workspace **`HEAD`** as a staleness baseline
+  when **`pr_reviewed_head_sha`** was not recorded. If the workspace still does
+  not resolve to a PR, pass **`--post-pr`** / **`--pr`**. Override the posting
+  PR with **`--pr`** or **`--post-pr`** when needed.
 - **`agents code-review post`** keeps reviews pending (unsubmitted), same as
   **`--pending-review`** on a full run.
 - Post does not mutate the selected **`result.json`**.
@@ -440,6 +445,12 @@ Deterministic mode:
   `gh pr view`.
 - If `--pr <number>` is provided, the harness fetches PR metadata/diff from that
   PR directly.
+- When **`--pr`** is set, the CLI reviews files from a **detached git worktree**
+  checked out at the PR head (under **`.agents-code-review/worktrees/`**), so
+  your main checkout’s branch and working tree stay untouched. That path
+  requires **git** at the resolved workspace (including jj → colocated `.git`)
+  and a fetchable **`origin`** ref for **`pull/<pr>/head`**. Without **`--pr`**,
+  reviewers use the workspace tree as-is (no extra worktree).
 - It reads PR title and description/body into review context.
 - The review diff is built from the PR base branch patch (`<base>...HEAD`), not
   from ad-hoc harness scratch artifacts (for example under
@@ -496,9 +507,10 @@ Core artifacts:
 - `metadata.deterministic_mode`: `true` when deterministic profile is enabled
 - `metadata.opencode_*` / `metadata.claude_*`: adapter-specific model/runtime
   settings and detected executable version
-- `metadata.pr_number`: PR number when the run used PR-backed context (`--pr`)
-- `metadata.pr_reviewed_head_sha`: PR head SHA captured during context
-  collection
+- `metadata.pr_number`: PR number from explicit **`--pr`** or implicit
+  **`gh pr view`** discovery on the workspace HEAD
+- `metadata.pr_reviewed_head_sha`: remote PR head OID captured during context
+  collection (requires **`headRefOid`** from **`gh`**)
 - `metadata.pr_reviewed_at`: ISO-8601 timestamp when PR patch context was
   collected
 - `metadata.pr_posting_head_sha`: PR head SHA seen immediately before posting

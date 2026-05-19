@@ -7,6 +7,13 @@
       "summary": "PR author checklist: gates, agents code-review, agents triage, one commit per finding; draft → ready for review.",
       "minAgentsVersion": "0.0.0",
       "tags": ["code-review", "triage"]
+    },
+    {
+      "id": "code-review",
+      "path": "code-review/SKILL.md",
+      "summary": "GitHub PR review inbox: list assignments (me + optional team), PR description preview when picking (e.g. fzf), full draft text before submit, then agents code-review inbox.",
+      "minAgentsVersion": "0.0.0",
+      "tags": ["code-review", "github", "pr"]
     }
   ]
 }

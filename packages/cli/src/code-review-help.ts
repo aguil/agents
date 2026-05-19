@@ -23,6 +23,10 @@ export type CodeReviewHelpRequest =
   | {
       readonly kind: "replay";
       readonly legacyRunSpelling?: boolean;
+    }
+  | {
+      readonly kind: "inbox";
+      readonly legacyRunSpelling?: boolean;
     };
 
 function stripHelpTokens(argv: readonly string[]): readonly string[] {
@@ -72,6 +76,11 @@ export function resolveCodeReviewHelp(
       ? { kind: "replay", legacyRunSpelling: true }
       : { kind: "replay" };
   }
+  if (rest[0] === "inbox") {
+    return legacyRunSpelling === true
+      ? { kind: "inbox", legacyRunSpelling: true }
+      : { kind: "inbox" };
+  }
 
   const bad = rest[0];
   if (legacyRunSpelling === true) {
@@ -116,6 +125,8 @@ export function renderCodeReviewHelp(req: CodeReviewHelpRequest): string {
       return buildPostHelp(req.legacyRunSpelling ?? false);
     case "replay":
       return buildReplayHelp(req.legacyRunSpelling ?? false);
+    case "inbox":
+      return buildInboxHelp(req.legacyRunSpelling ?? false);
   }
 }
 
@@ -136,7 +147,7 @@ export function codeReviewHelpStderrExtras(
   ) {
     const lines = [
       `Unknown 'code-review' subcommand '${req.codeReviewBadSubcommand}'.`,
-      `Expected 'post', 'replay', or options beginning with '-'.`,
+      `Expected 'post', 'replay', 'inbox', or options beginning with '-'.`,
     ];
     return lines;
   }
@@ -163,6 +174,7 @@ Getting help (context-specific option lists):
   agents --help                           Overview only
 
   agents code-review --help                Full run/replay flags
+  agents code-review inbox --help          PR review assignment inbox (GitHub)
   agents code-review replay --help         Replay synopsis and shortcuts
   agents code-review post --help           Publish from stored result.json
 
@@ -180,6 +192,7 @@ Commands:
   code-review [options]                 Run reviewers and write artifacts
   code-review replay [path] [options]   Replay with optional bundle path (-> --context-bundle)
   code-review post [options]            Publish pending PR review from result.json
+  code-review inbox <cmd> [options]     List/show/draft/submit human PR reviews (GitHub)
   triage [options]                       Build triage-queue files (--from producer; code-review today)
   doctor                                 Verify agents --version vs docs/skills minAgentsVersion
   skills <command>                       List or install playbooks from docs/skills/`;
@@ -203,7 +216,8 @@ See also: agents code-review post --help  (stored result publishing, no rerun)
 
 Run and replay (shared):
 
-  --workspace <path>     Workspace to review (default: cwd)
+  --workspace <path>     Workspace to review (default: cwd). Bare owner/repo resolves under repos root.
+  --repos-root <path>    Clone root for owner/repo workspaces (default ~/dev/repos; env AGENTS_CODE_REVIEW_REPOS_ROOT)
   --scratchpad <path>    Scratchpad root (default: <workspace>/.agents-code-review/runs)
   --dry-run              Write artifacts under <workspace>/.agents-code-review/dry-run
   --context-bundle <path> Reuse captured context bundle JSON
@@ -246,6 +260,33 @@ Diagnostics:
 ${sharedConfigurationHelpBlock()}`;
 }
 
+function buildInboxHelp(legacyRunSpelling: boolean): string {
+  const legacyLine = legacyRunReminderLine(legacyRunSpelling);
+  return `${legacyLine}Usage: agents code-review inbox <command> [options]
+
+Inbox: pull requests that request your review on GitHub (not automated harness findings or agents triage).
+
+Commands:
+
+  list [--format text|json] [--include-team] [--workspace <path>] [--repos-root <path>]
+  show --pr <n> [--repo owner/name] [--workspace <path>] [--repos-root <path>]
+  draft --pr <n> [--repo owner/name] [--output <path>] [--workspace <path>] [--repos-root <path>]
+  submit --draft <path> [--workspace <path>] [--repos-root <path>]
+
+Defaults:
+  --repo is inferred from \`gh repo view\` in the workspace when omitted.
+  When --repo or the submit draft names owner/repo, clones are resolved under --repos-root
+  (\`<root>/github.com/<owner>/<repo>\` then \`<root>/<owner>/<repo>\`; default ~/dev/repos).
+  list defaults to review requests for you; add --include-team to merge team-requested PRs.
+
+Auth: uses the GitHub CLI (\`gh\`) with the same login/cwd behavior as other code-review GitHub commands.
+
+Draft files use schema https://aguil.dev/schemas/agents/code-review-inbox-draft/v1 (see \`draft\` output).
+
+Inbox commands do not run harness reviewers and do not require \`--adapter\`, \`--model\`, or merged code-review harness JSON for listing or submitting from a draft file.
+`;
+}
+
 function buildPostHelp(legacyRunSpelling: boolean): string {
   const legacyLine = legacyRunReminderLine(legacyRunSpelling);
   return `${legacyLine}Usage: agents code-review post [options]
@@ -269,7 +310,7 @@ Supporting flags:
   --dry-run              Rarely relevant for publishing but keeps parity with harness wiring
   --log <level>          none | summary | commands | all
 
-Stored results must include pr_number and pr_reviewed_head_sha metadata (generate via PR-backed reviews).
+Stored results ideally include pr_number and pr_reviewed_head_sha (from --pr runs or implicit gh discovery). If either is missing, the CLI resolves the PR from the workspace (same rules as gh pr view / HEAD) and uses workspace HEAD as a staleness baseline when pr_reviewed_head_sha was not captured.
 
 ${sharedConfigurationHelpBlock()}`;
 }

@@ -144,6 +144,14 @@ test("peelCodeReviewSubcommand injects context-bundle for replay positional path
   );
 });
 
+test("peelCodeReviewSubcommand accepts inbox prefix", () => {
+  expect(peelCodeReviewSubcommand(["inbox", "list"])).toEqual({
+    ok: true,
+    kind: "inbox",
+    optionArgv: ["list"],
+  });
+});
+
 test("peelCodeReviewSubcommand rejects unknown leading token", () => {
   const result = peelCodeReviewSubcommand(["publish"]);
   expect(result.ok).toBe(false);
@@ -151,8 +159,15 @@ test("peelCodeReviewSubcommand rejects unknown leading token", () => {
     expect(result.error).toContain("publish");
     expect(result.error).toContain("replay");
     expect(result.error).toContain("post");
+    expect(result.error).toContain("inbox");
     expect(result.error).toContain("code-review");
   }
+});
+
+test("parseCodeReviewArgv parses repos-root", () => {
+  const parsed = parseCodeReviewArgv(["--repos-root", "/tmp/repos-root"]);
+  expect(parsed.options.reposRoot).toBe("/tmp/repos-root");
+  expect(parsed.explicitKeys.has("reposRoot")).toBe(true);
 });
 
 test("parseCodeReviewArgv never enables postOnly from CLI flags", () => {
@@ -234,6 +249,8 @@ test("resolveEffectivePostOnly ignores merged postOnly for replay subcommand", (
   expect(resolveEffectivePostOnly("run", false)).toBe(false);
   expect(resolveEffectivePostOnly("post", false)).toBe(true);
   expect(resolveEffectivePostOnly("post", true)).toBe(true);
+  expect(resolveEffectivePostOnly("inbox", true)).toBe(false);
+  expect(resolveEffectivePostOnly("inbox", false)).toBe(false);
 });
 
 test("parsePrNumber rejects non-canonical Pull Request number strings", () => {
@@ -281,6 +298,9 @@ test("resolveCodeReviewHelp maps contextual help scopes", () => {
   });
   expect(resolveCodeReviewHelp(["code-review", "replay", "--help"])).toEqual({
     kind: "replay",
+  });
+  expect(resolveCodeReviewHelp(["code-review", "inbox", "--help"])).toEqual({
+    kind: "inbox",
   });
   expect(resolveCodeReviewHelp(["unknown", "--help"])).toEqual({
     kind: "overview",
@@ -654,6 +674,73 @@ diff --git a/src/main.ts b/src/main.ts
     "gh api --hostname github.com -H Accept: application/vnd.github.v3.diff repos/aguil/agents/pulls/42",
   );
   expect(commands.some((command) => command.startsWith("gh gh "))).toBe(false);
+});
+
+test("collectReviewDiff attaches reviewPr when PR is discovered implicitly", async () => {
+  const isolationPath = `/agents/collect-implicit-review-pr-${Math.random().toString(36).slice(2)}`;
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n";
+    }
+    if (
+      cmd[0] === "git" &&
+      cmd[1] === "symbolic-ref" &&
+      cmd[2] === "-q" &&
+      cmd[3] === "HEAD"
+    ) {
+      return "refs/heads/feat/cli-code-review-inbox\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      expect(cmd.includes("--json")).toBe(true);
+      expect(cmd.some((t) => /^\d+$/.test(t))).toBe(false);
+      return JSON.stringify({
+        number: 27,
+        title: "PR",
+        body: "b",
+        url: "https://github.com/aguil/agents/pull/27",
+        baseRefName: "main",
+        headRefOid: "deadbeef11111111111111111111111111111111",
+      });
+    }
+    if (
+      cmd[0] === "git" &&
+      cmd[1] === "rev-parse" &&
+      cmd[2] === "--abbrev-ref" &&
+      cmd[3] === "--symbolic-full-name" &&
+      cmd[4] === "@{u}"
+    ) {
+      return undefined;
+    }
+    if (cmd[0] === "git" && cmd[1] === "remote" && cmd.length === 2) {
+      return "origin\n";
+    }
+    if (cmd[0] === "git" && cmd[1] === "remote" && cmd[2] === "get-url") {
+      return "git@github.com:aguil/agents.git\n";
+    }
+    if (
+      cmd[0] === "git" &&
+      cmd[1] === "diff" &&
+      cmd[2] === "--no-ext-diff" &&
+      cmd[3] === "main...HEAD"
+    ) {
+      return "diff --git a/a.ts b/a.ts\n+ok\n";
+    }
+    if (cmd[0] === "jj") {
+      return undefined;
+    }
+    throw new Error(`unexpected command: ${cmd.join(" ")}`);
+  };
+
+  const result = await collectReviewDiff(isolationPath, commandRunner);
+  expect(result.strategy).toBe("pr_base_git");
+  expect(result.baseRef).toBe("main");
+  expect(result.reviewPr?.number).toBe(27);
+  expect(result.reviewPr?.headSha).toBe(
+    "deadbeef11111111111111111111111111111111",
+  );
+  expect(result.reviewPr?.reviewedAt).toBeTruthy();
 });
 
 test("falls back to base diff when explicit PR patch is unavailable", async () => {
@@ -3056,6 +3143,7 @@ test("code-review overview help mentions agents triage, doctor, and skills", () 
     const rendered = renderCodeReviewHelp(overview);
     expect(rendered).toContain("agents triage --help");
     expect(rendered).toContain("triage [options]");
+    expect(rendered).toContain("agents code-review inbox --help");
     expect(rendered).toContain("agents doctor --help");
     expect(rendered).toContain("agents skills --help");
     expect(rendered).toContain("skills <command>");

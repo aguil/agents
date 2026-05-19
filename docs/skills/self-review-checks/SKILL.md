@@ -128,6 +128,15 @@ so review runs produce concise diagnostics/observability output.
 Capture the review artifact path and the resulting findings list, then ingest
 those findings into the repository's triage queue surface.
 
+**`--pr` on full harness runs:** When you pass **`--pr <n>`** to
+**`agents code-review`** (the main harness, not **`inbox`** subcommands), the
+CLI checks out the PR head in a **detached git worktree** under
+**`.agents-code-review/worktrees/<uuid>`** so your primary **`--workspace`**
+checkout keeps its current branch. File reads for the review use that worktree;
+**`runs/`**, **`result.json`**, and related output still land under
+**`.agents-code-review/`** on the workspace root you passed—the same anchor as
+runs without **`--pr`**.
+
 ### Build a triage queue from review output
 
 Ingest the review output into the triage queue format the repository expects.

@@ -1,6 +1,8 @@
 /** Options for one `agents code-review` invocation after config merge. */
 export interface CliOptions {
   readonly workspace?: string;
+  /** Root for resolving bare `owner/repo` workspaces (default ~/dev/repos). */
+  readonly reposRoot?: string;
   readonly scratchpad?: string;
   readonly dryRun: boolean;
   readonly contextBundle?: string;
