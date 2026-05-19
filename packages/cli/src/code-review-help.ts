@@ -310,7 +310,7 @@ Supporting flags:
   --dry-run              Rarely relevant for publishing but keeps parity with harness wiring
   --log <level>          none | summary | commands | all
 
-Stored results must include pr_number and pr_reviewed_head_sha metadata (generate via PR-backed reviews).
+Stored results must include pr_number and pr_reviewed_head_sha metadata (from --pr runs or implicit gh pr view discovery on the workspace branch).
 
 ${sharedConfigurationHelpBlock()}`;
 }

@@ -66,6 +66,21 @@ interface ReviewPrMetadata {
   readonly reviewedAt: string;
 }
 
+/** Build posting metadata from `gh pr view` JSON when no `--pr` was passed to the harness. */
+function reviewPrMetadataFromPullRequest(
+  pullRequest: PullRequestMetadata | undefined,
+): ReviewPrMetadata | undefined {
+  if (pullRequest === undefined) {
+    return undefined;
+  }
+  const headSha = pullRequest.headRefOid?.trim();
+  return {
+    number: pullRequest.number,
+    ...(headSha !== undefined && headSha.length > 0 ? { headSha } : {}),
+    reviewedAt: new Date().toISOString(),
+  };
+}
+
 interface PullRequestRepoScope {
   readonly host?: string;
   readonly owner: string;
@@ -499,6 +514,7 @@ export async function collectReviewDiff(
     commandRunner,
     pullRequestNumber,
   );
+  const implicitReviewPr = reviewPrMetadataFromPullRequest(pullRequest);
   const remoteScope = await resolvePreferredRemoteScope(
     workspacePath,
     commandRunner,
@@ -525,6 +541,9 @@ export async function collectReviewDiff(
           pullRequest?.baseRefName !== undefined
             ? "pr_base_git"
             : "fallback_base_git",
+        ...(implicitReviewPr !== undefined
+          ? { reviewPr: implicitReviewPr }
+          : {}),
       };
     }
 
@@ -541,6 +560,9 @@ export async function collectReviewDiff(
             pullRequest?.baseRefName !== undefined
               ? "pr_base_jj"
               : "fallback_base_jj",
+          ...(implicitReviewPr !== undefined
+            ? { reviewPr: implicitReviewPr }
+            : {}),
         };
       }
     }
@@ -551,6 +573,7 @@ export async function collectReviewDiff(
     diff: filterReviewDiff(workingDiff),
     baseRef: undefined,
     strategy: "working_copy_fallback",
+    ...(implicitReviewPr !== undefined ? { reviewPr: implicitReviewPr } : {}),
   };
 }
 

@@ -337,9 +337,11 @@ Pending review mode:
   **`.agents-code-review/runs/<run-id>/result.json`** in the workspace.
 - Pass **`--result <path>`** to choose a specific result artifact.
 - Post requires **`pr_number`** and **`pr_reviewed_head_sha`** metadata in the
-  stored result (produce them by running the review with **`--pr`** on a
-  PR-backed context). Override the posting PR with **`--pr`** or
-  **`--post-pr`**.
+  stored result. These are captured when GitHub associates your checkout with a
+  PR: either pass **`--pr`** (isolated worktree) or run without **`--pr`** on a
+  branch where **`gh pr view`** resolves the current PR (implicit discovery). If
+  metadata is missing (no linked PR or **`gh`** unavailable), pass **`--pr`** on
+  a fresh review. Override the posting PR with **`--pr`** or **`--post-pr`**.
 - **`agents code-review post`** keeps reviews pending (unsubmitted), same as
   **`--pending-review`** on a full run.
 - Post does not mutate the selected **`result.json`**.
@@ -503,9 +505,10 @@ Core artifacts:
 - `metadata.deterministic_mode`: `true` when deterministic profile is enabled
 - `metadata.opencode_*` / `metadata.claude_*`: adapter-specific model/runtime
   settings and detected executable version
-- `metadata.pr_number`: PR number when the run used PR-backed context (`--pr`)
-- `metadata.pr_reviewed_head_sha`: PR head SHA captured during context
-  collection
+- `metadata.pr_number`: PR number from explicit **`--pr`** or implicit
+  **`gh pr view`** discovery on the workspace HEAD
+- `metadata.pr_reviewed_head_sha`: remote PR head OID captured during context
+  collection (requires **`headRefOid`** from **`gh`**)
 - `metadata.pr_reviewed_at`: ISO-8601 timestamp when PR patch context was
   collected
 - `metadata.pr_posting_head_sha`: PR head SHA seen immediately before posting
