@@ -166,15 +166,22 @@ export class GitHubReviewInboxSource implements ReviewInboxSource {
   async listAssignments(
     options: ReviewInboxListOptions,
   ): Promise<readonly ReviewAssignment[]> {
-    const direct = await searchReviewRequested(
-      options.workspacePath,
-      "is:pr is:open review-requested:@me",
-      "direct",
-    );
     if (!options.includeTeam) {
+      const direct = await searchReviewRequested(
+        options.workspacePath,
+        "is:pr is:open review-requested:@me",
+        "direct",
+      );
       return dedupeByRepoNumber([...direct]);
     }
-    const teams = await listTeamRows(options.workspacePath);
+    const [direct, teams] = await Promise.all([
+      searchReviewRequested(
+        options.workspacePath,
+        "is:pr is:open review-requested:@me",
+        "direct",
+      ),
+      listTeamRows(options.workspacePath),
+    ]);
     const teamSlices = await mapWithConcurrency(teams, 5, async (team) => {
       const org = team.organization.login;
       const slug = team.slug;
