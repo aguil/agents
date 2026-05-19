@@ -17,9 +17,9 @@ playbooks, then **`agents skills install`** (all skills) or
 **`agents skills install <id>`** (see **`agents skills --help`**) to copy
 playbooks into your host’s skills directory (for example
 **`~/.agents/skills/<id>/`** — e.g. **`self-review-checks`**, **`code-review`**)
-when you want that guidance in Cursor, Claude
-Code, or another compatible client. Published **`@aguil/agents`** tarballs
-include **`docs/skills/`** so the same commands work after `npm install -g`.
+when you want that guidance in Cursor, Claude Code, or another compatible
+client. Published **`@aguil/agents`** tarballs include **`docs/skills/`** so the
+same commands work after `npm install -g`.
 
 ## Layout
 
