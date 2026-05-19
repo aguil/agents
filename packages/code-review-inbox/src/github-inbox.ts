@@ -154,7 +154,7 @@ export class GitHubReviewInboxSource implements ReviewInboxSource {
         bodyPath,
       ];
       await runGhText(args, workspacePath);
-      const view = await runGhJson<{ readonly url: string }>(
+      const view = await runGhJson<{ readonly url?: string }>(
         [
           "pr",
           "view",
@@ -166,7 +166,12 @@ export class GitHubReviewInboxSource implements ReviewInboxSource {
         ],
         workspacePath,
       );
-      return { reviewUrl: view.url };
+      const fromGh = view?.url?.trim();
+      const reviewUrl =
+        fromGh !== undefined && fromGh.length > 0
+          ? fromGh
+          : `https://github.com/${draft.repository}/pull/${draft.pullNumber}`;
+      return { reviewUrl };
     } finally {
       await rm(bodyPath, { force: true });
     }
