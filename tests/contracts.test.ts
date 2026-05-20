@@ -84,9 +84,11 @@ import {
   firstAnchorableDiffReviewPosition,
   firstNonCollidingAnchorableDiffReviewPosition,
   formatReviewCoverageSectionLines,
+  formatReviewProvenanceSectionLines,
   loadStoredReviewResult,
   parsePrNumber,
   parseReviewSummaryStyle,
+  resolveAdapterModelFromMetadata,
 } from "../packages/cli/src/index";
 import {
   parseCodeReviewArgv,
@@ -1350,6 +1352,80 @@ test("impact summary review coverage notes lite triage omissions", () => {
   expect(body).toContain("Triage tier **lite**");
   expect(body).toContain("Runtime / Performance");
   expect(body).toContain("not scheduled");
+});
+
+test("resolveAdapterModelFromMetadata picks adapter-specific model field", () => {
+  expect(
+    resolveAdapterModelFromMetadata({
+      adapter: "cursor",
+      cursor_model: "sonnet-4",
+      claude_model: "claude-sonnet-4",
+    }),
+  ).toBe("sonnet-4");
+  expect(
+    resolveAdapterModelFromMetadata({
+      adapter: "opencode",
+      opencode_model: "opencode/gpt-5.3-codex",
+    }),
+  ).toBe("opencode/gpt-5.3-codex");
+});
+
+test("review provenance section lists reviewer and agent in summary", () => {
+  const lines = formatReviewProvenanceSectionLines({
+    reviewerLogin: "jasona",
+    runId: "code-review-20260501120000-aaaa",
+    runMetadata: {
+      adapter: "cursor",
+      cursor_model: "sonnet-4",
+    },
+  });
+  expect(lines.join("\n")).toContain("### Review provenance");
+  expect(lines.join("\n")).toContain("Reviewer: @jasona");
+  expect(lines.join("\n")).toContain("Agent: cursor (sonnet-4)");
+  expect(lines.join("\n")).toContain("code-review-20260501120000-aaaa");
+
+  const body = buildPendingReviewSummaryBody({
+    style: "impact",
+    findings: [],
+    postedCommentCount: 0,
+    skippedUnanchorable: 0,
+    runMetadata: {
+      adapter: "cursor",
+      cursor_model: "sonnet-4",
+    },
+    provenance: {
+      reviewerLogin: "jasona",
+      runId: "code-review-20260501120000-aaaa",
+      runMetadata: {
+        adapter: "cursor",
+        cursor_model: "sonnet-4",
+      },
+    },
+  });
+  expect(body).toContain("### Review provenance");
+  expect(body).toContain("Reviewer: @jasona");
+  expect(body).toContain("Agent: cursor (sonnet-4)");
+});
+
+test("inline pending review comments include agent and role provenance footer", () => {
+  const finding: Finding = {
+    id: "f-prov",
+    severity: "warning",
+    title: "Anchored issue",
+    description: "d",
+    evidence: "e",
+    sourceRole: "security",
+    file: "src/app.ts",
+    line: 12,
+    validation: { status: "verified", details: "ok" },
+  };
+  const comments = findingsToPendingReviewComments([finding], {
+    reviewerLogin: "jasona",
+    runMetadata: { adapter: "claude", claude_model: "claude-sonnet-4" },
+  });
+  expect(comments[0]?.body).toContain("@jasona");
+  expect(comments[0]?.body).toContain("Agent: claude (claude-sonnet-4)");
+  expect(comments[0]?.body).toContain("Role: Security");
 });
 
 test("impact summary review coverage lists timed-out scheduled role", () => {

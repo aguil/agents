@@ -206,6 +206,7 @@ export async function runCodeReview(
   const perPassResults: HarnessRunResult[] = [];
   const passFindingSets: Array<readonly Finding[]> = [];
   const baseMetadata = {
+    run_id: runId,
     adapter: adapter.name,
     triage,
     strict_mode: options.strict === true ? "true" : "false",
