@@ -2241,16 +2241,13 @@ export function formatReviewProvenanceSectionLines(
   const consensusRuns = metadataString(runMetadata, "consensus_runs");
   const consensusMode = metadataString(runMetadata, "consensus_mode");
   const contextSource = metadataString(runMetadata, "context_source");
-  const deterministic =
-    metadataString(runMetadata, "deterministic_mode") === "true";
 
   const hasSignal =
     (reviewer !== undefined && reviewer.length > 0) ||
     agent !== undefined ||
     runId !== undefined ||
     (consensusRuns !== undefined && consensusRuns !== "1") ||
-    contextSource === "replay" ||
-    deterministic;
+    contextSource === "replay";
 
   if (!hasSignal) {
     return [];
@@ -2275,9 +2272,6 @@ export function formatReviewProvenanceSectionLines(
   }
   if (contextSource === "replay") {
     lines.push("- Context: replayed from prior bundle");
-  }
-  if (deterministic) {
-    lines.push("- Deterministic adapter profile: enabled");
   }
   return lines;
 }
