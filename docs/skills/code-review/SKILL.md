@@ -1,10 +1,9 @@
 ---
 name: code-review
 description: >-
-  Work through GitHub PRs that request your review: list assignments (you and
-  optional team requests), run the code-review harness on a chosen PR, locally
-  review harness findings before posting, then publish a pending GitHub review
-  with agents code-review post.
+  Work through GitHub PRs that request your review: list assignments, wait for
+  explicit user selection of one or more PRs, run the harness per PR, review
+  report.md before posting each, then agents code-review post per PR.
 ---
 
 # Code review (PR assignments → harness → post)
@@ -39,6 +38,48 @@ the merged CLI resolution already applies (harness defaults, user
 **`~/.config/agents/code-review/config.json`**, optional repo
 **`.agents-code-review/config.json`**, **`AGENTS_CODE_REVIEW_*`**, and flags the
 operator supplied). Do **not** add or drop **`--dry-run`** on your own.
+
+## PR selection (required before harness)
+
+**Do not run the harness, `post`, or any review command until the operator has
+explicitly chosen which pull request(s) to review** (`owner/repo#number`). One
+PR or **several** is fine; listing assignments is not consent to review
+anything.
+
+**Agents must:**
+
+1. Run **`agents code-review inbox list`** (or show the same data) and present
+   the assignments to the operator.
+2. **Stop and ask** which PR(s) to review—or wait for the operator to run
+   **fzf** (single or **multi-select**) or name **`owner/repo#<n>`**
+   (comma-separated or a clear list). Do **not** proceed on silence.
+3. Treat the operator’s answer as a **closed set**: only those PRs get harness
+   runs and **`post`** calls in this session. Do **not** add other inbox rows.
+4. For **each** selected PR, in order (or an order the operator specifies):
+   - Run **`agents code-review --pr <n> --repo owner/name`** when the anchor is
+     not already that repo. **Always pass `--pr`** per run.
+   - **[Review findings](#review-findings-before-post-required)** for **that**
+     PR’s run ( **`report.md`** ).
+   - Run **`agents code-review post --pr <n> --result <that-run/result.json>`**
+     only after the operator approves **that** PR’s findings.
+   - **Finish on GitHub** for that PR before moving on, unless the operator
+     asked to batch harness runs first (still **per-PR** review before each
+     **`post`**).
+
+**Never:**
+
+- Pick the first row, “most recent”, “all assignments”, or “only” PR without the
+  operator naming each **`owner/repo#number`**.
+- Infer PRs from cwd, HEAD, or chat context unless the operator explicitly
+  listed them for this session.
+- Run **`agents code-review`** before PR selection.
+- Use **`post`** without **`--pr`** and **`--result`** when multiple PRs were
+  reviewed in the same workspace (auto-discovery of “latest” may be the wrong
+  PR).
+
+If the operator says “review my PRs” without naming which ones, reply with the
+inbox list and ask for an explicit set (one or more **`owner/repo#number`**, or
+fzf multi-select) before any harness command.
 
 ## Commands (reference)
 
@@ -78,18 +119,21 @@ below.
 
 1. **Verify auth:** `gh auth status`
 2. **List assignments:** `agents code-review inbox list` (add
-   **`--include-team`** if needed). Prefer
-   **[Optional: fzf picker](#optional-fzf-picker-with-pr-description-preview)**.
-3. **Run harness:** `agents code-review --pr <n>` from the **artifact anchor**
-   workspace (the checkout you pass as **`--workspace`**, or cwd). Artifacts
-   land under **`.agents-code-review/runs/`** on that anchor—not only inside the
-   detached worktree.
-4. **Review findings before post:** Follow
-   **[Review findings before post](#review-findings-before-post-required)**.
-5. **Publish:** `agents code-review post --pr <n>` (or **`--result`** to a
-   specific run) after the operator approves the findings to publish.
-6. **Finish on GitHub:** Open the pending review URL and **Finish review**
-   (approve, request changes, or comment).
+   **`--include-team`** if needed). Present options to the operator.
+3. **Operator selects PR(s)** — explicit set only: one or more
+   **`owner/repo#<n>`**, confirmed rows, or
+   **[fzf](#optional-fzf-picker-with-pr-description-preview)** (including
+   **multi-select**). See
+   **[PR selection](#pr-selection-required-before-harness)**.
+4. **Per selected PR** (repeat for each; use that repo’s artifact anchor):
+   1. **Harness:** `agents code-review --pr <n> --repo owner/name`
+   2. **Review findings:**
+      **[Review findings before post](#review-findings-before-post-required)**
+      for this PR’s **`report.md`** / run directory
+   3. **Publish:** `agents code-review post --pr <n> --result <run>/result.json`
+      after operator approval for **this** PR
+   4. **Finish on GitHub** for this PR (unless operator deferred finish until
+      later)
 
 ## Review findings before post (required)
 
@@ -100,12 +144,14 @@ inbox draft files. The summary and inline comments come from harness
 Before **`post`**, the operator (or agent assisting them) must **review what
 will be published**—not a one-line chat recap.
 
-1. **Locate the run** — latest under
-   **`<workspace>/.agents-code-review/runs/code-review-*`**, or pass
-   **`--result <path>`** explicitly.
-2. **Read findings** — enumerate **`findings[].id`**, **`title`**, and
-   **`severity`** from **`result.json`**. Skim **`report.md`** in the same run
-   directory when present.
+1. **Locate the run** for **this PR** — the directory created by that PR’s
+   harness invocation, or pass **`--result <path>`** on **`post`**. When
+   multiple PRs were reviewed, do **not** assume “latest” under the anchor; tie
+   **`post`** to the matching **`result.json`**.
+2. **Read findings** — open **`report.md`** in the run directory (path printed
+   by the harness, or **`reportPath`** in **`result.json`**) for the full
+   formatted report. Use **`jq`** on **`result.json`** only for a compact
+   id/title/severity checklist if helpful.
 3. **Disposition** — confirm which findings should appear on the PR. For false
    positives or needed code fixes, update the branch and **re-run the harness**;
    do **not** **`post`** a stale **`result.json`**.
@@ -117,8 +163,9 @@ will be published**—not a one-line chat recap.
 ```bash
 WORKSPACE=.   # artifact anchor you used for the harness run
 RUN=$(ls -td "$WORKSPACE/.agents-code-review/runs/code-review-"* 2>/dev/null | head -1)
+less "$RUN/report.md"
+# optional compact checklist:
 jq '.findings[] | {id, title, severity}' "$RUN/result.json"
-# optional: less "$RUN/report.md"
 ```
 
 **Agents:** Do **not** run **`agents code-review post`** until the operator has
@@ -137,14 +184,22 @@ before **`post`**.
 
 ## Optional: fzf picker with PR description preview
 
-If **`fzf`** is installed, emit **tab-separated** rows so **`{1}`** stays
-**`owner/repo#number`** for scripting and preview.
+**Interactive pick:** **`fzf`** is for the **operator** to choose PR(s). Agents
+must **not** run **`fzf`** non-interactively or substitute list rows. After
+**`list`**, the operator runs the snippet (single or **multi**), or names
+**`owner/repo#<n>`** (one or several)—then you may run the harness **only for
+those PRs**.
+
+**Single PR** — default **`fzf`** (one row). **Multiple PRs** — add
+**`--multi`** (and optionally **`--bind 'ctrl-a:select-all+accept'`**).
+Tab-separated output still uses **`{1}`** = **`owner/repo#number`** per line.
 
 ```bash
-pick=$(
+# Single PR: omit --multi. Multiple PRs: add --multi to fzf.
+picks=$(
   agents code-review inbox list --format json \
     | jq -r '.assignments[] | [.repository + "#" + (.pullNumber | tostring), .title, .assignmentKind, .url] | @tsv' \
-    | fzf \
+    | fzf --multi \
         --delimiter=$'\t' \
         --with-nth=2,3,4 \
         --preview '
@@ -155,26 +210,28 @@ pick=$(
         ' \
         --preview-window=right:65%:wrap
 )
-repo_pr=$(printf '%s' "$pick" | cut -f1)
-repo="${repo_pr%%#*}"
-pr="${repo_pr##*#}"
 
-# Harness on PR head (artifact anchor = your clone or cwd)
-agents code-review --pr "$pr" --workspace <anchor>
+# Only after the operator selected in fzf — loop each line (do not run from agent alone):
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  key=$(printf '%s' "$line" | cut -f1)
+  repo="${key%%#*}"
+  pr="${key##*#}"
+  anchor=<clone-or-anchor-for-this-repo>
 
-# Human reviews findings (see "Review findings before post")
-RUN=$(ls -td <anchor>/.agents-code-review/runs/code-review-* 2>/dev/null | head -1)
-jq '.findings[] | {id, title, severity}' "$RUN/result.json"
-
-# After operator approval:
-agents code-review post --pr "$pr" --workspace <anchor>
+  agents code-review --pr "$pr" --repo "$repo" --workspace "$anchor"
+  RUN=$(ls -td "$anchor/.agents-code-review/runs/code-review-"* 2>/dev/null | head -1)
+  less "$RUN/report.md"
+  # Operator approves this PR's findings, then:
+  agents code-review post --pr "$pr" --result "$RUN/result.json" --workspace "$anchor"
+done <<< "$picks"
 ```
 
 Set **`GH_PAGER=cat`** in **`fzf --preview`** so the preview pane is
 non-interactive.
 
-Without **`fzf`**, pick from **`inbox list`** text output or pass **`--pr`**
-explicitly once you know the number.
+Without **`fzf`**, show **`inbox list`** and ask which **`owner/repo#<n>`** to
+review (one or more)—do not assume rows.
 
 ## Scripts directory?
 
@@ -189,13 +246,16 @@ Keep **fzf** / **`jq`** snippets **in this playbook**, not under
 
 ## Agents
 
-| Do                                                                          | Don't                                             |
-| --------------------------------------------------------------------------- | ------------------------------------------------- |
-| After pick, run **`agents code-review --pr <n>`**                           | Stop after **`inbox list`** / **`show`** / fzf    |
-| Show full **`findings`** (ids + titles) before **`post`**                   | Call **`post`** immediately after the harness     |
-| Use **`inbox`** for **`list`** / **`show`** / pick only                     | Use **`inbox draft`** / **`inbox submit`**        |
-| Respect **`post`** confirm prompts unless operator wants **`--no-confirm`** | Invent adapter/model/dry-run overrides            |
-| Finish the review on GitHub after **`post`**                                | Treat **`post`** as final approve/request-changes |
+| Do                                                                                    | Don't                                                               |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **`list`**, then **wait for explicit PR set** (one or many)                           | Run harness after **`list`** without operator-named PR(s)           |
+| Process **only** PRs the operator selected; **per PR**: harness → review → **`post`** | Review “all” inbox rows or add PRs they did not name                |
+| Run **`agents code-review --pr <n>`** per selected PR                                 | Omit **`--pr`** or auto-pick from cwd/HEAD/list order               |
+| Show **`report.md`** before **`post`** for **that** PR                                | Call **`post`** right after harness or use wrong **`--result`**     |
+| **`post --pr <n> --result <run>/result.json>`** matching the harness run              | **`post`** without **`--result`** when multiple PRs share an anchor |
+| Use **`inbox`** for **`list`** / **`show`** only                                      | Use **`inbox draft`** / **`inbox submit`**                          |
+| Respect **`post`** confirm prompts unless operator wants **`--no-confirm`**           | Invent adapter/model/dry-run overrides                              |
+| Finish on GitHub per PR after **`post`** (unless operator defers)                     | Treat **`post`** as final approve/request-changes                   |
 
 Install this playbook: **`agents skills install code-review`** (see
 **`agents skills --help`**).

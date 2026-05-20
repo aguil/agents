@@ -11,7 +11,7 @@
     {
       "id": "code-review",
       "path": "code-review/SKILL.md",
-      "summary": "List PRs awaiting your review, run agents code-review --pr, locally review harness findings in result.json, then agents code-review post after approval.",
+      "summary": "List PR review assignments, require explicit user pick of one or more PRs, harness and report.md review per PR, then agents code-review post per PR after approval.",
       "minAgentsVersion": "0.0.0",
       "tags": ["code-review", "github", "pr"]
     }
