@@ -325,6 +325,10 @@ export async function main(
             skippedUnanchorable,
             prDiffContext,
             runMetadata: result.metadata,
+            provenance: {
+              runId: result.runId,
+              runMetadata: result.metadata,
+            },
           }),
         );
         console.log("");
@@ -392,6 +396,7 @@ export async function main(
               ? verbosePrDiffContext
               : undefined,
           runMetadata: result.metadata,
+          runId: result.runId,
         });
         if (posted.cancelled === true) {
           await updateRunResultMetadata(result.artifacts, {
@@ -838,6 +843,7 @@ function logShowsCommands(level: CliLogLevel): boolean {
 interface StoredReviewResult {
   readonly findings: readonly Finding[];
   readonly metadata?: Readonly<Record<string, string>>;
+  readonly runId?: string;
 }
 
 async function resolvedResultPathIsUnderCodeReviewDryRunRoot(
@@ -984,6 +990,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     replacePendingReview: options.replacePendingReview,
     workspacePath,
     runMetadata: metadata,
+    runId: loaded.runId,
   });
   if (posted.cancelled === true) {
     return 0;
@@ -1014,6 +1021,7 @@ export async function loadStoredReviewResult(
   const parsed = JSON.parse(raw) as {
     readonly findings?: unknown;
     readonly metadata?: unknown;
+    readonly runId?: unknown;
   };
   if (!Array.isArray(parsed.findings)) {
     throw new Error(
@@ -1025,9 +1033,14 @@ export async function loadStoredReviewResult(
     typeof parsed.metadata === "object" && parsed.metadata !== null
       ? (parsed.metadata as Record<string, string>)
       : undefined;
+  const runId =
+    typeof parsed.runId === "string" && parsed.runId.trim().length > 0
+      ? parsed.runId.trim()
+      : undefined;
   return {
     findings,
     metadata,
+    runId,
   };
 }
 
@@ -1043,8 +1056,15 @@ export function parseReviewSummaryStyle(
   return undefined;
 }
 
+export interface ReviewPostProvenance {
+  readonly reviewerLogin?: string;
+  readonly runId?: string;
+  readonly runMetadata?: Readonly<Record<string, string>>;
+}
+
 export function findingsToPendingReviewComments(
   findings: readonly Finding[],
+  provenance?: ReviewPostProvenance,
 ): readonly PendingReviewComment[] {
   return findings
     .filter(
@@ -1054,7 +1074,7 @@ export function findingsToPendingReviewComments(
       path: finding.file as string,
       line: finding.line as number,
       side: "RIGHT" as const,
-      body: formatPendingReviewBody(finding),
+      body: formatPendingReviewBody(finding, provenance),
     }));
 }
 
@@ -1225,7 +1245,11 @@ function warnPrAnchorIssues(
   }
 }
 
-function formatPendingReviewBody(finding: Finding): string {
+function formatPendingReviewBody(
+  finding: Finding,
+  provenance?: ReviewPostProvenance,
+): string {
+  const footer = formatInlineReviewProvenanceFooter(finding, provenance);
   return [
     `### ${severityEmoji(finding.severity)} ${finding.title}`,
     "",
@@ -1233,6 +1257,7 @@ function formatPendingReviewBody(finding: Finding): string {
     "",
     `Evidence: ${finding.evidence}`,
     `Validation: ${finding.validation.status} - ${finding.validation.details}`,
+    ...(footer === undefined ? [] : ["", footer]),
     "",
     `<!-- finding:${findingFingerprint(finding)} -->`,
   ].join("\n");
@@ -1249,10 +1274,17 @@ async function replacePendingPullRequestReview(input: {
   readonly preloadedPrDiffContext?: PullRequestDiffContext;
   /** From harness result metadata (result.json) for review coverage in the summary body. */
   readonly runMetadata?: Readonly<Record<string, string>>;
+  readonly runId?: string;
 }): Promise<PendingReviewPosted | PendingReviewCancelled> {
   const workspacePath = resolveWorkspaceCwd(input.workspacePath);
   const repo = await getRepoNameWithOwner(workspacePath);
   const login = await getViewerLogin(workspacePath);
+  const postProvenance: ReviewPostProvenance = {
+    reviewerLogin: login,
+    runId:
+      input.runId?.trim() || input.runMetadata?.run_id?.trim() || undefined,
+    runMetadata: input.runMetadata,
+  };
   const prNumber =
     input.prNumber ?? (await getCurrentPullRequestNumber(repo, workspacePath));
   const reviewedHeadSha = input.reviewedHeadSha?.trim();
@@ -1373,7 +1405,7 @@ async function replacePendingPullRequestReview(input: {
     }
   }
 
-  const rawComments = findingsToPendingReviewComments(findings);
+  const rawComments = findingsToPendingReviewComments(findings, postProvenance);
   const diffContext =
     input.preloadedPrDiffContext ??
     (await loadPullRequestDiffContext(repo, prNumber, workspacePath));
@@ -1404,6 +1436,7 @@ async function replacePendingPullRequestReview(input: {
     skippedUnanchorable,
     prDiffContext: diffContext,
     runMetadata: input.runMetadata,
+    provenance: postProvenance,
   });
 
   const usedAnchorKeys = new Set(
@@ -2107,7 +2140,12 @@ export function buildPendingReviewSummaryBody(input: {
   readonly prDiffContext?: PullRequestDiffContext;
   /** Harness run metadata (e.g. from result.json) for review coverage / triage. */
   readonly runMetadata?: Readonly<Record<string, string>>;
+  /** Human reviewer + agent adapter attribution for the posted review. */
+  readonly provenance?: ReviewPostProvenance;
 }): string {
+  const provenance: ReviewPostProvenance = input.provenance ?? {
+    runMetadata: input.runMetadata,
+  };
   switch (input.style) {
     case "triage":
       return renderTriageSummary(
@@ -2116,6 +2154,7 @@ export function buildPendingReviewSummaryBody(input: {
         input.skippedUnanchorable,
         input.prDiffContext,
         input.runMetadata,
+        provenance,
       );
     case "impact":
       return renderImpactSummary(
@@ -2124,6 +2163,7 @@ export function buildPendingReviewSummaryBody(input: {
         input.skippedUnanchorable,
         input.prDiffContext,
         input.runMetadata,
+        provenance,
       );
     case "evidence":
       return renderEvidenceSummary(
@@ -2132,6 +2172,7 @@ export function buildPendingReviewSummaryBody(input: {
         input.skippedUnanchorable,
         input.prDiffContext,
         input.runMetadata,
+        provenance,
       );
   }
 }
@@ -2144,6 +2185,126 @@ function triageTierRationale(tier: "trivial" | "lite" | "full"): string {
     return "Triage tier **lite**: security, quality, and compliance run; runtime/performance is not scheduled for this scope.";
   }
   return "Triage tier **full**: all review dimensions are scheduled.";
+}
+
+function metadataString(
+  record: Readonly<Record<string, string>> | undefined,
+  key: string,
+): string | undefined {
+  const raw = record?.[key]?.trim() ?? "";
+  return raw.length > 0 ? raw : undefined;
+}
+
+/** Model id recorded for the active adapter in harness run metadata. */
+export function resolveAdapterModelFromMetadata(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): string | undefined {
+  const adapter = metadataString(runMetadata, "adapter");
+  if (adapter === "opencode") {
+    return metadataString(runMetadata, "opencode_model");
+  }
+  if (adapter === "claude") {
+    return metadataString(runMetadata, "claude_model");
+  }
+  if (adapter === "cursor") {
+    return metadataString(runMetadata, "cursor_model");
+  }
+  return (
+    metadataString(runMetadata, "cursor_model") ??
+    metadataString(runMetadata, "claude_model") ??
+    metadataString(runMetadata, "opencode_model")
+  );
+}
+
+function formatAgentProviderLabel(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): string | undefined {
+  const adapter = metadataString(runMetadata, "adapter");
+  if (adapter === undefined) {
+    return undefined;
+  }
+  const model = resolveAdapterModelFromMetadata(runMetadata);
+  return model === undefined ? adapter : `${adapter} (${model})`;
+}
+
+/**
+ * Markdown lines for human reviewer + harness agent attribution; empty when no signal.
+ */
+export function formatReviewProvenanceSectionLines(
+  provenance: ReviewPostProvenance | undefined,
+): readonly string[] {
+  const runMetadata = provenance?.runMetadata;
+  const reviewer = provenance?.reviewerLogin?.trim();
+  const agent = formatAgentProviderLabel(runMetadata);
+  const runId =
+    provenance?.runId?.trim() || metadataString(runMetadata, "run_id");
+  const consensusRuns = metadataString(runMetadata, "consensus_runs");
+  const consensusMode = metadataString(runMetadata, "consensus_mode");
+  const contextSource = metadataString(runMetadata, "context_source");
+  const deterministic =
+    metadataString(runMetadata, "deterministic_mode") === "true";
+
+  const hasSignal =
+    (reviewer !== undefined && reviewer.length > 0) ||
+    agent !== undefined ||
+    runId !== undefined ||
+    (consensusRuns !== undefined && consensusRuns !== "1") ||
+    contextSource === "replay" ||
+    deterministic;
+
+  if (!hasSignal) {
+    return [];
+  }
+
+  const lines: string[] = ["", "### Review provenance"];
+  if (reviewer !== undefined && reviewer.length > 0) {
+    lines.push(`- Reviewer: @${reviewer}`);
+  }
+  if (agent !== undefined) {
+    lines.push(`- Agent: ${agent}`);
+  }
+  if (runId !== undefined) {
+    lines.push(`- Run: \`${runId}\``);
+  }
+  if (consensusRuns !== undefined && consensusRuns !== "1") {
+    const mode =
+      consensusMode !== undefined && consensusMode.length > 0
+        ? ` (${consensusMode})`
+        : "";
+    lines.push(`- Consensus: ${consensusRuns} pass(es)${mode}`);
+  }
+  if (contextSource === "replay") {
+    lines.push("- Context: replayed from prior bundle");
+  }
+  if (deterministic) {
+    lines.push("- Deterministic adapter profile: enabled");
+  }
+  return lines;
+}
+
+function formatInlineReviewProvenanceFooter(
+  finding: Finding,
+  provenance: ReviewPostProvenance | undefined,
+): string | undefined {
+  const reviewer = provenance?.reviewerLogin?.trim();
+  const agent = formatAgentProviderLabel(provenance?.runMetadata);
+  const roleRaw = finding.sourceRole?.trim() ?? "";
+  const role = roleRaw.length > 0 ? roleReviewSectionLabel(roleRaw) : undefined;
+
+  const parts: string[] = [];
+  if (reviewer !== undefined && reviewer.length > 0) {
+    parts.push(`@${reviewer}`);
+  }
+  if (agent !== undefined) {
+    parts.push(`Agent: ${agent}`);
+  }
+  if (role !== undefined) {
+    parts.push(`Role: ${role}`);
+  }
+  if (parts.length === 0) {
+    return undefined;
+  }
+  return `_${parts.join(" · ")}_`;
 }
 
 /**
@@ -2258,6 +2419,7 @@ function renderTriageSummary(
   skippedUnanchorable: number,
   prDiffContext: PullRequestDiffContext | undefined,
   runMetadata: Readonly<Record<string, string>> | undefined,
+  provenance: ReviewPostProvenance,
 ): string {
   const critical = findings.filter(
     (finding) => finding.severity === "critical",
@@ -2271,6 +2433,7 @@ function renderTriageSummary(
   if (skippedUnanchorable > 0) {
     lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
   }
+  lines.push(...formatReviewProvenanceSectionLines(provenance));
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
@@ -2297,6 +2460,7 @@ function renderImpactSummary(
   skippedUnanchorable: number,
   prDiffContext: PullRequestDiffContext | undefined,
   runMetadata: Readonly<Record<string, string>> | undefined,
+  provenance: ReviewPostProvenance,
 ): string {
   const lines = [
     "## Impact Summary",
@@ -2306,6 +2470,7 @@ function renderImpactSummary(
   if (skippedUnanchorable > 0) {
     lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
   }
+  lines.push(...formatReviewProvenanceSectionLines(provenance));
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
@@ -2396,6 +2561,7 @@ function renderEvidenceSummary(
   skippedUnanchorable: number,
   prDiffContext: PullRequestDiffContext | undefined,
   runMetadata: Readonly<Record<string, string>> | undefined,
+  provenance: ReviewPostProvenance,
 ): string {
   const lines = [
     "## Why / Evidence / Fix",
@@ -2405,6 +2571,7 @@ function renderEvidenceSummary(
   if (skippedUnanchorable > 0) {
     lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
   }
+  lines.push(...formatReviewProvenanceSectionLines(provenance));
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
