@@ -17,12 +17,13 @@ function printInboxUsage(): void {
   console.log(`Usage: agents code-review inbox <command> [options]
 
 Inbox lists pull requests requesting your review on GitHub (not harness findings or agents triage).
+  Typical flow: list/show to pick a PR, then agents code-review --pr <n>, review result.json, then agents code-review post.
 
 Commands:
   list    List review assignments (default: you; optional team-requested PRs)
   show    Show one PR summary (JSON)
-  draft   Write a review draft JSON file for local editing before submit
-  submit  Post a review from a draft file (one PR per invocation)
+  draft   Legacy: local draft JSON for manual gh pr review (see skill playbook for harness + post)
+  submit  Legacy: post from draft file (one PR per invocation)
 
 Global options:
   --workspace <path>   Repository workspace for gh (default: cwd)
@@ -435,7 +436,10 @@ async function dispatchInbox(
     await writeJsonFile(effective.output, draft);
     console.log(`Wrote draft template to ${effective.output}`);
     console.log(
-      "Edit body and event (comment | approve | request_changes), then: agents code-review inbox submit --draft <path>",
+      "Legacy manual path: edit body and event, then inbox submit --draft <path>.",
+    );
+    console.log(
+      "Preferred: agents code-review --pr <n>, review result.json, then agents code-review post.",
     );
     return 0;
   }

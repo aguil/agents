@@ -1,111 +1,139 @@
 ---
 name: code-review
 description: >-
-  Work through GitHub pull requests that request your review: list assignments
-  (you by default, optional team requests), inspect diffs, author a local review
-  draft JSON, surface the full PR description when picking a PR (e.g. fzf
-  preview), print your review summary and findings in full for a final human
-  check, then submit one PR at a time with agents code-review inbox.
+  Work through GitHub PRs that request your review: list assignments (you and
+  optional team requests), run the code-review harness on a chosen PR, locally
+  review harness findings before posting, then publish a pending GitHub review
+  with agents code-review post.
 ---
 
-# Code review (PR assignment inbox)
+# Code review (PR assignments → harness → post)
 
-This playbook is for **human review obligations** on GitHub: PRs where **you**
-(or a **team** you belong to) are listed as a requested reviewer. It is **not**
-automated harness output, **`agents triage`**, or `result.json` findings.
+This playbook is for **review obligations** on GitHub: pull requests where
+**you** (or a **team** you belong to) are listed as a requested reviewer.
+
+**Scope:**
+
+- **`agents code-review inbox`** — discover and pick assignments (`list`,
+  `show`). It does **not** run reviewers or publish to GitHub.
+- **`agents code-review --pr <n>`** — run the **harness**; writes
+  **`result.json`** (and related artifacts) under
+  **`.agents-code-review/runs/`** on your artifact anchor workspace. Uses a
+  detached worktree so your main checkout stays unchanged.
+- **Local human review** — you (or an agent assisting you) must review harness
+  **findings** before anything is posted.
+- **`agents code-review post`** — publish a **pending** PR review from stored
+  **`result.json`** (inline threads + summary). **Finish review** in the GitHub
+  UI (approve, request changes, or comment).
+
+This is **not** **`agents triage`** (remediation queue from prior harness runs
+on your own branches).
 
 **Prerequisites:** [`gh`](https://cli.github.com/) installed and authenticated
-(`gh auth status`). The CLI uses the same **`gh`** cwd/login behavior as other
-`agents code-review` GitHub commands.
+(`gh auth status`). Harness and inbox GitHub commands use the same **`gh`**
+login/cwd behavior.
+
+**Agents following this skill:** Do **not** invent or override adapter or model
+settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever
+the merged CLI resolution already applies (harness defaults, user
+**`~/.config/agents/code-review/config.json`**, optional repo
+**`.agents-code-review/config.json`**, **`AGENTS_CODE_REVIEW_*`**, and flags the
+operator supplied). Do **not** add or drop **`--dry-run`** on your own.
 
 ## Commands (reference)
+
+**Inbox (assignment discovery):**
 
 ```text
 agents code-review inbox list [--format text|json] [--include-team] [--workspace <path>] [--repos-root <path>]
 agents code-review inbox show --pr <n> [--repo owner/name] [--workspace <path>] [--repos-root <path>]
-agents code-review inbox draft --pr <n> [--repo owner/name] [--output <path>] [--workspace <path>] [--repos-root <path>]
-agents code-review inbox submit --draft <path> [--workspace <path>] [--repos-root <path>]
 ```
 
-- **`list`:** Defaults to PRs with **`review-requested:@me`**. Add
-  **`--include-team`** to merge PRs matching **`team-review-requested:`** for
-  each of your teams (deduped by repo + number).
-- **`show`:** Prints **`gh pr view --json`** for the chosen PR (metadata and
-  review requests). For the author’s **full description body**, run
-  **`gh pr view <n> --repo …`** (plain or **`--json body,title`**).
-- **`draft`:** Writes a **draft JSON** template (schema
-  `https://aguil.dev/schemas/agents/code-review-inbox-draft/v1`). Edit
-  **`body`** and **`event`** (`comment` \| `approve` \| `request_changes`)
-  locally before submit.
-- **`submit`:** Reads the draft file and runs **`gh pr review`** for **one PR**
-  per invocation.
+- **`list`:** Defaults to **`review-requested:@me`**. Add **`--include-team`**
+  to merge **`team-review-requested:`** PRs for your teams (deduped by repo +
+  number).
+- **`show`:** PR metadata JSON (`gh pr view --json`). For the full description,
+  use **`gh pr view <n> --repo …`**.
 
-Omit **`--repo`** when your current repository is the same as the PR’s base
-(inferred via `gh repo view`). With **`--repo owner/name`** (or on **`submit`**,
-from **`draft.repository`**), the CLI can locate your checkout under
+**Harness and publish:**
+
+```text
+agents code-review --pr <n> [--workspace <path>] [--repos-root <path>] [harness flags…]
+agents code-review post [--pr <n>] [--result <path>] [--workspace <path>] [--review-summary triage|impact|evidence] [--no-confirm]
+```
+
+See **`agents code-review --help`** and **`agents code-review post --help`** for
+adapter, logging, and posting options.
+
 **`--repos-root`** (default **`~/dev/repos`**, or
-**`AGENTS_CODE_REVIEW_REPOS_ROOT`**): try **`repos-root/github.com/owner/repo`**
-then **`repos-root/owner/repo`**.
+**`AGENTS_CODE_REVIEW_REPOS_ROOT`**): with **`--repo owner/name`**, the CLI can
+resolve a clone at **`repos-root/github.com/owner/repo`** or
+**`repos-root/owner/repo`**.
+
+Legacy **`inbox draft`** / **`inbox submit`** exist in the CLI but are **not**
+part of this playbook (manual prose reviews). Use the harness + **`post`** flow
+below.
 
 ## Suggested workflow
 
 1. **Verify auth:** `gh auth status`
-2. **List work:** `agents code-review inbox list` (add `--include-team` if you
-   want team-requested PRs in the same pass). Prefer
-   **[Optional: fzf picker](#optional-fzf-picker-with-pr-description-preview)**
-   when choosing a PR so the description stays visible.
-3. **Inspect:** `agents code-review inbox show --pr <n>` and/or `gh pr diff <n>`
-   (and **`gh pr view <n>`** when you want the full PR body in the terminal).
-4. **Draft locally:**
-   `agents code-review inbox draft --pr <n> --output ./review.json` then edit
-   **`body`** with your **complete** review summary and findings (what readers
-   on GitHub will see).
-5. **Final human review:** Follow
-   **[Final human review before submit](#final-human-review-before-submit)**—print
-   the draft and confirm wording before posting.
-6. **Submit:** `agents code-review inbox submit --draft ./review.json`
+2. **List assignments:** `agents code-review inbox list` (add
+   **`--include-team`** if needed). Prefer
+   **[Optional: fzf picker](#optional-fzf-picker-with-pr-description-preview)**.
+3. **Run harness:** `agents code-review --pr <n>` from the **artifact anchor**
+   workspace (the checkout you pass as **`--workspace`**, or cwd). Artifacts
+   land under **`.agents-code-review/runs/`** on that anchor—not only inside the
+   detached worktree.
+4. **Review findings before post:** Follow
+   **[Review findings before post](#review-findings-before-post-required)**.
+5. **Publish:** `agents code-review post --pr <n>` (or **`--result`** to a
+   specific run) after the operator approves the findings to publish.
+6. **Finish on GitHub:** Open the pending review URL and **Finish review**
+   (approve, request changes, or comment).
 
-## Final human review before submit
+## Review findings before post (required)
 
-GitHub posts your **`draft.body`** verbatim. Before **`inbox submit`**, the
-operator (or agent assisting them) should **read the exact text** that will go
-public—not a shortened recap.
+**`agents code-review post`** reads **`result.json`** only. It does **not** use
+inbox draft files. The summary and inline comments come from harness
+**`findings`**.
 
-**Print the draft review (event + full findings body):**
+Before **`post`**, the operator (or agent assisting them) must **review what
+will be published**—not a one-line chat recap.
 
-```bash
-jq -r '
-  "========== GitHub review draft (not submitted yet) ==========",
-  "",
-  "Repository: \(.repository)#\(.pullNumber)",
-  "Event:      \(.event)",
-  "",
-  "--- Body (full text posted to the PR) ---",
-  "",
-  .body,
-  ""
-' ./review.json
-```
+1. **Locate the run** — latest under
+   **`<workspace>/.agents-code-review/runs/code-review-*`**, or pass
+   **`--result <path>`** explicitly.
+2. **Read findings** — enumerate **`findings[].id`**, **`title`**, and
+   **`severity`** from **`result.json`**. Skim **`report.md`** in the same run
+   directory when present.
+3. **Disposition** — confirm which findings should appear on the PR. For false
+   positives or needed code fixes, update the branch and **re-run the harness**;
+   do **not** **`post`** a stale **`result.json`**.
+4. **Optional context** — **`gh pr view <n> --repo owner/repo`** alongside
+   artifacts so the review sits next to the author’s description.
 
-- Use **`event: approve`** only after you are comfortable approving with **no**
-  review comment text (GitHub allows an empty body for approve); for
-  **`comment`** or **`request_changes`**, ensure **`body`** reflects every
-  finding you intend to publish—nothing should be “implicit” or omitted from
-  this preview.
-- Optionally recap PR context in the same terminal session so the review sits
-  beside the author’s description:
+**Inspect findings (read-only):**
 
 ```bash
-gh pr view <n> --repo owner/repo
+WORKSPACE=.   # artifact anchor you used for the harness run
+RUN=$(ls -td "$WORKSPACE/.agents-code-review/runs/code-review-"* 2>/dev/null | head -1)
+jq '.findings[] | {id, title, severity}' "$RUN/result.json"
+# optional: less "$RUN/report.md"
 ```
 
-Use **`GH_PAGER=cat`** (or **`PAGER=cat`**) if your pager would otherwise
-swallow output inside scripts or nested shells.
+**Agents:** Do **not** run **`agents code-review post`** until the operator has
+been shown the **full findings list** (at minimum every **`id`** and
+**`title`**). Truncated chat summaries are fine during work, not as the gate
+before **`post`**.
 
-**Agents following this skill:** Do **not** call **`inbox submit`** until the
-operator has been offered this **full-text** draft output (and, when helpful,
-the PR description). Truncated summaries are fine for _chat_, not as the last
-step before submit.
+**Posting notes:**
+
+- There is no **`post --dry-run`**; approval is based on reading artifacts.
+- **`post`** may prompt for stale PR head, local branch ahead of PR, or
+  replacing an existing pending review—use **`--no-confirm`** only when the
+  operator intends non-interactive publish (e.g. CI).
+- **`--review-summary`** controls summary formatting (**`triage`**,
+  **`impact`**, **`evidence`**; default **`impact`**).
 
 ## Optional: fzf picker with PR description preview
 
@@ -128,55 +156,46 @@ pick=$(
         --preview-window=right:65%:wrap
 )
 repo_pr=$(printf '%s' "$pick" | cut -f1)
-# repo_pr is owner/repo#<n> — split for draft/show:
 repo="${repo_pr%%#*}"
 pr="${repo_pr##*#}"
+
+# Harness on PR head (artifact anchor = your clone or cwd)
+agents code-review --pr "$pr" --workspace <anchor>
+
+# Human reviews findings (see "Review findings before post")
+RUN=$(ls -td <anchor>/.agents-code-review/runs/code-review-* 2>/dev/null | head -1)
+jq '.findings[] | {id, title, severity}' "$RUN/result.json"
+
+# After operator approval:
+agents code-review post --pr "$pr" --workspace <anchor>
 ```
 
-The **`--preview`** pane runs **`gh pr view`**, which includes the PR **title**
-and **body** (full description) in a scrollable preview box while you move the
-selection—set **`GH_PAGER=cat`** so the preview is non-interactive.
+Set **`GH_PAGER=cat`** in **`fzf --preview`** so the preview pane is
+non-interactive.
 
-If you omit **`fzf`**, run **`gh pr view <n> --repo owner/repo`** after choosing
-a row from the default **text** `list` output, or pass **`--pr`** explicitly
-once you know the number.
+Without **`fzf`**, pick from **`inbox list`** text output or pass **`--pr`**
+explicitly once you know the number.
 
 ## Scripts directory?
 
-**Today:** keep the **fzf** / **`jq`** snippets **in this playbook**, not in a
-companion **`scripts/`** tree under **`docs/skills/code-review/`**.
+Keep **fzf** / **`jq`** snippets **in this playbook**, not under
+**`docs/skills/code-review/scripts/`**.
 
-- **`agents skills install code-review`** copies **only** **`SKILL.md`** into
-  **`~/.agents/skills/code-review/`** (see the CLI implementation). Auxiliary
-  **`scripts/*.sh`** next to `SKILL.md` would **not** be installed, so most
-  users would never see them unless they symlink/copy the whole skill directory
-  by hand.
-- Shipping shell beside the skill without updating the installer splits the
-  “single portable file” story and invites stale forked copies when the JSON
-  shape or **`gh`** flags change.
-- **Preferred evolution:** add an **`agents code-review inbox …`** interactive
-  picker (or **`pick`**) in **`packages/cli`**, with **`--workspace`** /
-  **`--repos-root`** wired the same as **`list`** / **`draft`**, plus tests—then
-  this skill links to one supported command instead of a brittle bash bundle.
-- **If** you still want repo-local helpers for yourself, keep them outside this
-  skill tree (dotfiles, **`~/bin`**), or symlink an entire checkout directory
-  into your skills root **knowing** `skills install` will not refresh those
-  files.
+- **`agents skills install code-review`** copies **only** **`SKILL.md`** (see
+  **`agents skills --help`**).
+- **Preferred evolution:** an **`agents code-review inbox pick`** (or similar)
+  in **`packages/cli`** with **`--workspace`** / **`--repos-root`** wired like
+  **`list`**.
 
 ## Agents
 
-- Prefer **`agents code-review inbox`** for stable **`list --format json`**
-  output over ad-hoc `gh` search strings when automating.
-- Offer **`gh pr view`** (or **fzf `--preview`**) when picking among assignments
-  so the PR description is visible; emit the **full draft body** before
-  **`submit`** (see sections above).
-- Do **not** confuse this inbox flow with **full `agents code-review` harness
-  reviewer runs** or **`agents triage`** remediation queues. Here **`--pr`**
-  only selects which pull request to show, draft, or submit via **`gh`**. **Full
-  harness** **`agents code-review --pr <n>`** is different: it fetches the PR
-  head into a detached worktree under **`.agents-code-review/worktrees/`** so
-  the harness does not switch your main checkout (artifacts stay on
-  **`--workspace`**).
+| Do                                                                          | Don't                                             |
+| --------------------------------------------------------------------------- | ------------------------------------------------- |
+| After pick, run **`agents code-review --pr <n>`**                           | Stop after **`inbox list`** / **`show`** / fzf    |
+| Show full **`findings`** (ids + titles) before **`post`**                   | Call **`post`** immediately after the harness     |
+| Use **`inbox`** for **`list`** / **`show`** / pick only                     | Use **`inbox draft`** / **`inbox submit`**        |
+| Respect **`post`** confirm prompts unless operator wants **`--no-confirm`** | Invent adapter/model/dry-run overrides            |
+| Finish the review on GitHub after **`post`**                                | Treat **`post`** as final approve/request-changes |
 
 Install this playbook: **`agents skills install code-review`** (see
 **`agents skills --help`**).
