@@ -281,9 +281,10 @@ Defaults:
 
 Auth: uses the GitHub CLI (\`gh\`) with the same login/cwd behavior as other code-review GitHub commands.
 
-Draft files use schema https://aguil.dev/schemas/agents/code-review-inbox-draft/v1 (see \`draft\` output).
+Draft/submit (legacy manual prose): schema https://aguil.dev/schemas/agents/code-review-inbox-draft/v1.
+  Preferred flow: agents code-review --pr <n> then review result.json then agents code-review post (see docs/skills/code-review/SKILL.md).
 
-Inbox commands do not run harness reviewers and do not require \`--adapter\`, \`--model\`, or merged code-review harness JSON for listing or submitting from a draft file.
+Inbox commands do not run harness reviewers and do not require \`--adapter\`, \`--model\`, or merged code-review harness JSON.
 `;
 }
 

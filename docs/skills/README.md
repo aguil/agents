@@ -11,10 +11,10 @@ into **`~/.agents/skills/<id>/`**. Extra files under **`docs/skills/<id>/`**
 the whole directory yourself—keep portable snippets in **`SKILL.md`**, or add a
 first-class CLI command for interactive workflows.
 
-| Playbook                           | Directory                                                  |
-| ---------------------------------- | ---------------------------------------------------------- |
-| Self-review checks (draft → ready) | [self-review-checks/SKILL.md](self-review-checks/SKILL.md) |
-| Code review (PR assignment inbox)  | [code-review/SKILL.md](code-review/SKILL.md)               |
+| Playbook                                   | Directory                                                  |
+| ------------------------------------------ | ---------------------------------------------------------- |
+| Self-review checks (draft → ready)         | [self-review-checks/SKILL.md](self-review-checks/SKILL.md) |
+| Code review (assignments → harness → post) | [code-review/SKILL.md](code-review/SKILL.md)               |
 
 **Check CLI vs playbooks:** **`agents doctor`** (see
 **`agents doctor --help`**). **Install (supported path):** from a checkout or

@@ -11,7 +11,7 @@
     {
       "id": "code-review",
       "path": "code-review/SKILL.md",
-      "summary": "GitHub PR review inbox: list assignments (me + optional team), PR description preview when picking (e.g. fzf), full draft text before submit, then agents code-review inbox.",
+      "summary": "List PR review assignments, require explicit user pick of one or more PRs, harness and report.md review per PR, then agents code-review post per PR after approval.",
       "minAgentsVersion": "0.0.0",
       "tags": ["code-review", "github", "pr"]
     }
