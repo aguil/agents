@@ -11,20 +11,21 @@ description: >-
 Use this playbook when **you authored** open pull requests and need to address
 **human inline review threads** (scope A: unresolved `reviewThreads` only).
 
-**Not in scope:** harness self-review ([`self-review-checks`](../self-review-checks/SKILL.md)),
-reviewer assignments ([`code-review`](../code-review/SKILL.md)), issue comments,
-or CI (babysit / ci-triage skills).
+**Not in scope:** harness self-review
+([`self-review-checks`](../self-review-checks/SKILL.md)), reviewer assignments
+([`code-review`](../code-review/SKILL.md)), issue comments, or CI (babysit /
+ci-triage skills).
 
-**Agents following this skill:** Do **not** invent harness `--adapter` / `--model`
-settings. This workflow uses **`agents code-review inbox`**, **`agents
-pr-feedback`**, and **`agents triage`** only.
+**Agents following this skill:** Do **not** invent harness `--adapter` /
+`--model` settings. This workflow uses **`agents code-review inbox`**,
+**`agents pr-feedback`**, and **`agents triage`** only.
 
 ## Goal
 
 **Primary outcome:** every actionable unresolved review thread on selected PRs
 is fixed (one commit per item when code changes), replied to on GitHub, and the
-final **`agents triage --from pr-feedback`** ingest reports **`items.length ===
-0`** (or explicit disposition in your work report).
+final **`agents triage --from pr-feedback`** ingest reports
+**`items.length === 0`** (or explicit disposition in your work report).
 
 ## Pipeline
 
@@ -33,8 +34,8 @@ final **`agents triage --from pr-feedback`** ingest reports **`items.length ===
    [code-review PR selection](../code-review/SKILL.md#pr-selection-required-before-harness)).
 3. Per PR: **`agents pr-feedback collect --pr <n> [--repo owner/name]`** →
    `.agents-pr-feedback/<slug>/feedback.json`.
-4. **`agents triage --from pr-feedback --result <feedback.json> --workspace
-   <anchor>`** → `.agents-triage/pr-feedback-<hash>/triage-queue.json`.
+4. **`agents triage --from pr-feedback --result <feedback.json> --workspace <anchor>`**
+   → `.agents-triage/pr-feedback-<hash>/triage-queue.json`.
 5. For each **`items[]`** entry needing code: fix → **one commit** (cite
    `item.id` in message).
 6. Draft replies → **`pr-feedback-responses/v1`** JSON → operator approves full
@@ -44,7 +45,8 @@ final **`agents triage --from pr-feedback`** ingest reports **`items.length ===
 
 ## Reporting work done
 
-Mirror [self-review-checks reporting](../self-review-checks/SKILL.md#reporting-work-done):
+Mirror
+[self-review-checks reporting](../self-review-checks/SKILL.md#reporting-work-done):
 
 1. **Gates** — repo verification (README, `AGENTS.md`, etc.).
 2. **PR feedback** — `feedback.json` path; `items.length`; each `id` + `title`.
@@ -79,19 +81,21 @@ commit.
 ## Draft responses before submit (required)
 
 Before **`agents pr-feedback submit`**, show the operator every **`itemId`** and
-**`body`** from the responses draft. Truncated chat summaries are not sufficient.
+**`body`** from the responses draft. Truncated chat summaries are not
+sufficient.
 
 **`submit`** does not approve the PR or resolve threads by default.
 
 ## Repeat until done
 
 Round cap and no-churn rules from
-[self-review-checks](../self-review-checks/SKILL.md#stopping-endless-churn) apply
-to **`items`** fingerprints across collect/triage cycles.
+[self-review-checks](../self-review-checks/SKILL.md#stopping-endless-churn)
+apply to **`items`** fingerprints across collect/triage cycles.
 
 ## Related playbooks
 
-- **Self-review (harness):** [`self-review-checks`](../self-review-checks/SKILL.md)
+- **Self-review (harness):**
+  [`self-review-checks`](../self-review-checks/SKILL.md)
 - **Reviewer obligations:** [`code-review`](../code-review/SKILL.md)
 - **Merge-ready loop:** babysit skill (comments + CI)
 - **Actions red:** ci-triage skill
