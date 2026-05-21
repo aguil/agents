@@ -1,5 +1,10 @@
 # Maintainer: copy to distribution/npm/release-tag-message.local (gitignored).
 # Keep VERSION exactly once in the Release line below.
+#
+# This file drives (1) the annotated git tag and (2) the top of the GitHub Release
+# page after CI runs (see scripts/create-github-release-from-tag.sh). Longer prose
+# is fine here; do not commit per-version notes to the repo. CI appends generated
+# PR bullets after a --- separator when a previous v*.*.* tag exists.
 
 Release @aguil/agents VERSION: One-line summary of this tag (replace this sentence).
 

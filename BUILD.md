@@ -123,10 +123,12 @@ prep, **jj** bookmark + tag push, and post-publish verification).
 
 ### Annotated release tags
 
-Publishing on tag runs **GitHub Actions only**
-([`.github/workflows/release.yml`](.github/workflows/release.yml)); this
-workflow does **not** create a GitHub Release. Annotation text is **not** stored
-in git: copy the committed
+Publishing on tag runs **GitHub Actions**
+([`.github/workflows/release.yml`](.github/workflows/release.yml)): npm publish,
+then a **GitHub Release** whose body starts with the annotated tag message and
+appends auto-generated PR notes since the previous **`v*.*.*`** tag (idempotent
+if the Release already exists). Annotation text is **not** stored in git: copy
+the committed
 [**`distribution/npm/release-tag-message.template.example`**](distribution/npm/release-tag-message.template.example)
 to **`distribution/npm/release-tag-message.local`** (gitignored), edit your
 release notes there, and keep the literal token **`VERSION`** exactly once
