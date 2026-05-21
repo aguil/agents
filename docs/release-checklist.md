@@ -6,8 +6,9 @@ trusted publishing setup, and tarball details live in [`BUILD.md`](../BUILD.md)
 
 A pushed **`v*.*.*`** tag triggers
 [`.github/workflows/release.yml`](../.github/workflows/release.yml). That
-workflow runs the same quality gates as below, builds, and publishes to npm. It
-does **not** create a GitHub Release page.
+workflow runs the same quality gates as below, builds, publishes to npm, then
+creates a **GitHub Release** from the tag annotation plus generated PR notes
+(see [Where release notes appear](#where-release-notes-appear)).
 
 ## Before you tag
 
@@ -187,19 +188,38 @@ explicitly unless you use **`release:tag --push`**.
       new version.
 - [ ] Smoke install (optional): `npm install -g @aguil/agents@<semver>` then
       `agents --help`.
+- [ ] GitHub **Releases** page exists for **`v<semver>`** (created by CI unless
+      it already existed).
+
+### Where release notes appear
+
+| Surface               | What users see                                                                                                                                                                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Git annotated tag** | Text from `release-tag-message.local` at tag time (`bun run release:tag`).                                                                                                                                                              |
+| **GitHub Releases**   | Same tag text, then **`---`**, then GitHub-generated PR notes since the previous **`v*.*.*`** tag ([`scripts/create-github-release-from-tag.sh`](../scripts/create-github-release-from-tag.sh)). Skipped if the Release already exists. |
+| **npm**               | `README.npm.md` + `package.json` `description` from the publish pack — not the tag message.                                                                                                                                             |
+
+Put everything you want on the GitHub Release **above the generated PR section**
+in `release-tag-message.local` (gitignored). Do not commit per-version release
+notes to this repository.
+
+If CI did not create a Release (e.g. publish ran before this automation
+existed), run `bash scripts/create-github-release-from-tag.sh` locally with
+`TAG_NAME` and `GITHUB_REPOSITORY` set, or
+`gh release create vX.Y.Z --verify-tag --notes-file …`.
 
 If publish fails, fix forward on **`main`**, cut a new patch tag — do not move
 an already-pushed **`v*.*.*`** tag.
 
 ## Quick reference
 
-| Step              | Command / artifact                                          |
-| ----------------- | ----------------------------------------------------------- |
-| Git/npm version   | tag **`vX.Y.Z`** (required); root `package.json` (optional) |
-| Local gates       | `lint`, `typecheck`, `pre-commit`, `test:ci`, `build`       |
-| Tarball dry run   | `bun run publish:npm:pack:test`                             |
-| Tag message       | `distribution/npm/release-tag-message.local`                |
-| Create / push tag | `bun run release:tag -- X.Y.Z [--push]`                     |
-| CI publish        | push **`vX.Y.Z`** → **`release.yml`**                       |
-| jj commits        | `jj sign`, then `jj git push --bookmark …`                  |
-| jj + wrong cwd    | `--git-cwd` or **`RELEASE_TAG_GIT_CWD`**                    |
+| Step              | Command / artifact                                           |
+| ----------------- | ------------------------------------------------------------ |
+| Git/npm version   | tag **`vX.Y.Z`** (required); root `package.json` (optional)  |
+| Local gates       | `lint`, `typecheck`, `pre-commit`, `test:ci`, `build`        |
+| Tarball dry run   | `bun run publish:npm:pack:test`                              |
+| Tag message       | `distribution/npm/release-tag-message.local`                 |
+| Create / push tag | `bun run release:tag -- X.Y.Z [--push]`                      |
+| CI publish        | push **`vX.Y.Z`** → **`release.yml`** (npm + GitHub Release) |
+| jj commits        | `jj sign`, then `jj git push --bookmark …`                   |
+| jj + wrong cwd    | `--git-cwd` or **`RELEASE_TAG_GIT_CWD`**                     |
