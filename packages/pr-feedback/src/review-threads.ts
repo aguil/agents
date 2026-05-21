@@ -6,7 +6,15 @@ import { runGhJson } from "@aguil/agents-github";
 import type { PrFeedbackItemV1 } from "./types";
 
 const THREAD_PAGE_CAP = 10;
+const COMMENT_PAGE_SIZE = 100;
+const COMMENT_PAGE_CAP = 10;
 const PRIVATE_FILE_MODE = 0o600;
+
+interface CommentPage {
+  readonly nodes: readonly ThreadCommentNode[];
+  readonly hasNextPage: boolean;
+  readonly endCursor?: string;
+}
 
 interface ThreadCommentNode {
   readonly body?: string;
@@ -158,7 +166,75 @@ async function runGhGraphqlInput<T>(
   }
 }
 
-/** One GraphQL round-trip for comment bodies on many unresolved threads. */
+async function fetchThreadCommentPage(
+  workspacePath: string,
+  threadId: string,
+  after?: string,
+): Promise<CommentPage> {
+  const query = [
+    "query($id:ID!,$after:String){",
+    "node(id:$id){",
+    "... on PullRequestReviewThread{",
+    `comments(first:${COMMENT_PAGE_SIZE},after:$after){`,
+    "pageInfo{hasNextPage endCursor}",
+    "nodes{body author{login} createdAt}",
+    "}",
+    "}",
+    "}",
+    "}",
+  ].join("");
+  const resp = await runGhGraphqlInput<{
+    readonly data?: {
+      readonly node?: {
+        readonly comments?: {
+          readonly pageInfo?: {
+            readonly hasNextPage?: boolean;
+            readonly endCursor?: string | null;
+          };
+          readonly nodes?: ReadonlyArray<ThreadCommentNode>;
+        };
+      };
+    };
+  }>(workspacePath, {
+    query,
+    variables: {
+      id: threadId,
+      ...(after !== undefined ? { after } : {}),
+    },
+  });
+  const block = resp?.data?.node?.comments;
+  const pageInfo = block?.pageInfo;
+  const endCursor = pageInfo?.endCursor ?? undefined;
+  return {
+    nodes: block?.nodes ?? [],
+    hasNextPage: pageInfo?.hasNextPage === true,
+    endCursor:
+      endCursor !== undefined && endCursor.length > 0 ? endCursor : undefined,
+  };
+}
+
+async function fetchAllThreadComments(
+  workspacePath: string,
+  threadId: string,
+  firstPage: CommentPage,
+): Promise<readonly ThreadCommentNode[]> {
+  const all = [...firstPage.nodes];
+  let after = firstPage.endCursor;
+  if (!firstPage.hasNextPage || after === undefined) {
+    return all;
+  }
+  for (let page = 0; page < COMMENT_PAGE_CAP; page++) {
+    const next = await fetchThreadCommentPage(workspacePath, threadId, after);
+    all.push(...next.nodes);
+    if (!next.hasNextPage || next.endCursor === undefined) {
+      break;
+    }
+    after = next.endCursor;
+  }
+  return all;
+}
+
+/** One GraphQL round-trip for the first comment page on many unresolved threads. */
 async function fetchThreadCommentsBatch(
   workspacePath: string,
   threadIds: readonly string[],
@@ -171,7 +247,10 @@ async function fetchThreadCommentsBatch(
     "query($ids:[ID!]!){",
     "nodes(ids:$ids){",
     "... on PullRequestReviewThread{",
-    "id comments(first:50){nodes{body author{login} createdAt}}",
+    `id comments(first:${COMMENT_PAGE_SIZE}){`,
+    "pageInfo{hasNextPage endCursor}",
+    "nodes{body author{login} createdAt}",
+    "}",
     "}",
     "}",
     "}",
@@ -181,6 +260,10 @@ async function fetchThreadCommentsBatch(
       readonly nodes?: ReadonlyArray<{
         readonly id?: string;
         readonly comments?: {
+          readonly pageInfo?: {
+            readonly hasNextPage?: boolean;
+            readonly endCursor?: string | null;
+          };
           readonly nodes?: ReadonlyArray<ThreadCommentNode>;
         };
       } | null>;
@@ -190,7 +273,19 @@ async function fetchThreadCommentsBatch(
     if (node?.id === undefined) {
       continue;
     }
-    out.set(node.id, node.comments?.nodes ?? []);
+    const block = node.comments;
+    const pageInfo = block?.pageInfo;
+    const endCursor = pageInfo?.endCursor ?? undefined;
+    const firstPage: CommentPage = {
+      nodes: block?.nodes ?? [],
+      hasNextPage: pageInfo?.hasNextPage === true,
+      endCursor:
+        endCursor !== undefined && endCursor.length > 0 ? endCursor : undefined,
+    };
+    out.set(
+      node.id,
+      await fetchAllThreadComments(workspacePath, node.id, firstPage),
+    );
   }
   return out;
 }
