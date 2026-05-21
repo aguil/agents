@@ -39,6 +39,9 @@ test("agents skills list exits 0 and prints self-review-checks", async () => {
 });
 
 test("agents --version prints root package version", async () => {
+  const rootPkg = JSON.parse(
+    await readFile(join(REPO_ROOT, "package.json"), "utf8"),
+  ) as { version?: string };
   const prev = console.log;
   let line = "";
   console.log = (...args: unknown[]) => {
@@ -47,7 +50,7 @@ test("agents --version prints root package version", async () => {
   try {
     const code = await agentsMain(["--version"]);
     expect(code).toBe(0);
-    expect(line).toMatch(/^\d+\.\d+\.\d+/u);
+    expect(line).toBe(rootPkg.version ?? "0.0.0");
   } finally {
     console.log = prev;
   }

@@ -30,6 +30,21 @@ export const AGENTS_PACK_ROOT = findDocsSkillsPackRoot();
 export const DOCS_SKILLS_ROOT = join(AGENTS_PACK_ROOT, "docs", "skills");
 export const SKILLS_MANIFEST_PATH = join(DOCS_SKILLS_ROOT, "skills.json");
 
+/** Semver from the pack root `package.json` (`@aguil/agents`, dev or npm install). */
+export function readAgentsMonorepoVersion(): string {
+  const rootPkg = join(AGENTS_PACK_ROOT, "package.json");
+  try {
+    const raw = readFileSync(rootPkg, "utf8");
+    const j = JSON.parse(raw) as { version?: string };
+    if (typeof j.version === "string" && j.version.length > 0) {
+      return j.version;
+    }
+  } catch {
+    // ignore missing or invalid package.json
+  }
+  return "0.0.0";
+}
+
 export type SkillManifestEntry = {
   readonly id: string;
   readonly path: string;

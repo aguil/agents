@@ -42,7 +42,10 @@ You can also invoke it from another repository:
 The repository keeps the workspace root `package.json` **private** while still
 supporting a **thin, publishable tarball** that only ships `dist/` +
 `README.npm.md` + `LICENSE`. The helper script copies the built bundle and
-merges metadata from `distribution/npm/cli-package.manifest.json`.
+merges metadata from `distribution/npm/cli-package.manifest.json`. Published
+semver comes from the **git tag** in CI, not from committed `package.json`
+fields; optionally bump root `version` for local `agents --version` — see
+[`docs/release-checklist.md`](docs/release-checklist.md#2-version-fields-in-git-optional-bookkeeping).
 
 ```bash
 bun run publish:npm:verify
@@ -111,6 +114,13 @@ You do **not** need a **`NPM_TOKEN`** secret for CI publishes once this is
 wired. Local/manual **`npm publish`** from your laptop still uses
 **`npm login`** or a granular token—not OIDC.
 
+### Pre-release checklist
+
+Before creating **`vX.Y.Z`**, walk through
+[`docs/release-checklist.md`](docs/release-checklist.md) (local gates aligned
+with **`AGENTS.md`** / **`.agents/rules/pre-commit-checks.md`**, tag message
+prep, **jj** bookmark + tag push, and post-publish verification).
+
 ### Annotated release tags
 
 Publishing on tag runs **GitHub Actions only**
@@ -151,7 +161,7 @@ message file stays repo-root–relative to the harness checkout (or use
 **`--message-file`**).
 
 If you use **jj** with colocated **git**, tags are normal git objects —
-**`release:tag`** runs **`git tag`** in the resolved working tree (and use your
-usual **`jj git`** flow to push **bookmarks**; semver tags are still pushed with
-**`git push origin vX.Y.Z`** unless you only use **`jj tag set`** and
-**`git push`** for the tag ref).
+**`release:tag`** runs **`git tag`** in the resolved working tree. Push
+**bookmarks** (signed commits) with **`jj git push`** first; semver tags still
+need **`git push origin vX.Y.Z`** (or **`release:tag --push`**). Step-by-step:
+[`docs/release-checklist.md`](docs/release-checklist.md#jujutsu-colocated-git).
