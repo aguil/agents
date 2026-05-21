@@ -1,8 +1,35 @@
-import { runGhJson } from "@aguil/agents-code-review-inbox";
 import type { FindingSeverity } from "@aguil/agents-core";
+import { runGhJson } from "@aguil/agents-github";
 import type { PrFeedbackItemV1 } from "./types";
 
 const THREAD_PAGE_CAP = 10;
+/** Max concurrent per-thread comment GraphQL fetches per list page. */
+const THREAD_COMMENT_FETCH_CONCURRENCY = 8;
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const cap =
+    concurrency > 0 ? Math.min(concurrency, items.length) : items.length;
+  if (cap === 0) {
+    return [];
+  }
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) {
+        return;
+      }
+      results[i] = await mapper(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: cap }, () => worker()));
+  return results;
+}
 
 interface ThreadCommentNode {
   readonly body?: string;
@@ -228,14 +255,18 @@ export async function collectUnresolvedReviewThreads(
     );
 
     const block = resp?.data?.repository?.pullRequest?.reviewThreads;
-    for (const thread of block?.nodes ?? []) {
-      if (thread.isResolved === true) {
-        continue;
-      }
-      const comments = await fetchThreadComments(
-        options.workspacePath,
-        thread.id,
-      );
+    const unresolved = (block?.nodes ?? []).filter(
+      (thread) => thread.isResolved !== true,
+    );
+    const threaded = await mapWithConcurrency(
+      unresolved,
+      THREAD_COMMENT_FETCH_CONCURRENCY,
+      async (thread) => ({
+        thread,
+        comments: await fetchThreadComments(options.workspacePath, thread.id),
+      }),
+    );
+    for (const { thread, comments } of threaded) {
       const humanComments = comments.filter((c) => {
         const login = c.author?.login ?? "";
         return (
