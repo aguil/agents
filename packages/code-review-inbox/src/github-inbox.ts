@@ -1,7 +1,7 @@
 import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runGhJson, runGhText } from "./gh-runner";
+import { runGhJson, runGhText } from "@aguil/agents-github";
 import {
   type AuthoredPull,
   CODE_REVIEW_INBOX_DRAFT_SCHEMA_ID,

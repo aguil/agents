@@ -1,4 +1,3 @@
-export { runGhJson, runGhText } from "./gh-runner";
 export {
   GitHubReviewInboxSource,
   parseReviewDraftV1,

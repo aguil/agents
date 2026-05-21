@@ -20,6 +20,7 @@
         "packages/code-review-inbox/src/index.ts"
       ],
       "@aguil/agents-execution": ["packages/execution/src/index.ts"],
+      "@aguil/agents-github": ["packages/github/src/index.ts"],
       "@aguil/agents-orchestration": ["packages/orchestration/src/index.ts"],
       "@aguil/agents-pr-feedback": ["packages/pr-feedback/src/index.ts"],
       "@aguil/agents-reporting": ["packages/reporting/src/index.ts"],

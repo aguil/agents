@@ -39,6 +39,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@aguil/agents-core": "workspace:*",
+        "@aguil/agents-github": "workspace:*",
       },
     },
     "packages/context": {
@@ -59,6 +60,13 @@
         "@aguil/agents-core": "workspace:*",
       },
     },
+    "packages/github": {
+      "name": "@aguil/agents-github",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-core": "workspace:*",
+      },
+    },
     "packages/orchestration": {
       "name": "@aguil/agents-orchestration",
       "version": "0.0.0",
@@ -72,8 +80,8 @@
       "name": "@aguil/agents-pr-feedback",
       "version": "0.0.0",
       "dependencies": {
-        "@aguil/agents-code-review-inbox": "workspace:*",
         "@aguil/agents-core": "workspace:*",
+        "@aguil/agents-github": "workspace:*",
       },
     },
     "packages/reporting": {
@@ -115,6 +123,8 @@
     "@aguil/agents-core": ["@aguil/agents-core@workspace:packages/core"],
 
     "@aguil/agents-execution": ["@aguil/agents-execution@workspace:packages/execution"],
+
+    "@aguil/agents-github": ["@aguil/agents-github@workspace:packages/github"],
 
     "@aguil/agents-orchestration": ["@aguil/agents-orchestration@workspace:packages/orchestration"],
 

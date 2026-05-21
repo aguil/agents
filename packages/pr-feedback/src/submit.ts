@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runGhJson } from "@aguil/agents-code-review-inbox";
+import { runGhJson } from "@aguil/agents-github";
 import type {
   PrFeedbackDocumentV1,
   PrFeedbackResponsesDocumentV1,

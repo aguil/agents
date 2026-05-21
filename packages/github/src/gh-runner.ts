@@ -16,15 +16,12 @@ function resolveWorkspaceCwd(workspacePath: string): string {
 
 async function resolveGitAwareCwd(workspacePath: string): Promise<string> {
   const cwd = resolveWorkspaceCwd(workspacePath);
-  // No module-level memoization: repeated resolveGitAwarePath per gh call is cheap vs subprocess + network,
-  // and avoids order-dependent test/cache behavior (see AGENTS.md determinism guidance).
   const resolved = await resolveGitAwarePath(cwd);
   return resolved.gitAwarePath;
 }
 
 /**
  * Runs `gh` with JSON stdout parsing and transient network retries.
- * Same behavior as the agents CLI `runGh` helper (kept local to avoid a CLI↔package cycle).
  */
 export async function runGhJson<T = unknown>(
   args: readonly string[],
