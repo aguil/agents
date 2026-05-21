@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 25
     # Trusted publishing (OIDC): https://docs.npmjs.com/trusted-publishers
     permissions:
-      contents: write
+      contents: read
       id-token: write
 
     steps:
@@ -51,6 +51,18 @@ jobs:
       - run: bun run scripts/prepare-npm-publish.ts -- --version "${{ steps.semver.outputs.version }}"
 
       - run: npm publish ./.npm-publish-pack --access public
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Create GitHub Release
         env:
