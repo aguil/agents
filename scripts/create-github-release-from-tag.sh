@@ -54,14 +54,19 @@ while IFS= read -r candidate; do
 done < <(git tag -l 'v*.*.*' --sort=-version:refname)
 
 if [[ -n "${PREV}" ]]; then
+  GENERATED_NOTES="$(mktemp)"
+  trap 'rm -f "${NOTES_FILE}" "${GENERATED_NOTES:-}"' EXIT
+  gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+    -f tag_name="${TAG_NAME}" \
+    -f target_commitish="${COMMIT}" \
+    -f previous_tag_name="${PREV}" \
+    --jq '.body' >"${GENERATED_NOTES}"
   {
     printf '\n\n---\n\n'
-    gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-      -f tag_name="${TAG_NAME}" \
-      -f target_commitish="${COMMIT}" \
-      -f previous_tag_name="${PREV}" \
-      --jq '.body'
-  } >>"${NOTES_FILE}" || true
+    cat "${GENERATED_NOTES}"
+  } >>"${NOTES_FILE}"
+  rm -f "${GENERATED_NOTES}"
+  trap 'rm -f "${NOTES_FILE}"' EXIT
 fi
 
 gh release create "${TAG_NAME}" \
