@@ -8,6 +8,10 @@ import {
   type PrFeedbackDocumentV1,
 } from "./types";
 
+/** Restrict local PR feedback artifacts to the owning user (umask still applies). */
+const PRIVATE_DIR_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
+
 export interface CollectPrFeedbackOptions {
   readonly workspacePath: string;
   readonly repository: string;
@@ -55,13 +59,12 @@ export async function collectPrFeedback(
           options.pullNumber,
         );
 
-  await mkdir(outputDir, { recursive: true });
+  await mkdir(outputDir, { recursive: true, mode: PRIVATE_DIR_MODE });
   const feedbackPath = join(outputDir, "feedback.json");
-  await writeFile(
-    feedbackPath,
-    `${JSON.stringify(document, null, 2)}\n`,
-    "utf8",
-  );
+  await writeFile(feedbackPath, `${JSON.stringify(document, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: PRIVATE_FILE_MODE,
+  });
 
   return { outputDir, document };
 }

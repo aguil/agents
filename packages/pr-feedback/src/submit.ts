@@ -78,7 +78,7 @@ export async function submitPrFeedbackReplies(
           query: mutation,
           variables: { threadId, body: reply.body },
         }),
-        "utf8",
+        { encoding: "utf8", mode: 0o600 },
       );
       await runGhJson(
         ["api", "graphql", "--input", inputPath],
