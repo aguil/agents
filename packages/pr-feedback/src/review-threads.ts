@@ -1,35 +1,12 @@
+import { rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FindingSeverity } from "@aguil/agents-core";
 import { runGhJson } from "@aguil/agents-github";
 import type { PrFeedbackItemV1 } from "./types";
 
 const THREAD_PAGE_CAP = 10;
-/** Max concurrent per-thread comment GraphQL fetches per list page. */
-const THREAD_COMMENT_FETCH_CONCURRENCY = 8;
-
-async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const cap =
-    concurrency > 0 ? Math.min(concurrency, items.length) : items.length;
-  if (cap === 0) {
-    return [];
-  }
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (true) {
-      const i = next++;
-      if (i >= items.length) {
-        return;
-      }
-      results[i] = await mapper(items[i] as T);
-    }
-  };
-  await Promise.all(Array.from({ length: cap }, () => worker()));
-  return results;
-}
+const PRIVATE_FILE_MODE = 0o600;
 
 interface ThreadCommentNode {
   readonly body?: string;
@@ -156,32 +133,66 @@ async function fetchLatestHumanReviewState(
   return undefined;
 }
 
-async function fetchThreadComments(
+async function runGhGraphqlInput<T>(
   workspacePath: string,
-  threadId: string,
-): Promise<readonly ThreadCommentNode[]> {
+  body: {
+    readonly query: string;
+    readonly variables?: Record<string, unknown>;
+  },
+): Promise<T | undefined> {
+  const inputPath = join(
+    tmpdir(),
+    `agents-pr-feedback-graphql-${crypto.randomUUID()}.json`,
+  );
+  try {
+    await writeFile(inputPath, JSON.stringify(body), {
+      encoding: "utf8",
+      mode: PRIVATE_FILE_MODE,
+    });
+    return await runGhJson<T>(
+      ["api", "graphql", "--input", inputPath],
+      workspacePath,
+    );
+  } finally {
+    await rm(inputPath, { force: true });
+  }
+}
+
+/** One GraphQL round-trip for comment bodies on many unresolved threads. */
+async function fetchThreadCommentsBatch(
+  workspacePath: string,
+  threadIds: readonly string[],
+): Promise<Map<string, readonly ThreadCommentNode[]>> {
+  const out = new Map<string, readonly ThreadCommentNode[]>();
+  if (threadIds.length === 0) {
+    return out;
+  }
   const query = [
-    "query($id:ID!){",
-    "node(id:$id){",
+    "query($ids:[ID!]!){",
+    "nodes(ids:$ids){",
     "... on PullRequestReviewThread{",
-    "comments(first:50){nodes{body author{login} createdAt}}",
+    "id comments(first:50){nodes{body author{login} createdAt}}",
     "}",
     "}",
     "}",
   ].join("");
-  const resp = await runGhJson<{
+  const resp = await runGhGraphqlInput<{
     readonly data?: {
-      readonly node?: {
+      readonly nodes?: ReadonlyArray<{
+        readonly id?: string;
         readonly comments?: {
           readonly nodes?: ReadonlyArray<ThreadCommentNode>;
         };
-      };
+      } | null>;
     };
-  }>(
-    ["api", "graphql", "-f", `query=${query}`, "-f", `id=${threadId}`],
-    workspacePath,
-  );
-  return resp?.data?.node?.comments?.nodes ?? [];
+  }>(workspacePath, { query, variables: { ids: [...threadIds] } });
+  for (const node of resp?.data?.nodes ?? []) {
+    if (node?.id === undefined) {
+      continue;
+    }
+    out.set(node.id, node.comments?.nodes ?? []);
+  }
+  return out;
 }
 
 /**
@@ -258,15 +269,12 @@ export async function collectUnresolvedReviewThreads(
     const unresolved = (block?.nodes ?? []).filter(
       (thread) => thread.isResolved !== true,
     );
-    const threaded = await mapWithConcurrency(
-      unresolved,
-      THREAD_COMMENT_FETCH_CONCURRENCY,
-      async (thread) => ({
-        thread,
-        comments: await fetchThreadComments(options.workspacePath, thread.id),
-      }),
+    const commentsByThreadId = await fetchThreadCommentsBatch(
+      options.workspacePath,
+      unresolved.map((thread) => thread.id),
     );
-    for (const { thread, comments } of threaded) {
+    for (const thread of unresolved) {
+      const comments = commentsByThreadId.get(thread.id) ?? [];
       const humanComments = comments.filter((c) => {
         const login = c.author?.login ?? "";
         return (
