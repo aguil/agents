@@ -1,10 +1,12 @@
 import { resolve } from "node:path";
 import {
   buildEnvelopeFromCodeReviewResult,
+  buildEnvelopeFromPrFeedbackResult,
   defaultTriageQueueDir,
   isToonEncodeAvailable,
   loadToonEncode,
   resolveCodeReviewResultPath,
+  resolvePrFeedbackResultPath,
   writeTriageOutputs,
 } from "@aguil/agents-triage";
 import {
@@ -13,6 +15,12 @@ import {
 } from "./parse-triage-argv";
 
 const CODE_REVIEW_PRODUCER = "code-review";
+const PR_FEEDBACK_PRODUCER = "pr-feedback";
+
+const SUPPORTED_TRIAGE_PRODUCERS = new Set([
+  CODE_REVIEW_PRODUCER,
+  PR_FEEDBACK_PRODUCER,
+]);
 
 /** Full argv after script name (includes leading `triage`). */
 export async function runTriageCli(argv: readonly string[]): Promise<number> {
@@ -51,22 +59,30 @@ export async function runTriageCli(argv: readonly string[]): Promise<number> {
 
   const workspacePath = resolve(opt.workspace ?? process.cwd());
 
-  if (opt.from !== CODE_REVIEW_PRODUCER) {
+  if (!SUPPORTED_TRIAGE_PRODUCERS.has(opt.from)) {
     console.error(
-      `Unsupported --from '${opt.from}' (only '${CODE_REVIEW_PRODUCER}' in this release).`,
+      `Unsupported --from '${opt.from}' (supported: ${[...SUPPORTED_TRIAGE_PRODUCERS].join(", ")}).`,
     );
     return 1;
   }
 
   try {
-    const resultAbsolutePath = await resolveCodeReviewResultPath({
-      workspacePath,
-      resultPath: opt.result,
-    });
-    const envelope = await buildEnvelopeFromCodeReviewResult({
-      workspacePath,
-      resultAbsolutePath,
-    });
+    const envelope =
+      opt.from === PR_FEEDBACK_PRODUCER
+        ? await buildEnvelopeFromPrFeedbackResult({
+            workspacePath,
+            resultAbsolutePath: await resolvePrFeedbackResultPath({
+              workspacePath,
+              resultPath: opt.result,
+            }),
+          })
+        : await buildEnvelopeFromCodeReviewResult({
+            workspacePath,
+            resultAbsolutePath: await resolveCodeReviewResultPath({
+              workspacePath,
+              resultPath: opt.result,
+            }),
+          });
 
     const outputDirResolved =
       opt.outputDir !== undefined

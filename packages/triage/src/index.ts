@@ -10,6 +10,12 @@ export {
   resolveCodeReviewResultPath,
 } from "./ingest-code-review";
 export {
+  buildEnvelopeFromPrFeedbackResult,
+  canonicalKeyForPrFeedbackArtifact,
+  PR_FEEDBACK_FROM,
+  resolvePrFeedbackResultPath,
+} from "./ingest-pr-feedback";
+export {
   computeOutputSlug,
   fingerprint12,
 } from "./output-slug";
