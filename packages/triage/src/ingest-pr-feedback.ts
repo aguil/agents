@@ -88,7 +88,11 @@ export async function buildEnvelopeFromPrFeedbackResult(options: {
       "PR feedback path moved relative to workspace anchor before read.",
     );
   }
-  const raw = await readUtf8FileNoFollow(reResolved);
+  const reResolvedAgain = await realpath(anchored);
+  if (reResolvedAgain !== reResolved) {
+    throw new Error("PR feedback path moved immediately before read.");
+  }
+  const raw = await readUtf8FileNoFollow(reResolvedAgain);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
