@@ -3,6 +3,7 @@ export {
   collectPrFeedback,
   defaultFeedbackOutputDir,
 } from "./collect";
+export { parsePrFeedbackV1 } from "./feedback";
 export { parsePrFeedbackResponsesV1 } from "./responses";
 export { collectUnresolvedReviewThreads } from "./review-threads";
 export {

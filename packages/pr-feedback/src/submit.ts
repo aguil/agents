@@ -2,6 +2,7 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGhJson } from "@aguil/agents-github";
+import { parsePrFeedbackV1 } from "./feedback";
 import type {
   PrFeedbackDocumentV1,
   PrFeedbackResponsesDocumentV1,
@@ -97,15 +98,5 @@ export async function loadFeedbackDocument(
   path: string,
 ): Promise<PrFeedbackDocumentV1> {
   const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
-  if (typeof raw !== "object" || raw === null) {
-    throw new Error("feedback.json must be an object.");
-  }
-  const o = raw as Record<string, unknown>;
-  if (o.schemaId !== "https://aguil.dev/schemas/agents/pr-feedback/v1") {
-    throw new Error("Invalid feedback.json schemaId.");
-  }
-  if (!Array.isArray(o.items)) {
-    throw new Error("Invalid feedback.json items.");
-  }
-  return raw as PrFeedbackDocumentV1;
+  return parsePrFeedbackV1(raw);
 }
