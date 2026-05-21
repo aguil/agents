@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs";
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   CODE_REVIEW_ROLE_IDS,
@@ -37,6 +35,7 @@ import {
   peelCodeReviewSubcommand,
   resolveEffectivePostOnly,
 } from "./parse-code-review-argv";
+import { readAgentsMonorepoVersion } from "./skills-pack";
 import {
   renderTriageHelp,
   resolveTriageHelp,
@@ -3098,21 +3097,6 @@ function extractRightSideHunkPositions(
     }
   }
   return positions;
-}
-
-function readAgentsMonorepoVersion(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const rootPkg = join(here, "..", "..", "package.json");
-  try {
-    const raw = readFileSync(rootPkg, "utf8");
-    const j = JSON.parse(raw) as { version?: string };
-    if (typeof j.version === "string" && j.version.length > 0) {
-      return j.version;
-    }
-  } catch {
-    // ignore missing or invalid package.json
-  }
-  return "0.0.0";
 }
 
 if (import.meta.main) {
