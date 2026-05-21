@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGhJson, runGhText } from "./gh-runner";
 import {
+  type AuthoredPull,
   CODE_REVIEW_INBOX_DRAFT_SCHEMA_ID,
   type ReviewAssignment,
   type ReviewAssignmentKind,
   type ReviewDraftV1,
+  type ReviewInboxListMineOptions,
   type ReviewInboxListOptions,
   type ReviewInboxSource,
   type ReviewSubmitEvent,
@@ -195,6 +197,24 @@ export class GitHubReviewInboxSource implements ReviewInboxSource {
     });
     const teamResults = teamSlices.flat();
     return dedupeByRepoNumber([...direct, ...teamResults]);
+  }
+
+  async listAuthoredOpen(
+    options: ReviewInboxListMineOptions,
+  ): Promise<readonly AuthoredPull[]> {
+    const rows = await searchReviewRequested(
+      options.workspacePath,
+      "is:pr is:open author:@me",
+      "direct",
+    );
+    return rows.map((row) => ({
+      id: `${row.repository}#${row.pullNumber}`,
+      url: row.url,
+      repository: row.repository,
+      pullNumber: row.pullNumber,
+      title: row.title,
+      updatedAt: row.updatedAt,
+    }));
   }
 
   async submitReview(input: {
