@@ -17,7 +17,10 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
 - Human **PR review assignment** workflows (GitHub first) live in
   [`packages/code-review-inbox`](packages/code-review-inbox) and are exposed as
   **`agents code-review inbox`** (separate from harness runs and
-  `agents triage`).
+  `agents triage`). **`inbox list`** (and **`list --include-team`**) are
+  reviewer assignments; **`inbox list-mine`** lists open PRs you **authored**
+  for the [`pr-feedback-response`](docs/skills/pr-feedback-response/SKILL.md)
+  playbook only.
 - Prefer deterministic code for lifecycle, logging, scratchpads, validation
   gates, and reporting; reserve LLM calls for review reasoning.
 - Conventional commits: use `!` after the scope in the title when the change is

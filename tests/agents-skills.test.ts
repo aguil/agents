@@ -31,6 +31,7 @@ test("agents skills list exits 0 and prints self-review-checks", async () => {
     expect(code).toBe(0);
     expect(buf).toContain("self-review-checks");
     expect(buf).toContain('"id": "code-review"');
+    expect(buf).toContain('"id": "pr-feedback-response"');
     expect(buf).toContain("minAgentsVersion");
   } finally {
     console.log = prev;
@@ -63,6 +64,7 @@ test("agents triage --help documents --from", async () => {
     expect(code).toBe(0);
     expect(help).toContain("--from");
     expect(help).toContain("code-review");
+    expect(help).toContain("pr-feedback");
   } finally {
     console.log = prev;
   }
@@ -80,6 +82,7 @@ test("agents doctor exits 0 in this monorepo", async () => {
     const code = await agentsMain(["doctor"]);
     expect(code).toBe(0);
     expect(out).toContain("self-review-checks");
+    expect(out).toContain("pr-feedback-response");
   } finally {
     console.log = prevLog;
     console.error = prevErr;
@@ -96,6 +99,7 @@ test("agents skills install --dry-run without id installs all manifest skills", 
     const code = await agentsMain(["skills", "install", "--dry-run"]);
     expect(code).toBe(0);
     expect(buf).toContain("# Skill: self-review-checks");
+    expect(buf).toContain("# Skill: pr-feedback-response");
     expect(buf).toContain("(dry-run: no files written)");
   } finally {
     console.log = prev;

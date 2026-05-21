@@ -179,6 +179,7 @@ Getting help (context-specific option lists):
   agents code-review post --help           Publish from stored result.json
 
   agents triage --help                     Normalize triage queues from producer output
+  agents pr-feedback --help                Collect PR review threads / submit replies (author)
 
   agents doctor --help                     Check agents semver vs bundled docs/skills playbooks
   agents skills --help                     List or install Agent Skills playbooks (docs/skills/)
@@ -269,6 +270,7 @@ Inbox: pull requests that request your review on GitHub (not automated harness f
 Commands:
 
   list [--format text|json] [--include-team] [--workspace <path>] [--repos-root <path>]
+  list-mine [--format text|json] [--workspace <path>] [--repos-root <path>]
   show --pr <n> [--repo owner/name] [--workspace <path>] [--repos-root <path>]
   draft --pr <n> [--repo owner/name] [--output <path>] [--workspace <path>] [--repos-root <path>]
   submit --draft <path> [--workspace <path>] [--repos-root <path>]
@@ -277,7 +279,8 @@ Defaults:
   --repo is inferred from \`gh repo view\` in the workspace when omitted.
   When --repo or the submit draft names owner/repo, clones are resolved under --repos-root
   (\`<root>/github.com/<owner>/<repo>\` then \`<root>/<owner>/<repo>\`; default ~/dev/repos).
-  list defaults to review requests for you; add --include-team to merge team-requested PRs.
+  list — PRs requesting your review (add --include-team for team-requested).
+  list-mine — open PRs you authored (pr-feedback-response playbook).
 
 Auth: uses the GitHub CLI (\`gh\`) with the same login/cwd behavior as other code-review GitHub commands.
 

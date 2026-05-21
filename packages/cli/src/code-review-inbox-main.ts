@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  CODE_REVIEW_INBOX_LIST_MINE_SCHEMA_ID,
+  CODE_REVIEW_INBOX_LIST_SCHEMA_ID,
   GitHubReviewInboxSource,
   parseReviewDraftV1,
   templateReviewDraftV1,
@@ -9,6 +11,7 @@ import { writeJsonFile } from "@aguil/agents-core";
 import { expandReposRoot, findClonePath } from "./code-review-workspace";
 
 const LIST = "list";
+const LIST_MINE = "list-mine";
 const SHOW = "show";
 const DRAFT = "draft";
 const SUBMIT = "submit";
@@ -20,8 +23,9 @@ Inbox lists pull requests requesting your review on GitHub (not harness findings
   Typical flow: list/show to pick a PR, then agents code-review --pr <n>, review result.json, then agents code-review post.
 
 Commands:
-  list    List review assignments (default: you; optional team-requested PRs)
-  show    Show one PR summary (JSON)
+  list        List review assignments (PRs requesting your review)
+  list-mine   List your open authored PRs (feedback-response playbook)
+  show        Show one PR summary (JSON)
   draft   Legacy: local draft JSON for manual gh pr review (see skill playbook for harness + post)
   submit  Legacy: post from draft file (one PR per invocation)
 
@@ -29,8 +33,10 @@ Global options:
   --workspace <path>   Repository workspace for gh (default: cwd)
   --repos-root <path>  Resolve clones for --repo / draft.repository (default ~/dev/repos; env AGENTS_CODE_REVIEW_REPOS_ROOT)
 
-list options:
+list / list-mine options:
   --format text|json   Output format (default: text)
+
+list options:
   --include-team       Include PRs with team review requests for your teams
 
 show options:
@@ -50,6 +56,7 @@ Paths for --draft / --output are resolved from the shell working directory; --wo
 Examples:
   agents code-review inbox list
   agents code-review inbox list --format json --include-team
+  agents code-review inbox list-mine --format json
   agents code-review inbox show --repo org/repo --pr 42
   agents code-review inbox draft --repo org/repo --pr 42 --output ./my-review.json
   agents code-review inbox submit --draft ./my-review.json
@@ -67,6 +74,11 @@ interface ParsedList extends InboxGlobal {
   readonly command: typeof LIST;
   readonly format: "text" | "json";
   readonly includeTeam: boolean;
+}
+
+interface ParsedListMine extends InboxGlobal {
+  readonly command: typeof LIST_MINE;
+  readonly format: "text" | "json";
 }
 
 interface ParsedShow extends InboxGlobal {
@@ -87,7 +99,12 @@ interface ParsedSubmit extends InboxGlobal {
   readonly draftPath: string;
 }
 
-type ParsedInbox = ParsedList | ParsedShow | ParsedDraft | ParsedSubmit;
+type ParsedInbox =
+  | ParsedList
+  | ParsedListMine
+  | ParsedShow
+  | ParsedDraft
+  | ParsedSubmit;
 
 function parsePr(s: string | undefined): number | undefined {
   if (s === undefined) return undefined;
@@ -221,6 +238,39 @@ function parseInboxSubcommand(
       throw new Error(`Unknown list option '${t}'.`);
     }
     return { command: LIST, workspace, format, includeTeam };
+  }
+
+  if (sub === LIST_MINE) {
+    let format: "text" | "json" = "text";
+    let j = 0;
+    while (j < tail.length) {
+      const t = tail[j];
+      if (t === "--format") {
+        const v = tail[j + 1];
+        if (v !== "text" && v !== "json") {
+          throw new Error("--format expects text or json.");
+        }
+        format = v;
+        j += 2;
+        continue;
+      }
+      if (t.startsWith("--format=")) {
+        const v = t.slice("--format=".length);
+        if (v !== "text" && v !== "json") {
+          throw new Error("--format expects text or json.");
+        }
+        format = v;
+        j += 1;
+        continue;
+      }
+      if (t === "--include-team") {
+        throw new Error(
+          "--include-team applies to 'list' (review assignments), not 'list-mine'.",
+        );
+      }
+      throw new Error(`Unknown list-mine option '${t}'.`);
+    }
+    return { command: LIST_MINE, workspace, format };
   }
 
   if (sub === SHOW) {
@@ -386,8 +436,7 @@ async function dispatchInbox(
       console.log(
         `${JSON.stringify(
           {
-            schemaId:
-              "https://aguil.dev/schemas/agents/code-review-inbox-list/v1",
+            schemaId: CODE_REVIEW_INBOX_LIST_SCHEMA_ID,
             schemaVersion: 1,
             generatedAt: new Date().toISOString(),
             assignments: items,
@@ -402,6 +451,33 @@ async function dispatchInbox(
           a.assignmentKind === "team" ? `team:${a.teamSlug ?? "?"}` : "me";
         console.log(
           `${a.repository}#${a.pullNumber}\t${tag}\t${a.title}\t${a.url}`,
+        );
+      }
+    }
+    return 0;
+  }
+
+  if (effective.command === LIST_MINE) {
+    const pulls = await source.listAuthoredOpen({
+      workspacePath: effective.workspace,
+    });
+    if (effective.format === "json") {
+      console.log(
+        `${JSON.stringify(
+          {
+            schemaId: CODE_REVIEW_INBOX_LIST_MINE_SCHEMA_ID,
+            schemaVersion: 1,
+            generatedAt: new Date().toISOString(),
+            pulls,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    } else {
+      for (const p of pulls) {
+        console.log(
+          `${p.repository}#${p.pullNumber}\tauthor\t${p.title}\t${p.url}`,
         );
       }
     }

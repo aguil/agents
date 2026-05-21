@@ -8,6 +8,7 @@ coverage/
 .review-agent/
 .agents-code-review/
 .agents-triage/
+.agents-pr-feedback/
 
 .env
 .env.*

@@ -125,7 +125,7 @@ export function parseTriageArgv(
     return {
       ok: false,
       error:
-        "--from <producer> is required (phase 1: only `code-review` is supported for --from).",
+        "--from <producer> is required (supported: code-review, pr-feedback).",
     };
   }
 

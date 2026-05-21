@@ -56,17 +56,17 @@ function buildTriageHelp(bad?: string): string {
 Read structured producer output and emit normalized triage queues under
 <workspace>/.agents-triage/<outputSlug>/ (outputSlug encodes --from + ingress fingerprint).
 
-Phase 1: only code-review ingest is wired; this command does not run reviewers —
-use agents code-review first.
+Producers: code-review (harness result.json), pr-feedback (feedback.json from agents pr-feedback collect).
+This command does not run reviewers or collect threads — produce upstream artifacts first.
 
 Required:
 
-  --from <producer>          Source (only: code-review)
+  --from <producer>          code-review | pr-feedback
 
 Optional:
 
   --workspace <dir>         Repo scope (default: cwd)
-  --result <path>           Explicit code-review result.json (default: newest under .agents-code-review/{dry-run,runs}; legacy .review-agent/ also scanned)
+  --result <path>           Ingress artifact: code-review result.json (default: newest under .agents-code-review/) or pr-feedback feedback.json (required for pr-feedback)
   --format json|toon|both   Output mode (default: both → JSON + TOON when @toon-format/toon is installed; otherwise JSON only with a warning)
   --output <dir>            Target directory (default: <workspace>/.agents-triage/<outputSlug>/)
   --stdout                  Print exactly one format (--format json|toon required)
@@ -80,6 +80,8 @@ Examples:
 
   agents code-review --workspace /repo
   agents triage --from code-review --workspace /repo
+  agents pr-feedback collect --pr 42 --repo org/repo --workspace /repo
+  agents triage --from pr-feedback --result /repo/.agents-pr-feedback/org-repo-42/feedback.json --workspace /repo
 
 This repository ignores .agents-triage/ queues via .gitignore so local artifacts stay untracked.
 
