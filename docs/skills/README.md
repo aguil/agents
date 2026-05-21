@@ -15,6 +15,7 @@ first-class CLI command for interactive workflows.
 | ------------------------------------------ | ---------------------------------------------------------- |
 | Self-review checks (draft → ready)         | [self-review-checks/SKILL.md](self-review-checks/SKILL.md) |
 | Code review (assignments → harness → post) | [code-review/SKILL.md](code-review/SKILL.md)               |
+| PR feedback response (author threads)      | [pr-feedback-response/SKILL.md](pr-feedback-response/SKILL.md) |
 
 **Check CLI vs playbooks:** **`agents doctor`** (see
 **`agents doctor --help`**). **Install (supported path):** from a checkout or
