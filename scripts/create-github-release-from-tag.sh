@@ -40,7 +40,19 @@ trap 'rm -f "${NOTES_FILE}"' EXIT
 
 git for-each-ref "refs/tags/${TAG_NAME}" --format='%(subject)%n%n%(body)' >"${NOTES_FILE}"
 
-PREV="$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || true)"
+# Previous semver release tag (workflow only pushes v*.*.*).
+PREV=""
+seen=false
+while IFS= read -r candidate; do
+  if [[ "${seen}" == true ]]; then
+    PREV="${candidate}"
+    break
+  fi
+  if [[ "${candidate}" == "${TAG_NAME}" ]]; then
+    seen=true
+  fi
+done < <(git tag -l 'v*.*.*' --sort=-version:refname)
+
 if [[ -n "${PREV}" ]]; then
   {
     printf '\n\n---\n\n'
