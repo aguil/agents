@@ -119,6 +119,11 @@ export async function main(
     return await runTriageCli(argv);
   }
 
+  if (argv[0] === "pr-feedback") {
+    const { runPrFeedbackCli } = await import("./pr-feedback-main");
+    return await runPrFeedbackCli(argv.slice(1));
+  }
+
   if (argv[0] === "code-review") {
     const peeled = peelCodeReviewSubcommand(argv.slice(1));
     if (!peeled.ok) {

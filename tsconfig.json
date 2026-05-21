@@ -21,6 +21,7 @@
       ],
       "@aguil/agents-execution": ["packages/execution/src/index.ts"],
       "@aguil/agents-orchestration": ["packages/orchestration/src/index.ts"],
+      "@aguil/agents-pr-feedback": ["packages/pr-feedback/src/index.ts"],
       "@aguil/agents-reporting": ["packages/reporting/src/index.ts"],
       "@aguil/agents-triage": ["packages/triage/src/index.ts"],
       "@aguil/agents-telemetry": ["packages/telemetry/src/index.ts"]
