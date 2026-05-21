@@ -36,7 +36,8 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
 - With **Jujutsu**, keep **`git.sign-on-push = true`** in jj config and use
   **`jj sign`** on any still-unsigned revisions before **`jj git push`** so
   published commits stay signed (details in the same `.agents` doc).
-- Store design notes and product requirements under `docs/`.
+- Store design notes and product requirements under `docs/`. Maintainer release
+  steps: [`docs/release-checklist.md`](docs/release-checklist.md).
 - Store portable Agent Skills playbooks under `docs/skills/`; verify semver with
   **`agents doctor`**, install with **`agents skills install`** (see
   `agents doctor --help` / `agents skills --help`).
