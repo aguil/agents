@@ -129,6 +129,34 @@ async function fetchLatestHumanReviewState(
   return undefined;
 }
 
+async function fetchThreadComments(
+  workspacePath: string,
+  threadId: string,
+): Promise<readonly ThreadCommentNode[]> {
+  const query = [
+    "query($id:ID!){",
+    "node(id:$id){",
+    "... on PullRequestReviewThread{",
+    "comments(first:50){nodes{body author{login} createdAt}}",
+    "}",
+    "}",
+    "}",
+  ].join("");
+  const resp = await runGhJson<{
+    readonly data?: {
+      readonly node?: {
+        readonly comments?: {
+          readonly nodes?: ReadonlyArray<ThreadCommentNode>;
+        };
+      };
+    };
+  }>(
+    ["api", "graphql", "-f", `query=${query}`, "-f", `id=${threadId}`],
+    workspacePath,
+  );
+  return resp?.data?.node?.comments?.nodes ?? [];
+}
+
 /**
  * Fetch unresolved pull request review threads (scope A).
  */
@@ -150,13 +178,13 @@ export async function collectUnresolvedReviewThreads(
   );
   const defaultSeverity = inferSeverity(reviewState);
 
-  const query = [
+  const listQuery = [
     "query($o:String!,$r:String!,$n:Int!,$after:String){",
     "repository(owner:$o,name:$r){",
     "pullRequest(number:$n){",
     "reviewThreads(first:100,after:$after){",
     "pageInfo{hasNextPage endCursor}",
-    "nodes{id isResolved path line comments(first:50){nodes{body author{login} createdAt}}}",
+    "nodes{id isResolved path line}",
     "}",
     "}",
     "}",
@@ -187,7 +215,7 @@ export async function collectUnresolvedReviewThreads(
         "api",
         "graphql",
         "-f",
-        `query=${query}`,
+        `query=${listQuery}`,
         "-f",
         `o=${owner}`,
         "-f",
@@ -204,7 +232,10 @@ export async function collectUnresolvedReviewThreads(
       if (thread.isResolved === true) {
         continue;
       }
-      const comments = thread.comments?.nodes ?? [];
+      const comments = await fetchThreadComments(
+        options.workspacePath,
+        thread.id,
+      );
       const humanComments = comments.filter((c) => {
         const login = c.author?.login ?? "";
         return (
