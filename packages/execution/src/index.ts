@@ -927,6 +927,26 @@ export function buildCursorCommand(
   return cmd;
 }
 
+export {
+  type AgentSessionClient,
+  FakeAgentSessionClient,
+  type FakeAgentSessionClientOptions,
+  SessionAgentAdapterClient,
+  type SessionAgentAdapterClientOptions,
+  type SessionContinueParams,
+  type SessionEvent,
+  type SessionEventType,
+  type SessionStartParams,
+  sessionEventToAgentEvent,
+} from "./agent-session-client";
+export {
+  type AppServerAdapterOptions,
+  AppServerAgentAdapter,
+  CodexAppServerAdapter,
+  type CodexAppServerAdapterOptions,
+  SessionAgentAdapter,
+  type SessionAgentAdapterOptions,
+} from "./session-agent-adapter";
 export function buildCursorPrompt(
   request: AgentRunRequest,
   requestPath: string,
