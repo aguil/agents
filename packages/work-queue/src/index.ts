@@ -27,6 +27,7 @@ export interface RunningEntry {
   readonly workspacePath: string;
   readonly startedAtMs: number;
   readonly attempt: number | null;
+  readonly workerKind: string;
 }
 
 export interface WorkQueueSnapshot {
@@ -57,6 +58,8 @@ export interface WorkQueueOrchestratorOptions {
     | { readonly ok: true; readonly prompt: string }
     | { readonly ok: false; readonly error: string };
   readonly now?: () => number;
+  /** Abort implementation dispatches running longer than this (ms). */
+  readonly implementationStallTimeoutMs?: number;
 }
 
 /** Poll-based scheduler (Symphony coordination layer; ADR 0003). */
@@ -143,7 +146,40 @@ export class WorkQueueOrchestrator {
     return all;
   }
 
+  private reconcileStalledWorkers(): void {
+    const stallMs = this.options.implementationStallTimeoutMs;
+    if (stallMs === undefined || stallMs <= 0) {
+      return;
+    }
+    const now = this.options.now?.() ?? Date.now();
+    for (const [id, entry] of this.running) {
+      if (entry.workerKind !== "implementation") {
+        continue;
+      }
+      if (now - entry.startedAtMs <= stallMs) {
+        continue;
+      }
+      console.warn(
+        JSON.stringify({
+          event: "implementation_worker_stalled",
+          work_item_id: id,
+          identifier: entry.item.identifier,
+          elapsed_ms: now - entry.startedAtMs,
+          stall_timeout_ms: stallMs,
+        }),
+      );
+      this.running.delete(id);
+      this.scheduleRetry(
+        entry.item,
+        (entry.attempt ?? 0) + 1,
+        "implementation worker exceeded stall timeout",
+        0,
+      );
+    }
+  }
+
   private async reconcile(): Promise<void> {
+    this.reconcileStalledWorkers();
     const ids = [...this.running.keys()];
     if (ids.length === 0) {
       return;
@@ -211,6 +247,10 @@ export class WorkQueueOrchestrator {
       workspacePath,
       startedAtMs: now,
       attempt,
+      workerKind: resolveWorkerKindForItem(
+        item,
+        this.options.definition.workers,
+      ),
     });
 
     try {
@@ -365,4 +405,22 @@ function sortCandidates(items: readonly WorkItem[]): WorkItem[] {
 function isTerminalState(state: string): boolean {
   const s = state.toLowerCase();
   return ["closed", "done", "cancelled", "canceled", "merged"].includes(s);
+}
+
+function resolveWorkerKindForItem(
+  item: WorkItem,
+  workers: Readonly<Record<string, string>>,
+): string {
+  const mapped = workers[item.kind];
+  if (mapped !== undefined) {
+    return mapped;
+  }
+  switch (item.kind) {
+    case "github_pr_review":
+      return "code_review";
+    case "github_pr_feedback":
+      return "pr_feedback";
+    default:
+      return "implementation";
+  }
 }

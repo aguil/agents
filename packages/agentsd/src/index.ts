@@ -64,6 +64,8 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
     definition: activeDefinition,
     feeds,
     hooks,
+    implementationStallTimeoutMs:
+      activeDefinition.implementation.stallTimeoutMs,
     worker: createWorkerRouter({
       definition: activeDefinition,
       hostWorkspacePath: hostWorkspace,
