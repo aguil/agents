@@ -15,6 +15,7 @@
     "paths": {
       "@aguil/agents-context": ["packages/context/src/index.ts"],
       "@aguil/agents-core": ["packages/core/src/index.ts"],
+      "@aguil/agents-workflow": ["packages/workflow/src/index.ts"],
       "@aguil/agents-code-review": ["harnesses/code-review/src/index.ts"],
       "@aguil/agents-code-review-inbox": [
         "packages/code-review-inbox/src/index.ts"
