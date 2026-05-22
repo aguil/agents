@@ -1,4 +1,3 @@
-import { createFakeCodeReviewAdapter } from "@aguil/agents-code-review";
 import type { AgentAdapter } from "@aguil/agents-execution";
 import type { WorkItem } from "@aguil/agents-tracker";
 import type { WorkQueueWorker } from "@aguil/agents-work-queue";
@@ -9,6 +8,7 @@ import {
   runImplementationSubprocess,
 } from "./implementation-runtime";
 import { runPrFeedbackWorker } from "./pr-feedback-worker";
+import { createWorkflowAgentAdapter } from "./workflow-adapter";
 
 export interface WorkerRouterOptions {
   readonly definition: WorkflowDefinition;
@@ -17,11 +17,14 @@ export interface WorkerRouterOptions {
 }
 
 export { readTriageQueueFile, runPrFeedbackFixes } from "./pr-feedback-fix";
+export { createWorkflowAgentAdapter } from "./workflow-adapter";
 
 export function createWorkerRouter(
   options: WorkerRouterOptions,
 ): WorkQueueWorker {
-  const adapter = options.adapter ?? createFakeCodeReviewAdapter();
+  const adapter =
+    options.adapter ??
+    createWorkflowAgentAdapter(options.definition.implementation);
   const workers = options.definition.workers;
 
   return async ({ item, workspacePath, prompt }) => {

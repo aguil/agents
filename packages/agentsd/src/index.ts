@@ -1,7 +1,10 @@
 import { resolve } from "node:path";
 import { createWorkFeeds, workItemTemplateVars } from "@aguil/agents-tracker";
 import { WorkQueueOrchestrator } from "@aguil/agents-work-queue";
-import { createWorkerRouter } from "@aguil/agents-workers";
+import {
+  createWorkerRouter,
+  createWorkflowAgentAdapter,
+} from "@aguil/agents-workers";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
 import {
   loadWorkflowFile,
@@ -69,6 +72,7 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
     worker: createWorkerRouter({
       definition: activeDefinition,
       hostWorkspacePath: hostWorkspace,
+      adapter: createWorkflowAgentAdapter(activeDefinition.implementation),
     }),
     renderPrompt: (item, attempt) => {
       const rendered = renderStrictTemplate(activeDefinition.promptTemplate, {

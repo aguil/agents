@@ -2,8 +2,27 @@ import { expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createFakeCodeReviewAdapter } from "@aguil/agents-code-review";
 import { TRIAGE_ENVELOPE_SCHEMA_ID } from "@aguil/agents-triage";
-import { readTriageQueueFile } from "@aguil/agents-workers";
+import {
+  createWorkflowAgentAdapter,
+  readTriageQueueFile,
+} from "@aguil/agents-workers";
+
+const FAKE_IMPL = {
+  mode: "subprocess" as const,
+  adapter: "fake" as const,
+  command: null,
+  protocol: null,
+  turnTimeoutMs: null,
+  stallTimeoutMs: 300_000,
+};
+
+test("createWorkflowAgentAdapter uses harness fake for fake adapter", () => {
+  const adapter = createWorkflowAgentAdapter(FAKE_IMPL);
+  const harnessFake = createFakeCodeReviewAdapter();
+  expect(adapter.constructor).toBe(harnessFake.constructor);
+});
 
 test("readTriageQueueFile reads valid triage-queue.json", async () => {
   const dir = join(tmpdir(), `triage-read-${Date.now()}`);
