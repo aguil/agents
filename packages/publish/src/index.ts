@@ -149,3 +149,15 @@ function notifyHint(resultPath: string | undefined, command: string): string {
   }
   return `run: ${command}`;
 }
+
+export { resolveAgentsCliArgv, runAgentsCli } from "./agents-cli";
+export {
+  fetchPullRequestHeadSha,
+  viewerHasPendingPullRequestReview,
+} from "./github-context";
+export {
+  countCodeReviewTriageItems,
+  countPrFeedbackTriageItems,
+  isCodeReviewDryRunResultPath,
+  writePrFeedbackTriageQueue,
+} from "./triage-count";

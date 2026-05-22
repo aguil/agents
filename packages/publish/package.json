@@ -8,6 +8,9 @@
   },
   "dependencies": {
     "@aguil/agents-core": "workspace:*",
+    "@aguil/agents-github": "workspace:*",
+    "@aguil/agents-pr-feedback": "workspace:*",
+    "@aguil/agents-triage": "workspace:*",
     "@aguil/agents-workflow": "workspace:*"
   }
 }
