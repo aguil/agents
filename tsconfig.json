@@ -15,7 +15,12 @@
     "paths": {
       "@aguil/agents-context": ["packages/context/src/index.ts"],
       "@aguil/agents-core": ["packages/core/src/index.ts"],
+      "@aguil/agents-publish": ["packages/publish/src/index.ts"],
+      "@aguil/agents-tracker": ["packages/tracker/src/index.ts"],
+      "@aguil/agents-work-queue": ["packages/work-queue/src/index.ts"],
+      "@aguil/agents-workers": ["packages/workers/src/index.ts"],
       "@aguil/agents-workflow": ["packages/workflow/src/index.ts"],
+      "@aguil/agents-workspace": ["packages/workspace/src/index.ts"],
       "@aguil/agents-code-review": ["harnesses/code-review/src/index.ts"],
       "@aguil/agents-code-review-inbox": [
         "packages/code-review-inbox/src/index.ts"

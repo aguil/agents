@@ -1,0 +1,18 @@
+{
+  "name": "@aguil/agents-workers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aguil/agents-code-review": "workspace:*",
+    "@aguil/agents-core": "workspace:*",
+    "@aguil/agents-execution": "workspace:*",
+    "@aguil/agents-pr-feedback": "workspace:*",
+    "@aguil/agents-publish": "workspace:*",
+    "@aguil/agents-tracker": "workspace:*",
+    "@aguil/agents-workflow": "workspace:*"
+  }
+}
