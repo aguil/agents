@@ -13,6 +13,7 @@
     "types": ["bun"],
     "baseUrl": ".",
     "paths": {
+      "@aguil/agents-agentsd": ["packages/agentsd/src/index.ts"],
       "@aguil/agents-context": ["packages/context/src/index.ts"],
       "@aguil/agents-core": ["packages/core/src/index.ts"],
       "@aguil/agents-publish": ["packages/publish/src/index.ts"],
