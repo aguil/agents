@@ -152,6 +152,11 @@ function notifyHint(resultPath: string | undefined, command: string): string {
 
 export { resolveAgentsCliArgv, runAgentsCli } from "./agents-cli";
 export {
+  type ExecuteCodeReviewPublishInput,
+  type ExecuteCodeReviewPublishResult,
+  executeCodeReviewPublish,
+} from "./execute-code-review";
+export {
   fetchPullRequestHeadSha,
   viewerHasPendingPullRequestReview,
 } from "./github-context";
