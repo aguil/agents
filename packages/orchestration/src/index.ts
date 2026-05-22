@@ -26,9 +26,13 @@ export interface HarnessDefinition {
   readonly defaultAllowedCommands?: readonly string[];
 }
 
-export interface Orchestrator {
+/** Fan-out harness roles for a single run (see ADR 0003). */
+export interface HarnessOrchestrator {
   run(request: HarnessRunRequest): Promise<HarnessRunResult>;
 }
+
+/** @deprecated Use {@link HarnessOrchestrator}. */
+export type Orchestrator = HarnessOrchestrator;
 
 export interface NativeBunOrchestratorOptions {
   readonly definition: HarnessDefinition;
@@ -38,7 +42,7 @@ export interface NativeBunOrchestratorOptions {
   readonly embeddedPrompts?: Readonly<Record<string, string>>;
 }
 
-export class NativeBunOrchestrator implements Orchestrator {
+export class NativeBunOrchestrator implements HarnessOrchestrator {
   constructor(private readonly options: NativeBunOrchestratorOptions) {}
 
   async run(request: HarnessRunRequest): Promise<HarnessRunResult> {
