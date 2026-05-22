@@ -1,0 +1,14 @@
+{
+  "name": "@aguil/agents-work-queue",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aguil/agents-tracker": "workspace:*",
+    "@aguil/agents-workflow": "workspace:*",
+    "@aguil/agents-workspace": "workspace:*"
+  }
+}
