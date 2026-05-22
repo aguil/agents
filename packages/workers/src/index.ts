@@ -16,6 +16,8 @@ export interface WorkerRouterOptions {
   readonly hostWorkspacePath: string;
 }
 
+export { readTriageQueueFile, runPrFeedbackFixes } from "./pr-feedback-fix";
+
 export function createWorkerRouter(
   options: WorkerRouterOptions,
 ): WorkQueueWorker {

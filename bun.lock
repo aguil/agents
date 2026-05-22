@@ -161,6 +161,7 @@
         "@aguil/agents-pr-feedback": "workspace:*",
         "@aguil/agents-publish": "workspace:*",
         "@aguil/agents-tracker": "workspace:*",
+        "@aguil/agents-triage": "workspace:*",
         "@aguil/agents-workflow": "workspace:*",
       },
     },
