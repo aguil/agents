@@ -10,6 +10,7 @@ import {
 import {
   evaluateCodeReviewPublish,
   evaluatePrFeedbackPublish,
+  isCodeReviewDryRunResultPath,
 } from "@aguil/agents-publish";
 import { FakeWorkFeed, type WorkItem } from "@aguil/agents-tracker";
 import { WorkQueueOrchestrator } from "@aguil/agents-work-queue";
@@ -253,6 +254,22 @@ test("FakeAgentSessionClient runs multi-turn loop", async () => {
   expect(events.filter((t) => t === "turn_completed").length).toBeGreaterThan(
     0,
   );
+});
+
+test("isCodeReviewDryRunResultPath detects dry-run roots", () => {
+  const ws = "/tmp/agents-ws";
+  expect(
+    isCodeReviewDryRunResultPath(
+      ws,
+      `${ws}/.agents-code-review/dry-run/run-1/result.json`,
+    ),
+  ).toBe(true);
+  expect(
+    isCodeReviewDryRunResultPath(
+      ws,
+      `${ws}/.agents-code-review/runs/run-1/result.json`,
+    ),
+  ).toBe(false);
 });
 
 test("evaluatePrFeedbackPublish requires responses for submit", () => {

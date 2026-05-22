@@ -1,22 +1,14 @@
-import { join } from "node:path";
-import {
-  createFakeCodeReviewAdapter,
-  runCodeReview,
-} from "@aguil/agents-code-review";
-import { agentsCodeReviewRunsRoot } from "@aguil/agents-core";
+import { createFakeCodeReviewAdapter } from "@aguil/agents-code-review";
 import type { AgentAdapter } from "@aguil/agents-execution";
-import { collectPrFeedback } from "@aguil/agents-pr-feedback";
-import {
-  evaluateCodeReviewPublish,
-  evaluatePrFeedbackPublish,
-} from "@aguil/agents-publish";
 import type { WorkItem } from "@aguil/agents-tracker";
 import type { WorkQueueWorker } from "@aguil/agents-work-queue";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
+import { runCodeReviewWorker } from "./code-review-worker";
 import {
   runImplementationAppServer,
   runImplementationSubprocess,
 } from "./implementation-runtime";
+import { runPrFeedbackWorker } from "./pr-feedback-worker";
 
 export interface WorkerRouterOptions {
   readonly definition: WorkflowDefinition;
@@ -91,106 +83,6 @@ function resolveWorkerKind(
   }
 }
 
-async function runCodeReviewWorker(input: {
-  readonly item: WorkItem;
-  readonly workspacePath: string;
-  readonly hostWorkspacePath: string;
-  readonly adapter: AgentAdapter;
-  readonly definition: WorkflowDefinition;
-  readonly prompt: string;
-}): Promise<{
-  readonly status: "succeeded" | "failed";
-  readonly error?: string;
-}> {
-  const repo = input.item.metadata.repository;
-  const prRaw = input.item.metadata.pull_number;
-  const prNumber =
-    prRaw !== undefined ? Number.parseInt(prRaw, 10) : Number.NaN;
-  if (repo === undefined || !Number.isFinite(prNumber)) {
-    return {
-      status: "failed",
-      error: "missing repository or pull_number metadata",
-    };
-  }
-
-  const scratchpadRoot = agentsCodeReviewRunsRoot(input.workspacePath);
-  const result = await runCodeReview({
-    workspacePath: input.hostWorkspacePath,
-    scratchpadRoot,
-    reviewPrNumber: prNumber,
-    adapter: input.adapter,
-    metadata: {
-      ...input.item.metadata,
-      agentsd_prompt: input.prompt.slice(0, 200),
-      work_item_id: input.item.id,
-    },
-  });
-
-  const publishDecision = evaluateCodeReviewPublish({
-    publish: input.definition.publish,
-    result,
-    resultPath: join(scratchpadRoot, result.runId, "result.json"),
-    triageItemCount: 0,
-    isDryRunPath: false,
-    prNumber,
-    reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
-  });
-
-  logPublishDecision(input.item, publishDecision);
-
-  if (result.status === "error") {
-    return { status: "failed", error: "code review harness error" };
-  }
-  return { status: "succeeded" };
-}
-
-async function runPrFeedbackWorker(input: {
-  readonly item: WorkItem;
-  readonly workspacePath: string;
-  readonly hostWorkspacePath: string;
-  readonly definition: WorkflowDefinition;
-}): Promise<{
-  readonly status: "succeeded" | "failed";
-  readonly error?: string;
-}> {
-  const repo = input.item.metadata.repository;
-  const prRaw = input.item.metadata.pull_number;
-  const prNumber =
-    prRaw !== undefined ? Number.parseInt(prRaw, 10) : Number.NaN;
-  if (repo === undefined || !Number.isFinite(prNumber)) {
-    return {
-      status: "failed",
-      error: "missing repository or pull_number metadata",
-    };
-  }
-
-  const { outputDir, document } = await collectPrFeedback({
-    workspacePath: input.hostWorkspacePath,
-    repository: repo,
-    pullNumber: prNumber,
-    outputDir: join(input.workspacePath, ".agents-pr-feedback"),
-  });
-
-  const publishDecision = evaluatePrFeedbackPublish({
-    publish: input.definition.publish,
-    triageItemCount: document.items.length,
-    responsesPath: undefined,
-  });
-
-  logPublishDecision(input.item, publishDecision);
-  console.log(
-    JSON.stringify({
-      event: "pr_feedback_collected",
-      work_item_id: input.item.id,
-      identifier: input.item.identifier,
-      output_dir: outputDir,
-      item_count: document.items.length,
-    }),
-  );
-
-  return { status: "succeeded" };
-}
-
 async function runImplementationWorker(input: {
   readonly item: WorkItem;
   readonly workspacePath: string;
@@ -231,26 +123,4 @@ async function runImplementationWorker(input: {
     impl,
     timeoutMs,
   });
-}
-
-function logPublishDecision(
-  item: WorkItem,
-  decision: {
-    readonly shouldPublish: boolean;
-    readonly mode: string;
-    readonly skipReason?: string;
-    readonly operatorHint?: string;
-  },
-): void {
-  console.log(
-    JSON.stringify({
-      event: "publish_decision",
-      work_item_id: item.id,
-      identifier: item.identifier,
-      should_publish: decision.shouldPublish,
-      mode: decision.mode,
-      publish_skipped_reason: decision.skipReason,
-      operator_hint: decision.operatorHint,
-    }),
-  );
 }

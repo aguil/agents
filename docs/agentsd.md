@@ -49,6 +49,16 @@ same adapter family as `agents code-review`.
 **App server:** multi-turn loop via `AgentSessionClient` (stub session driver
 until a full JSON-RPC client is added). Requires `agent.command`.
 
+### Publish execution (when enabled in `WORKFLOW.md`)
+
+| Lane        | `pending` / `submit` behavior                                                                                                                 |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Code review | Runs `agents code-review post` (non-interactive) when gates pass; set `AGENTS_CLI` if the CLI is not on `PATH` (e.g. `bun run agents`).       |
+| PR feedback | Writes triage queue from `feedback.json`; `submit` calls `submitPrFeedbackReplies` when `responses.json` exists beside the feedback artifact. |
+
+Implementation workers exceeding `agent.stall_timeout_ms` are released and
+retried on the next poll tick (best-effort; in-flight work may still complete).
+
 ## Environment
 
 | Variable                   | Effect                                                   |
