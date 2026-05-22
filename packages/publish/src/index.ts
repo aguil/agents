@@ -157,6 +157,11 @@ export {
   executeCodeReviewPublish,
 } from "./execute-code-review";
 export {
+  type ExecutePrFeedbackSubmitInput,
+  type ExecutePrFeedbackSubmitResult,
+  executePrFeedbackSubmit,
+} from "./execute-pr-feedback";
+export {
   fetchPullRequestHeadSha,
   viewerHasPendingPullRequestReview,
 } from "./github-context";
