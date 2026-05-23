@@ -124,7 +124,7 @@ export async function runPrFeedbackWorker(input: {
     }),
   );
 
-  if (submitResult.executed && submitResult.error !== undefined) {
+  if (submitResult.error !== undefined) {
     return { status: "failed", error: submitResult.error };
   }
   return { status: "succeeded" };

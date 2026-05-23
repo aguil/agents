@@ -14,6 +14,7 @@
     "@aguil/agents-publish": "workspace:*",
     "@aguil/agents-triage": "workspace:*",
     "@aguil/agents-tracker": "workspace:*",
+    "@aguil/agents-work-queue": "workspace:*",
     "@aguil/agents-workflow": "workspace:*"
   }
 }
