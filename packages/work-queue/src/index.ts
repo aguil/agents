@@ -322,18 +322,13 @@ export class WorkQueueOrchestrator {
       if (entry.dueAtMs > now) {
         continue;
       }
+      if (this.running.size >= this.options.definition.maxConcurrentAgents) {
+        continue;
+      }
       this.retryAttempts.delete(id);
       const item = await this.findCandidateById(id);
       if (item === undefined) {
         this.release(id, entry.identifier);
-        continue;
-      }
-      if (this.running.size >= this.options.definition.maxConcurrentAgents) {
-        this.scheduleRetry(
-          item,
-          entry.attempt,
-          "no available orchestrator slots",
-        );
         continue;
       }
       const rendered = this.options.renderPrompt(item, entry.attempt);
