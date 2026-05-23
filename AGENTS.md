@@ -7,8 +7,9 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
 - Keep agent execution behind adapter interfaces so OpenCode, Claude Code,
   Cursor CLI, pi.dev, and future agents can be swapped without changing harness
   logic.
-- Keep orchestration behind internal contracts so a framework such as Mastra can
-  be introduced later without rewriting harnesses.
+- Keep harness orchestration behind `HarnessOrchestrator`; poll-based scheduling
+  for `agentsd` uses `WorkQueueOrchestrator` (ADR 0003). Mastra remains
+  optional.
 - Code-review reviewer roles, triage-to-role scheduling, metadata field names,
   and review-coverage labels are defined in
   [`harnesses/code-review/src/review-contract.ts`](harnesses/code-review/src/review-contract.ts)

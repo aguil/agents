@@ -22,12 +22,24 @@
         "@aguil/agents-telemetry": "workspace:*",
       },
     },
+    "packages/agentsd": {
+      "name": "@aguil/agentsd",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-tracker": "workspace:*",
+        "@aguil/agents-work-queue": "workspace:*",
+        "@aguil/agents-workers": "workspace:*",
+        "@aguil/agents-workflow": "workspace:*",
+        "@aguil/agents-workspace": "workspace:*",
+      },
+    },
     "packages/cli": {
       "name": "@aguil/agents-cli",
       "version": "0.0.0",
       "dependencies": {
         "@aguil/agents-code-review": "workspace:*",
         "@aguil/agents-code-review-inbox": "workspace:*",
+        "@aguil/agents-code-review-post": "workspace:*",
         "@aguil/agents-core": "workspace:*",
         "@aguil/agents-pr-feedback": "workspace:*",
         "@aguil/agents-reporting": "workspace:*",
@@ -40,6 +52,16 @@
       "dependencies": {
         "@aguil/agents-core": "workspace:*",
         "@aguil/agents-github": "workspace:*",
+      },
+    },
+    "packages/code-review-post": {
+      "name": "@aguil/agents-code-review-post",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-code-review": "workspace:*",
+        "@aguil/agents-core": "workspace:*",
+        "@aguil/agents-reporting": "workspace:*",
+        "@aguil/agents-triage": "workspace:*",
       },
     },
     "packages/context": {
@@ -84,6 +106,18 @@
         "@aguil/agents-github": "workspace:*",
       },
     },
+    "packages/publish": {
+      "name": "@aguil/agents-publish",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-code-review-post": "workspace:*",
+        "@aguil/agents-core": "workspace:*",
+        "@aguil/agents-github": "workspace:*",
+        "@aguil/agents-pr-feedback": "workspace:*",
+        "@aguil/agents-triage": "workspace:*",
+        "@aguil/agents-workflow": "workspace:*",
+      },
+    },
     "packages/reporting": {
       "name": "@aguil/agents-reporting",
       "version": "0.0.0",
@@ -98,6 +132,16 @@
         "@aguil/agents-core": "workspace:*",
       },
     },
+    "packages/tracker": {
+      "name": "@aguil/agents-tracker",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-code-review-inbox": "workspace:*",
+        "@aguil/agents-github": "workspace:*",
+        "@aguil/agents-pr-feedback": "workspace:*",
+        "@aguil/agents-workflow": "workspace:*",
+      },
+    },
     "packages/triage": {
       "name": "@aguil/agents-triage",
       "version": "0.0.0",
@@ -110,6 +154,38 @@
         "@toon-format/toon": "^2.2.0",
       },
     },
+    "packages/work-queue": {
+      "name": "@aguil/agents-work-queue",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-tracker": "workspace:*",
+        "@aguil/agents-workflow": "workspace:*",
+        "@aguil/agents-workspace": "workspace:*",
+      },
+    },
+    "packages/workers": {
+      "name": "@aguil/agents-workers",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-code-review": "workspace:*",
+        "@aguil/agents-core": "workspace:*",
+        "@aguil/agents-execution": "workspace:*",
+        "@aguil/agents-pr-feedback": "workspace:*",
+        "@aguil/agents-publish": "workspace:*",
+        "@aguil/agents-tracker": "workspace:*",
+        "@aguil/agents-triage": "workspace:*",
+        "@aguil/agents-work-queue": "workspace:*",
+        "@aguil/agents-workflow": "workspace:*",
+      },
+    },
+    "packages/workflow": {
+      "name": "@aguil/agents-workflow",
+      "version": "0.0.0",
+    },
+    "packages/workspace": {
+      "name": "@aguil/agents-workspace",
+      "version": "0.0.0",
+    },
   },
   "packages": {
     "@aguil/agents-cli": ["@aguil/agents-cli@workspace:packages/cli"],
@@ -117,6 +193,8 @@
     "@aguil/agents-code-review": ["@aguil/agents-code-review@workspace:harnesses/code-review"],
 
     "@aguil/agents-code-review-inbox": ["@aguil/agents-code-review-inbox@workspace:packages/code-review-inbox"],
+
+    "@aguil/agents-code-review-post": ["@aguil/agents-code-review-post@workspace:packages/code-review-post"],
 
     "@aguil/agents-context": ["@aguil/agents-context@workspace:packages/context"],
 
@@ -130,11 +208,25 @@
 
     "@aguil/agents-pr-feedback": ["@aguil/agents-pr-feedback@workspace:packages/pr-feedback"],
 
+    "@aguil/agents-publish": ["@aguil/agents-publish@workspace:packages/publish"],
+
     "@aguil/agents-reporting": ["@aguil/agents-reporting@workspace:packages/reporting"],
 
     "@aguil/agents-telemetry": ["@aguil/agents-telemetry@workspace:packages/telemetry"],
 
+    "@aguil/agents-tracker": ["@aguil/agents-tracker@workspace:packages/tracker"],
+
     "@aguil/agents-triage": ["@aguil/agents-triage@workspace:packages/triage"],
+
+    "@aguil/agents-work-queue": ["@aguil/agents-work-queue@workspace:packages/work-queue"],
+
+    "@aguil/agents-workers": ["@aguil/agents-workers@workspace:packages/workers"],
+
+    "@aguil/agents-workflow": ["@aguil/agents-workflow@workspace:packages/workflow"],
+
+    "@aguil/agents-workspace": ["@aguil/agents-workspace@workspace:packages/workspace"],
+
+    "@aguil/agentsd": ["@aguil/agentsd@workspace:packages/agentsd"],
 
     "@biomejs/biome": ["@biomejs/biome@2.4.15", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.4.15", "@biomejs/cli-darwin-x64": "2.4.15", "@biomejs/cli-linux-arm64": "2.4.15", "@biomejs/cli-linux-arm64-musl": "2.4.15", "@biomejs/cli-linux-x64": "2.4.15", "@biomejs/cli-linux-x64-musl": "2.4.15", "@biomejs/cli-win32-arm64": "2.4.15", "@biomejs/cli-win32-x64": "2.4.15" }, "bin": { "biome": "bin/biome" } }, "sha512-j5VH3a/h/HXTKBM50MDMxRCzkeLv9S2XJcW2WgnZT1+xyisi+0bISrXR82gCX+8S9lvK0skEvHJRN+3Ktr2hlw=="],
 
