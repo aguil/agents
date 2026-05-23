@@ -6,6 +6,10 @@ import type { WorkItem } from "../work-item";
 export interface GitHubPrFeedbackFeedOptions {
   readonly workspacePath: string;
   readonly repository?: string;
+  /** Cap authored open PRs scanned per poll (default 20). */
+  readonly maxOpen?: number;
+  /** Max concurrent `collectUnresolvedReviewThreads` calls (default 3). */
+  readonly threadConcurrency?: number;
 }
 
 export class GitHubPrFeedbackFeed implements WorkFeedClient {
@@ -21,16 +25,24 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       this.options.repository === undefined
         ? pulls
         : pulls.filter((pull) => pull.repository === this.options.repository);
+    const limit = this.options.maxOpen ?? 20;
+    const limited = scoped.slice(0, limit);
+    const concurrency = Math.max(
+      1,
+      Math.min(this.options.threadConcurrency ?? 3, limited.length),
+    );
 
-    const withThreads = await Promise.all(
-      scoped.map(async (pull) => ({
+    const withThreads = await mapWithConcurrency(
+      limited,
+      concurrency,
+      async (pull) => ({
         pull,
         threads: await collectUnresolvedReviewThreads({
           workspacePath,
           repository: pull.repository,
           pullNumber: pull.pullNumber,
         }),
-      })),
+      }),
     );
 
     const items: WorkItem[] = [];
@@ -114,6 +126,31 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
   async fetchTerminal(): Promise<readonly WorkItem[]> {
     return [];
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      for (;;) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= items.length) {
+          return;
+        }
+        results[index] = await fn(items[index]);
+      }
+    }),
+  );
+  return results;
 }
 
 function parsePrFeedbackWorkItemId(

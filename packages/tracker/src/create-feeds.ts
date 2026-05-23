@@ -79,6 +79,10 @@ function createFeedClient(
         workspacePath: options.workspacePath,
         repository:
           typeof raw.repository === "string" ? raw.repository : undefined,
+        maxOpen:
+          typeof raw.max_open === "number"
+            ? Math.floor(raw.max_open)
+            : undefined,
       });
     case "mcp": {
       if (options.mcpInvoke === undefined) {
