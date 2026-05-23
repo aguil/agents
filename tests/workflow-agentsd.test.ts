@@ -173,6 +173,10 @@ test("sanitizeWorkspaceKey replaces unsafe characters", () => {
   expect(sanitizeWorkspaceKey("org/repo#1-review")).toBe("org_repo_1-review");
 });
 
+test("sanitizeWorkspaceKey rejects dot identifiers", () => {
+  expect(() => sanitizeWorkspaceKey(".")).toThrow(/workspace_key_unsafe/);
+});
+
 test("assertWorkspaceInsideRoot rejects escape", () => {
   expect(() => assertWorkspaceInsideRoot("/tmp/root", "/tmp/other")).toThrow();
 });

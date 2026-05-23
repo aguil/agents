@@ -19,7 +19,11 @@ export interface WorkspaceHooks {
 }
 
 export function sanitizeWorkspaceKey(identifier: string): string {
-  return identifier.replace(WORKSPACE_KEY_RE, "_");
+  const key = identifier.replace(WORKSPACE_KEY_RE, "_");
+  if (key.length === 0 || key === "." || key === "..") {
+    throw new Error(`workspace_key_unsafe: ${JSON.stringify(identifier)}`);
+  }
+  return key;
 }
 
 export function assertWorkspaceInsideRoot(
@@ -93,6 +97,11 @@ export async function removeIssueWorkspace(input: {
   const workspaceKey = sanitizeWorkspaceKey(input.identifier);
   const path = resolve(workspaceRoot, workspaceKey);
   assertWorkspaceInsideRoot(workspaceRoot, path);
+  if (path === workspaceRoot) {
+    throw new Error(
+      `workspace_remove_unsafe: identifier ${JSON.stringify(input.identifier)} resolves to workspace root`,
+    );
+  }
 
   if (input.hooks?.beforeRemove !== undefined) {
     await runWorkspaceHook(
