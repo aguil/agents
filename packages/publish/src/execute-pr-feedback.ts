@@ -51,7 +51,7 @@ export async function executePrFeedbackSubmit(
     return { decision, executed: true, postedCount: posted };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { decision, executed: false, error: message };
+    return { decision, executed: true, error: message };
   }
 }
 
