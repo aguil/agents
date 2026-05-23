@@ -107,12 +107,16 @@ export interface SessionAgentAdapterClientOptions
 export class SessionAgentAdapterClient implements AgentSessionClient {
   readonly protocol: string;
   private threadId: string | undefined;
+  private workspacePath = "";
+  private scratchpadPath = "";
 
   constructor(private readonly options: SessionAgentAdapterClientOptions) {
     this.protocol = options.protocol;
   }
 
   async *startSession(params: SessionStartParams): AsyncIterable<SessionEvent> {
+    this.workspacePath = params.workspacePath;
+    this.scratchpadPath = params.scratchpadPath;
     const adapter = new SessionAgentAdapter({
       ...this.options,
       threadId: `thread-${params.runId}`,
@@ -148,9 +152,9 @@ export class SessionAgentAdapterClient implements AgentSessionClient {
         runId: params.runId,
         roleId: "implementation",
         prompt: params.guidance,
-        workspacePath: "",
-        contextBundlePath: "",
-        scratchpadPath: "",
+        workspacePath: this.workspacePath,
+        contextBundlePath: this.scratchpadPath,
+        scratchpadPath: this.scratchpadPath,
         timeoutMs: 3_600_000,
         allowedCommands: [],
       }),
