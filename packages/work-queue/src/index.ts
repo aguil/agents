@@ -68,10 +68,30 @@ export class WorkQueueOrchestrator {
   private readonly claimed = new Set<string>();
   private readonly retryAttempts = new Map<string, RetryEntry>();
   private readonly completed = new Set<string>();
+  private pendingDispatches = 0;
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
 
   constructor(private readonly options: WorkQueueOrchestratorOptions) {}
+
+  private availableAgentSlots(): number {
+    return Math.max(
+      0,
+      this.options.definition.maxConcurrentAgents -
+        this.running.size -
+        this.pendingDispatches,
+    );
+  }
+
+  private reservePendingDispatch(): void {
+    this.pendingDispatches += 1;
+  }
+
+  private releasePendingDispatch(): void {
+    if (this.pendingDispatches > 0) {
+      this.pendingDispatches -= 1;
+    }
+  }
 
   snapshot(): WorkQueueSnapshot {
     return {
@@ -106,10 +126,7 @@ export class WorkQueueOrchestrator {
     await this.reconcile();
     const candidates = await this.fetchAllCandidates();
     const sorted = sortCandidates(candidates);
-    const slots = Math.max(
-      0,
-      this.options.definition.maxConcurrentAgents - this.running.size,
-    );
+    const slots = this.availableAgentSlots();
     const dispatchPromises: Promise<void>[] = [];
     let dispatched = 0;
     for (const item of sorted) {
@@ -125,6 +142,7 @@ export class WorkQueueOrchestrator {
       }
       this.claimed.add(item.id);
       dispatched += 1;
+      this.reservePendingDispatch();
       dispatchPromises.push(this.dispatch(item, rendered.prompt, null));
     }
     if (dispatchPromises.length > 0) {
@@ -245,12 +263,14 @@ export class WorkQueueOrchestrator {
         );
       }
     } catch (error) {
+      this.releasePendingDispatch();
       this.claimed.delete(item.id);
       const message = error instanceof Error ? error.message : String(error);
       this.scheduleRetry(item, 1, message);
       return;
     }
 
+    this.releasePendingDispatch();
     const startedAtMs = now;
     this.running.set(item.id, {
       item,
@@ -331,10 +351,7 @@ export class WorkQueueOrchestrator {
   private async processDueRetries(): Promise<void> {
     const now = this.options.now?.() ?? Date.now();
     const dispatchPromises: Promise<void>[] = [];
-    let slots = Math.max(
-      0,
-      this.options.definition.maxConcurrentAgents - this.running.size,
-    );
+    let slots = this.availableAgentSlots();
     for (const [id, entry] of this.retryAttempts) {
       if (entry.dueAtMs > now) {
         continue;
@@ -354,6 +371,7 @@ export class WorkQueueOrchestrator {
         continue;
       }
       slots -= 1;
+      this.reservePendingDispatch();
       dispatchPromises.push(
         this.dispatch(item, rendered.prompt, entry.attempt),
       );
