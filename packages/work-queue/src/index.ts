@@ -242,16 +242,24 @@ export class WorkQueueOrchestrator {
       return;
     }
 
+    const startedAtMs = now;
     this.running.set(item.id, {
       item,
       workspacePath,
-      startedAtMs: now,
+      startedAtMs,
       attempt,
       workerKind: resolveWorkerKindForItem(
         item,
         this.options.definition.workers,
       ),
     });
+
+    const clearRunningIfCurrent = (): void => {
+      const current = this.running.get(item.id);
+      if (current !== undefined && current.startedAtMs === startedAtMs) {
+        this.running.delete(item.id);
+      }
+    };
 
     try {
       const result = await this.options.worker({
@@ -260,7 +268,7 @@ export class WorkQueueOrchestrator {
         attempt,
         prompt,
       });
-      this.running.delete(item.id);
+      clearRunningIfCurrent();
       if (result.status === "succeeded") {
         this.completed.add(item.id);
         this.claimed.delete(item.id);
@@ -268,7 +276,7 @@ export class WorkQueueOrchestrator {
         this.scheduleRetry(item, (attempt ?? 0) + 1, result.error ?? "failed");
       }
     } catch (error) {
-      this.running.delete(item.id);
+      clearRunningIfCurrent();
       const message = error instanceof Error ? error.message : String(error);
       this.scheduleRetry(item, (attempt ?? 0) + 1, message);
     } finally {
