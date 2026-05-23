@@ -17,20 +17,24 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
   async fetchCandidates(): Promise<readonly WorkItem[]> {
     const workspacePath = this.options.workspacePath;
     const pulls = await this.inbox.listAuthoredOpen({ workspacePath });
-    const items: WorkItem[] = [];
+    const scoped =
+      this.options.repository === undefined
+        ? pulls
+        : pulls.filter((pull) => pull.repository === this.options.repository);
 
-    for (const pull of pulls) {
-      if (
-        this.options.repository !== undefined &&
-        pull.repository !== this.options.repository
-      ) {
-        continue;
-      }
-      const threads = await collectUnresolvedReviewThreads({
-        workspacePath,
-        repository: pull.repository,
-        pullNumber: pull.pullNumber,
-      });
+    const withThreads = await Promise.all(
+      scoped.map(async (pull) => ({
+        pull,
+        threads: await collectUnresolvedReviewThreads({
+          workspacePath,
+          repository: pull.repository,
+          pullNumber: pull.pullNumber,
+        }),
+      })),
+    );
+
+    const items: WorkItem[] = [];
+    for (const { pull, threads } of withThreads) {
       if (threads.length === 0) {
         continue;
       }
