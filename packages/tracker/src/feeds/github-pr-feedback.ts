@@ -63,12 +63,69 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
   }
 
   async fetchStates(ids: readonly string[]): Promise<readonly WorkItem[]> {
-    const all = await this.fetchCandidates();
-    const wanted = new Set(ids);
-    return all.filter((item) => wanted.has(item.id));
+    if (ids.length === 0) {
+      return [];
+    }
+    const workspacePath = this.options.workspacePath;
+    const items: WorkItem[] = [];
+    for (const id of ids) {
+      const parsed = parsePrFeedbackWorkItemId(id);
+      if (parsed === null) {
+        continue;
+      }
+      if (
+        this.options.repository !== undefined &&
+        parsed.repository !== this.options.repository
+      ) {
+        continue;
+      }
+      const threads = await collectUnresolvedReviewThreads({
+        workspacePath,
+        repository: parsed.repository,
+        pullNumber: parsed.pullNumber,
+      });
+      if (threads.length === 0) {
+        continue;
+      }
+      items.push({
+        id,
+        identifier: `${parsed.repository}#${parsed.pullNumber}-feedback`,
+        title: `${parsed.repository}#${parsed.pullNumber}`,
+        description: `${threads.length} unresolved review thread(s)`,
+        state: "feedback_pending",
+        kind: "github_pr_feedback",
+        priority: 2,
+        url: `https://github.com/${parsed.repository}/pull/${parsed.pullNumber}`,
+        labels: [],
+        blockedBy: [],
+        createdAt: null,
+        updatedAt: null,
+        branchName: null,
+        metadata: {
+          repository: parsed.repository,
+          pull_number: String(parsed.pullNumber),
+          unresolved_thread_count: String(threads.length),
+        },
+      });
+    }
+    return items;
   }
 
   async fetchTerminal(): Promise<readonly WorkItem[]> {
     return [];
   }
+}
+
+function parsePrFeedbackWorkItemId(
+  id: string,
+): { readonly repository: string; readonly pullNumber: number } | null {
+  const match = /^(.+)\/pull\/(\d+)\/feedback$/.exec(id);
+  if (match === null) {
+    return null;
+  }
+  const pullNumber = Number(match[2]);
+  if (!Number.isInteger(pullNumber) || pullNumber <= 0) {
+    return null;
+  }
+  return { repository: match[1], pullNumber };
 }
