@@ -128,7 +128,17 @@ export class WorkQueueOrchestrator {
       dispatched += 1;
       dispatchPromises.push(this.dispatch(item, rendered.prompt, null));
     }
-    await Promise.all(dispatchPromises);
+    if (dispatchPromises.length > 0) {
+      void Promise.all(dispatchPromises).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          JSON.stringify({
+            event: "work_queue_dispatch_batch_error",
+            error: message,
+          }),
+        );
+      });
+    }
     await this.processDueRetries();
   }
 

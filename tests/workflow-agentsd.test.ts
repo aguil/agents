@@ -164,6 +164,7 @@ Do work on {{ issue.identifier }}
   });
 
   await orchestrator.tick();
+  await new Promise((resolve) => setTimeout(resolve, 50));
   expect(ran).toBe(true);
   await rm(dir, { recursive: true, force: true });
 });
