@@ -104,7 +104,7 @@ function normalizeCommand(
   command: readonly string[] | string | undefined,
 ): readonly string[] {
   if (command === undefined) {
-    return ["codex", "app-server"];
+    return [];
   }
   if (typeof command === "string") {
     return command.split(/\s+/).filter((p) => p.length > 0);
