@@ -75,6 +75,34 @@ retried on the next poll tick (best-effort; in-flight work may still complete).
 - PR feedback auto-submit requires an operator-authored responses document.
 - Implementation workers follow configured runtime; subprocess adapters use the
   same CLI boundaries as the code-review harness.
+- PR feedback **fix** workers treat review-thread bodies as operational input;
+  untrusted-reviewer / allowlist policy is **not** enforced yet — see
+  [#36](https://github.com/aguil/agents/issues/36).
+
+## Known limitations (platform landed)
+
+PR [#33](https://github.com/aguil/agents/pull/33) lands the scheduler and
+workers; the items below are tracked for **shippable E2E**, not blockers for
+merging the platform PR.
+
+| Topic                                                                         | GitHub issue                                     |
+| ----------------------------------------------------------------------------- | ------------------------------------------------ |
+| PR feedback playbook + operator policy (ingest, allowlist, multi-round drain) | [#36](https://github.com/aguil/agents/issues/36) |
+| Work-item terminal semantics; stop post-success retry churn                   | [#37](https://github.com/aguil/agents/issues/37) |
+| `WORKFLOW.md` hot reload (orchestrator/router/publish); graceful shutdown     | [#38](https://github.com/aguil/agents/issues/38) |
+| Code-review worker parity (worktree, publish-with-findings)                   | [#39](https://github.com/aguil/agents/issues/39) |
+| Per-feed concurrency, JSONL observability, production runbook                 | [#40](https://github.com/aguil/agents/issues/40) |
+| Stall timeout: cancel or isolate in-flight implementation workers             | [#41](https://github.com/aguil/agents/issues/41) |
+| `codex:` alias vs ADR 0004 (`codex.protocol` field)                           | [#42](https://github.com/aguil/agents/issues/42) |
+| Real `app_server` JSON-RPC client                                             | [#34](https://github.com/aguil/agents/issues/34) |
+| MCP feed, `github_issues` dogfood, publish integration tests                  | [#35](https://github.com/aguil/agents/issues/35) |
+
+**Stall / reload behavior today:** `agent.stall_timeout_ms` releases a work item
+from the running map and may retry while the prior worker is still executing
+([#41](https://github.com/aguil/agents/issues/41)). Editing `WORKFLOW.md` on
+disk updates prompt templates via reload, but poll interval, workers, publish,
+and adapter settings require restart until
+[#38](https://github.com/aguil/agents/issues/38).
 
 ## One-shot CLI
 
