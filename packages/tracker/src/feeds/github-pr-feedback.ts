@@ -79,23 +79,49 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       return [];
     }
     const workspacePath = this.options.workspacePath;
+    const scoped = ids
+      .map((id) => ({ id, parsed: parsePrFeedbackWorkItemId(id) }))
+      .filter(
+        (
+          row,
+        ): row is {
+          readonly id: string;
+          readonly parsed: {
+            readonly repository: string;
+            readonly pullNumber: number;
+          };
+        } => {
+          if (row.parsed === null) {
+            return false;
+          }
+          if (
+            this.options.repository !== undefined &&
+            row.parsed.repository !== this.options.repository
+          ) {
+            return false;
+          }
+          return true;
+        },
+      );
+    const concurrency = Math.max(
+      1,
+      Math.min(this.options.threadConcurrency ?? 3, scoped.length),
+    );
+    const withThreads = await mapWithConcurrency(
+      scoped,
+      concurrency,
+      async ({ id, parsed }) => ({
+        id,
+        parsed,
+        threads: await collectUnresolvedReviewThreads({
+          workspacePath,
+          repository: parsed.repository,
+          pullNumber: parsed.pullNumber,
+        }),
+      }),
+    );
     const items: WorkItem[] = [];
-    for (const id of ids) {
-      const parsed = parsePrFeedbackWorkItemId(id);
-      if (parsed === null) {
-        continue;
-      }
-      if (
-        this.options.repository !== undefined &&
-        parsed.repository !== this.options.repository
-      ) {
-        continue;
-      }
-      const threads = await collectUnresolvedReviewThreads({
-        workspacePath,
-        repository: parsed.repository,
-        pullNumber: parsed.pullNumber,
-      });
+    for (const { id, parsed, threads } of withThreads) {
       if (threads.length === 0) {
         continue;
       }
