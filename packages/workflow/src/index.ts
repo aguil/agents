@@ -12,6 +12,7 @@ export {
   expandPathValue,
   resolveConfigString,
   resolveEnvVarReference,
+  resolveShellCommand,
 } from "./resolve-vars";
 export {
   renderStrictTemplate,

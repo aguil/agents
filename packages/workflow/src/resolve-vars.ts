@@ -60,3 +60,21 @@ export function resolveConfigString(
   }
   return expandPathValue(value, options);
 }
+
+/** Shell argv strings: expand `$VAR` only, not workflow-relative paths. */
+export function resolveShellCommand(
+  value: unknown,
+  options: { readonly env?: NodeJS.ProcessEnv } = {},
+): string | undefined {
+  if (typeof value !== "string" || value.length === 0) {
+    return undefined;
+  }
+  const envOnly = resolveEnvVarReference(value, options.env);
+  if (envOnly !== undefined) {
+    return envOnly;
+  }
+  if (value.startsWith("$")) {
+    return undefined;
+  }
+  return value.trim();
+}

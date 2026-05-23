@@ -1,4 +1,4 @@
-import { resolveConfigString } from "./resolve-vars";
+import { resolveShellCommand } from "./resolve-vars";
 import type {
   AgentRuntimeMode,
   ImplementationExecutionConfig,
@@ -64,9 +64,6 @@ export function applyCodexAlias(
   ) {
     out.stall_timeout_ms = codex.stall_timeout_ms;
   }
-  if (out.protocol === undefined && typeof codex.protocol === "string") {
-    out.protocol = codex.protocol;
-  }
   return out;
 }
 
@@ -90,10 +87,7 @@ export function parseImplementationExecution(input: {
   );
 
   const command =
-    resolveConfigString(agent.command, {
-      workflowDir: input.workflowDir,
-      env: input.env,
-    }) ?? null;
+    resolveShellCommand(agent.command, { env: input.env }) ?? null;
 
   const protocol =
     typeof agent.protocol === "string" && agent.protocol.length > 0

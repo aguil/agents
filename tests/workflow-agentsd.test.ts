@@ -17,6 +17,7 @@ import { WorkQueueOrchestrator } from "@aguil/agents-work-queue";
 import {
   applyCodexAlias,
   loadWorkflowFile,
+  parseImplementationExecution,
   renderStrictTemplate,
   validateImplementationRuntime,
   validateWorkflowDefinition,
@@ -188,6 +189,15 @@ test("codex front matter aliases into agent runtime", () => {
   );
   expect(agent.command).toBe("codex app-server");
   expect(agent.runtime).toBe("app_server");
+});
+
+test("parseImplementationExecution preserves shell command argv", () => {
+  const parsed = parseImplementationExecution({
+    config: { agent: { command: "codex app-server", runtime: "app_server" } },
+    workflowDir: "/tmp/workflow",
+    env: {},
+  });
+  expect(parsed.command).toBe("codex app-server");
 });
 
 test("validateImplementationRuntime requires command for app_server", () => {
