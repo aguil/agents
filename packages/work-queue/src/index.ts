@@ -263,7 +263,7 @@ export class WorkQueueOrchestrator {
       this.running.delete(item.id);
       if (result.status === "succeeded") {
         this.completed.add(item.id);
-        this.scheduleContinuationRetry(item);
+        this.claimed.delete(item.id);
       } else {
         this.scheduleRetry(item, (attempt ?? 0) + 1, result.error ?? "failed");
       }
@@ -282,10 +282,6 @@ export class WorkQueueOrchestrator {
         );
       }
     }
-  }
-
-  private scheduleContinuationRetry(item: WorkItem): void {
-    this.scheduleRetry(item, 1, null, 1000);
   }
 
   private scheduleRetry(
@@ -318,11 +314,15 @@ export class WorkQueueOrchestrator {
   private async processDueRetries(): Promise<void> {
     const now = this.options.now?.() ?? Date.now();
     const dispatchPromises: Promise<void>[] = [];
+    let slots = Math.max(
+      0,
+      this.options.definition.maxConcurrentAgents - this.running.size,
+    );
     for (const [id, entry] of this.retryAttempts) {
       if (entry.dueAtMs > now) {
         continue;
       }
-      if (this.running.size >= this.options.definition.maxConcurrentAgents) {
+      if (this.completed.has(id) || slots <= 0) {
         continue;
       }
       this.retryAttempts.delete(id);
@@ -336,6 +336,7 @@ export class WorkQueueOrchestrator {
         this.release(id, entry.identifier);
         continue;
       }
+      slots -= 1;
       dispatchPromises.push(
         this.dispatch(item, rendered.prompt, entry.attempt),
       );
