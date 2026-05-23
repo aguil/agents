@@ -82,8 +82,7 @@ export class WorkQueueOrchestrator {
   }
 
   start(): void {
-    void this.tick();
-    this.scheduleNext();
+    void this.tick().finally(() => this.scheduleNext());
   }
 
   stop(): void {
