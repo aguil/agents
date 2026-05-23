@@ -1,5 +1,7 @@
-import type { PublishCodeReviewConfig } from "@aguil/agents-workflow";
-import { runAgentsCli } from "./agents-cli";
+import {
+  type PendingReviewPostResult,
+  replacePendingPullRequestReview,
+} from "@aguil/agents-code-review-post";
 import {
   fetchPullRequestHeadSha,
   viewerHasPendingPullRequestReview,
@@ -25,8 +27,7 @@ export interface ExecuteCodeReviewPublishInput {
 export interface ExecuteCodeReviewPublishResult {
   readonly decision: PublishDecision;
   readonly executed: boolean;
-  readonly cliExitCode?: number;
-  readonly cliStderr?: string;
+  readonly postError?: string;
   readonly reviewUrl?: string;
 }
 
@@ -64,50 +65,35 @@ export async function executeCodeReviewPublish(
   }
 
   const cfg = input.publish.codeReview;
-  const cliArgs = buildCodeReviewPostArgs({
-    resultPath: input.resultPath,
-    prNumber: input.prNumber,
-    cfg,
-  });
-  const cli = await runAgentsCli(cliArgs, input.workspacePath);
-  const reviewUrl = extractReviewUrl(cli.stdout);
+  let posted: PendingReviewPostResult;
+  try {
+    posted = await replacePendingPullRequestReview({
+      findings: input.result.findings,
+      prNumber: input.prNumber,
+      reviewSummaryStyle: cfg.reviewSummary,
+      reviewedHeadSha: input.reviewedHeadSha,
+      noConfirm: true,
+      replacePendingReview: cfg.replacePending,
+      workspacePath: input.workspacePath,
+      runMetadata: input.result.metadata,
+      runId: input.result.runId,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { decision, executed: true, postError: message };
+  }
+
+  if (posted.cancelled === true) {
+    return {
+      decision,
+      executed: true,
+      postError: "pending review publish cancelled",
+    };
+  }
+
   return {
     decision,
     executed: true,
-    cliExitCode: cli.exitCode,
-    cliStderr: cli.stderr.trim().length > 0 ? cli.stderr : undefined,
-    reviewUrl,
+    reviewUrl: posted.url,
   };
-}
-
-function buildCodeReviewPostArgs(input: {
-  readonly resultPath: string;
-  readonly prNumber: number;
-  readonly cfg: PublishCodeReviewConfig;
-}): string[] {
-  const args = [
-    "code-review",
-    "post",
-    "--result",
-    input.resultPath,
-    "--post-pr",
-    String(input.prNumber),
-    "--no-confirm",
-    "--review-summary",
-    input.cfg.reviewSummary,
-  ];
-  if (input.cfg.replacePending) {
-    args.push("--replace-pending-review");
-  }
-  return args;
-}
-
-function extractReviewUrl(stdout: string): string | undefined {
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("Review URL:")) {
-      return trimmed.slice("Review URL:".length).trim();
-    }
-  }
-  return undefined;
 }

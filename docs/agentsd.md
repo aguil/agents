@@ -55,7 +55,7 @@ until a full JSON-RPC client is added). Requires `agent.command`.
 
 | Lane        | `pending` / `submit` behavior                                                                                                                                         |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Code review | Runs `agents code-review post` (non-interactive) when gates pass; set `AGENTS_CLI` if the CLI is not on `PATH` (e.g. `bun run agents`).                               |
+| Code review | Posts a **pending** GitHub review in-process via `@aguil/agents-code-review-post` when gates pass (no `agents` subprocess).                                           |
 | PR feedback | Collect → triage → **fix** (subprocess adapter per triage item in `AGENTSD_WORKSPACE`) → re-collect/re-triage → `submit` when `responses.json` exists and gates pass. |
 
 Implementation workers exceeding `agent.stall_timeout_ms` are released and

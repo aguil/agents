@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@aguil/agents-code-review-post": "workspace:*",
     "@aguil/agents-core": "workspace:*",
     "@aguil/agents-github": "workspace:*",
     "@aguil/agents-pr-feedback": "workspace:*",

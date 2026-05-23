@@ -76,25 +76,17 @@ export async function runCodeReviewWorker(input: {
   logPublishOutcome(input.item, publishResult.decision, {
     triage_item_count: triageItemCount,
     publish_executed: publishResult.executed,
-    cli_exit_code: publishResult.cliExitCode,
     review_url: publishResult.reviewUrl,
-    publish_error:
-      publishResult.cliExitCode !== undefined && publishResult.cliExitCode !== 0
-        ? (publishResult.cliStderr ?? "agents code-review post failed")
-        : undefined,
+    publish_error: publishResult.postError,
   });
 
   if (result.status === "error") {
     return { status: "failed", error: "code review harness error" };
   }
-  if (
-    publishResult.executed &&
-    publishResult.cliExitCode !== undefined &&
-    publishResult.cliExitCode !== 0
-  ) {
+  if (publishResult.executed && publishResult.postError !== undefined) {
     return {
       status: "failed",
-      error: publishResult.cliStderr ?? "code-review post failed",
+      error: publishResult.postError,
     };
   }
   return { status: "succeeded" };
