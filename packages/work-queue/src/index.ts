@@ -160,17 +160,19 @@ export class WorkQueueOrchestrator {
   }
 
   private async fetchAllCandidates(): Promise<WorkItem[]> {
-    const all: WorkItem[] = [];
-    for (const feed of this.options.feeds) {
-      try {
-        const batch = await feed.fetchCandidates();
-        all.push(...batch);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[work-queue] feed ${feed.feedKind} failed: ${message}`);
-      }
-    }
-    return all;
+    const batches = await Promise.all(
+      this.options.feeds.map(async (feed) => {
+        try {
+          return await feed.fetchCandidates();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          console.warn(`[work-queue] feed ${feed.feedKind} failed: ${message}`);
+          return [];
+        }
+      }),
+    );
+    return batches.flat();
   }
 
   private reconcileStalledWorkers(): void {
@@ -376,7 +378,17 @@ export class WorkQueueOrchestrator {
         this.dispatch(item, rendered.prompt, entry.attempt),
       );
     }
-    await Promise.all(dispatchPromises);
+    if (dispatchPromises.length > 0) {
+      void Promise.all(dispatchPromises).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          JSON.stringify({
+            event: "work_queue_retry_dispatch_batch_error",
+            error: message,
+          }),
+        );
+      });
+    }
   }
 
   private async findCandidateById(id: string): Promise<WorkItem | undefined> {
