@@ -352,17 +352,26 @@ export class WorkQueueOrchestrator {
 
   private async processDueRetries(): Promise<void> {
     const now = this.options.now?.() ?? Date.now();
+    const due: { readonly id: string; readonly entry: RetryEntry }[] = [];
+    for (const [id, entry] of this.retryAttempts) {
+      if (entry.dueAtMs <= now) {
+        due.push({ id, entry });
+      }
+    }
+    const resolved = await Promise.all(
+      due.map(async ({ id, entry }) => ({
+        id,
+        entry,
+        item: await this.findCandidateById(id),
+      })),
+    );
     const dispatchPromises: Promise<void>[] = [];
     let slots = this.availableAgentSlots();
-    for (const [id, entry] of this.retryAttempts) {
-      if (entry.dueAtMs > now) {
-        continue;
-      }
+    for (const { id, entry, item } of resolved) {
       if (this.completed.has(id) || slots <= 0) {
         continue;
       }
       this.retryAttempts.delete(id);
-      const item = await this.findCandidateById(id);
       if (item === undefined) {
         this.release(id, entry.identifier);
         continue;
