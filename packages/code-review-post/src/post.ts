@@ -365,6 +365,8 @@ export interface ReplacePendingPullRequestReviewInput {
   readonly reviewSummaryStyle: ReviewSummaryStyle;
   readonly reviewedHeadSha?: string;
   readonly noConfirm: boolean;
+  /** When true, cancel instead of posting if PR head moved since review. */
+  readonly abortOnStaleHead?: boolean;
   readonly replacePendingReview: boolean;
   readonly workspacePath?: string;
   readonly preloadedPrDiffContext?: PullRequestDiffContext;
@@ -403,6 +405,14 @@ export async function replacePendingPullRequestReview(
     console.warn(
       `Warning: PR #${prNumber} has updates after this review context (${reviewedHeadSha.slice(0, 12)} -> ${currentHeadSha.slice(0, 12)}).`,
     );
+    if (input.abortOnStaleHead === true) {
+      console.log("Skipped pending review publish (stale PR head).");
+      return {
+        cancelled: true,
+        currentHeadSha,
+        headDiverged,
+      };
+    }
     const confirmed = await confirmProceedAfterStaleness(input.noConfirm);
     if (!confirmed) {
       console.log("Skipped pending review publish.");

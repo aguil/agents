@@ -34,6 +34,23 @@ export interface ExecuteCodeReviewPublishResult {
 export async function executeCodeReviewPublish(
   input: ExecuteCodeReviewPublishInput,
 ): Promise<ExecuteCodeReviewPublishResult> {
+  const isDryRunPath = isCodeReviewDryRunResultPath(
+    input.workspacePath,
+    input.resultPath,
+  );
+  const localDecision = evaluateCodeReviewPublish({
+    publish: input.publish,
+    result: input.result,
+    resultPath: input.resultPath,
+    triageItemCount: input.triageItemCount,
+    isDryRunPath,
+    prNumber: input.prNumber,
+  });
+
+  if (!localDecision.shouldPublish || localDecision.mode !== "pending") {
+    return { decision: localDecision, executed: false };
+  }
+
   const currentHeadSha = await fetchPullRequestHeadSha({
     workspacePath: input.workspacePath,
     repository: input.repository,
@@ -50,10 +67,7 @@ export async function executeCodeReviewPublish(
     result: input.result,
     resultPath: input.resultPath,
     triageItemCount: input.triageItemCount,
-    isDryRunPath: isCodeReviewDryRunResultPath(
-      input.workspacePath,
-      input.resultPath,
-    ),
+    isDryRunPath,
     prNumber: input.prNumber,
     reviewedHeadSha: input.reviewedHeadSha,
     currentHeadSha,
@@ -73,6 +87,7 @@ export async function executeCodeReviewPublish(
       reviewSummaryStyle: cfg.reviewSummary,
       reviewedHeadSha: input.reviewedHeadSha,
       noConfirm: true,
+      abortOnStaleHead: true,
       replacePendingReview: cfg.replacePending,
       workspacePath: input.workspacePath,
       runMetadata: input.result.metadata,
