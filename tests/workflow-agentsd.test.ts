@@ -39,6 +39,21 @@ publish:
   expect(parsed.feeds).toBeDefined();
 });
 
+test("parseYamlFrontMatter parses feed active_states and terminal_states lists", () => {
+  const parsed = parseYamlFrontMatter(`
+feeds:
+  - kind: github_issues
+    repository: org/repo
+    active_states:
+      - open
+    terminal_states:
+      - closed
+`);
+  const feeds = parsed.feeds as Array<Record<string, unknown>>;
+  expect(feeds[0]?.active_states).toEqual(["open"]);
+  expect(feeds[0]?.terminal_states).toEqual(["closed"]);
+});
+
 test("loadWorkflowFile defaults publish to off", async () => {
   const dir = join(tmpdir(), `wf-${Date.now()}`);
   await mkdir(dir, { recursive: true });

@@ -1,5 +1,7 @@
 /** Minimal YAML parser for WORKFLOW.md front matter (maps, lists, scalars). */
 
+const LIST_PARENT_KEYS = new Set(["feeds", "active_states", "terminal_states"]);
+
 type StackFrame =
   | {
       readonly kind: "map";
@@ -32,13 +34,6 @@ export function parseYamlFrontMatter(source: string): Record<string, unknown> {
       stack.pop();
     }
 
-    const colon = trimmed.indexOf(":");
-    if (colon <= 0) {
-      throw new Error(`workflow_parse_error: invalid line "${line}"`);
-    }
-    const key = trimmed.slice(0, colon).trim();
-    const rest = trimmed.slice(colon + 1).trim();
-
     if (isListItem) {
       const top = stack[stack.length - 1];
       if (top.kind !== "list") {
@@ -46,6 +41,13 @@ export function parseYamlFrontMatter(source: string): Record<string, unknown> {
           `workflow_parse_error: list item without parent list at "${line}"`,
         );
       }
+      const colon = trimmed.indexOf(":");
+      if (colon <= 0) {
+        top.value.push(parseScalar(trimmed));
+        continue;
+      }
+      const key = trimmed.slice(0, colon).trim();
+      const rest = trimmed.slice(colon + 1).trim();
       if (rest.length === 0) {
         const item: Record<string, unknown> = {};
         top.value.push(item);
@@ -58,6 +60,13 @@ export function parseYamlFrontMatter(source: string): Record<string, unknown> {
       continue;
     }
 
+    const colon = trimmed.indexOf(":");
+    if (colon <= 0) {
+      throw new Error(`workflow_parse_error: invalid line "${line}"`);
+    }
+    const key = trimmed.slice(0, colon).trim();
+    const rest = trimmed.slice(colon + 1).trim();
+
     const top = stack[stack.length - 1];
     if (top.kind !== "map") {
       throw new Error(`workflow_parse_error: key outside map at "${line}"`);
@@ -65,7 +74,7 @@ export function parseYamlFrontMatter(source: string): Record<string, unknown> {
     const parent = top.value;
 
     if (rest.length === 0) {
-      if (key === "feeds") {
+      if (LIST_PARENT_KEYS.has(key)) {
         const list: unknown[] = [];
         parent[key] = list;
         stack.push({ kind: "list", indent, value: list });
