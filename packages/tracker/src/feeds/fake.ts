@@ -1,4 +1,4 @@
-import type { WorkFeedClient } from "../feed-client";
+import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
 
 export class FakeWorkFeed implements WorkFeedClient {
@@ -18,7 +18,9 @@ export class FakeWorkFeed implements WorkFeedClient {
     return this.items.filter((i) => wanted.has(i.id));
   }
 
-  async fetchTerminal(): Promise<readonly WorkItem[]> {
+  async fetchTerminal(
+    _context?: WorkFeedTerminalContext,
+  ): Promise<readonly WorkItem[]> {
     return this.terminal;
   }
 

@@ -1,6 +1,7 @@
 import { GitHubReviewInboxSource } from "@aguil/agents-code-review-inbox";
 import { collectUnresolvedReviewThreads } from "@aguil/agents-pr-feedback";
-import type { WorkFeedClient } from "../feed-client";
+import { listWorkItemMarkers } from "@aguil/agents-workspace";
+import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
 
 export interface GitHubPrFeedbackFeedOptions {
@@ -149,21 +150,32 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
     return items;
   }
 
-  async fetchTerminal(): Promise<readonly WorkItem[]> {
+  async fetchTerminal(
+    context?: WorkFeedTerminalContext,
+  ): Promise<readonly WorkItem[]> {
     const workspacePath = this.options.workspacePath;
-    const pulls = await this.inbox.listAuthoredOpen({ workspacePath });
+    const workspaceRoot = context?.workspaceRoot;
+    if (workspaceRoot === undefined) {
+      return [];
+    }
+
+    const fromMarkers = await listPrFeedbackPullsFromWorkspaces(workspaceRoot);
     const scoped =
       this.options.repository === undefined
-        ? pulls
-        : pulls.filter((pull) => pull.repository === this.options.repository);
-    const limit = this.options.maxOpen ?? 20;
-    const limited = scoped.slice(0, limit);
+        ? fromMarkers
+        : fromMarkers.filter(
+            (pull) => pull.repository === this.options.repository,
+          );
+    if (scoped.length === 0) {
+      return [];
+    }
+
     const concurrency = Math.max(
       1,
-      Math.min(this.options.threadConcurrency ?? 3, limited.length),
+      Math.min(this.options.threadConcurrency ?? 3, scoped.length),
     );
     const withThreads = await mapWithConcurrency(
-      limited,
+      scoped,
       concurrency,
       async (pull) => ({
         pull,
@@ -182,16 +194,16 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       terminal.push({
         id: `${pull.repository}/pull/${pull.pullNumber}/feedback`,
         identifier: `${pull.repository}#${pull.pullNumber}-feedback`,
-        title: pull.title,
+        title: pull.identifier,
         description: "no unresolved review threads",
         state: "feedback_done",
         kind: "github_pr_feedback",
         priority: 2,
-        url: pull.url,
+        url: `https://github.com/${pull.repository}/pull/${pull.pullNumber}`,
         labels: [],
         blockedBy: [],
         createdAt: null,
-        updatedAt: pull.updatedAt,
+        updatedAt: null,
         branchName: null,
         metadata: {
           repository: pull.repository,
@@ -202,6 +214,48 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
     }
     return terminal;
   }
+}
+
+async function listPrFeedbackPullsFromWorkspaces(
+  workspaceRoot: string,
+): Promise<
+  readonly {
+    readonly repository: string;
+    readonly pullNumber: number;
+    readonly identifier: string;
+  }[]
+> {
+  const markers = await listWorkItemMarkers(workspaceRoot);
+  const pulls: {
+    readonly repository: string;
+    readonly pullNumber: number;
+    readonly identifier: string;
+  }[] = [];
+  for (const marker of markers) {
+    if (marker.kind !== "github_pr_feedback") {
+      continue;
+    }
+    const parsed = parsePrFeedbackIdentifier(marker.identifier);
+    if (parsed === null) {
+      continue;
+    }
+    pulls.push({ ...parsed, identifier: marker.identifier });
+  }
+  return pulls;
+}
+
+export function parsePrFeedbackIdentifier(
+  identifier: string,
+): { readonly repository: string; readonly pullNumber: number } | null {
+  const match = /^(.+)#(\d+)-feedback$/.exec(identifier);
+  if (match === null) {
+    return null;
+  }
+  const pullNumber = Number(match[2]);
+  if (!Number.isInteger(pullNumber) || pullNumber <= 0) {
+    return null;
+  }
+  return { repository: match[1], pullNumber };
 }
 
 async function mapWithConcurrency<T, R>(

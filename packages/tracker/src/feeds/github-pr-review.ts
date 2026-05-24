@@ -1,5 +1,5 @@
 import { GitHubReviewInboxSource } from "@aguil/agents-code-review-inbox";
-import type { WorkFeedClient } from "../feed-client";
+import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
 
 export interface GitHubPrReviewFeedOptions {
@@ -50,7 +50,9 @@ export class GitHubPrReviewFeed implements WorkFeedClient {
     return all.filter((item) => wanted.has(item.id));
   }
 
-  async fetchTerminal(): Promise<readonly WorkItem[]> {
+  async fetchTerminal(
+    _context?: WorkFeedTerminalContext,
+  ): Promise<readonly WorkItem[]> {
     return [];
   }
 }

@@ -1,10 +1,17 @@
 import type { WorkItem } from "./work-item";
 
+export interface WorkFeedTerminalContext {
+  /** When set, feeds may scope terminal discovery to existing work-item workspaces. */
+  readonly workspaceRoot?: string;
+}
+
 export interface WorkFeedClient {
   readonly feedKind: string;
   fetchCandidates(): Promise<readonly WorkItem[]>;
   fetchStates(ids: readonly string[]): Promise<readonly WorkItem[]>;
-  fetchTerminal(): Promise<readonly WorkItem[]>;
+  fetchTerminal(
+    context?: WorkFeedTerminalContext,
+  ): Promise<readonly WorkItem[]>;
 }
 
 export interface WorkFeedClientFactory {

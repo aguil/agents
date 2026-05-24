@@ -1,5 +1,5 @@
 import { runGhJson } from "@aguil/agents-github";
-import type { WorkFeedClient } from "../feed-client";
+import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
 
 interface GhIssueRow {
@@ -65,7 +65,9 @@ export class GitHubIssuesFeed implements WorkFeedClient {
     return all.filter((item) => wanted.has(item.id));
   }
 
-  async fetchTerminal(): Promise<readonly WorkItem[]> {
+  async fetchTerminal(
+    _context?: WorkFeedTerminalContext,
+  ): Promise<readonly WorkItem[]> {
     const repo = this.options.repository;
     const rows = await runGhJson<readonly GhIssueRow[]>(
       [
