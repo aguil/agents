@@ -342,3 +342,45 @@ test("evaluatePrFeedbackPublish requires responses for submit", () => {
   expect(decision.shouldPublish).toBe(false);
   expect(decision.skipReason).toBe("responses_document_missing");
 });
+
+test("evaluatePrFeedbackPublish requires approval before submit by default", () => {
+  const publish = {
+    codeReview: {
+      mode: "off" as const,
+      reviewSummary: "impact" as const,
+      staleHead: "skip" as const,
+      replacePending: false,
+      requireEmptyTriage: true,
+    },
+    prFeedback: {
+      mode: "submit" as const,
+      requireEmptyTriage: true,
+      requireResponsesDocument: true,
+    },
+  };
+  const blocked = evaluatePrFeedbackPublish({
+    publish,
+    triageItemCount: 0,
+    responsesPath: "/tmp/responses.json",
+    prApprovedForSubmit: false,
+  });
+  expect(blocked.shouldPublish).toBe(false);
+  expect(blocked.skipReason).toBe("approval_required");
+
+  const allowed = evaluatePrFeedbackPublish({
+    publish,
+    triageItemCount: 0,
+    responsesPath: "/tmp/responses.json",
+    prApprovedForSubmit: true,
+  });
+  expect(allowed.shouldPublish).toBe(true);
+
+  const policyOff = evaluatePrFeedbackPublish({
+    publish,
+    triageItemCount: 0,
+    responsesPath: "/tmp/responses.json",
+    requireApprovalBeforeSubmit: false,
+    prApprovedForSubmit: false,
+  });
+  expect(policyOff.shouldPublish).toBe(true);
+});

@@ -37,15 +37,15 @@ export async function runPrFeedbackWorker(input: {
     return { status: "failed", error: "aborted" };
   }
 
+  const policy = input.definition.prFeedbackPolicy;
   const selection = await readSelectionDocument(input.hostWorkspacePath);
   const approved = new Set(selection.approved);
-  if (
-    !isPrApprovedForWork(
-      input.definition.prFeedbackPolicy,
-      approved,
-      input.item.metadata,
-    )
-  ) {
+  const prApprovedForSubmit = isPrApprovedForWork(
+    policy,
+    approved,
+    input.item.metadata,
+  );
+  if (!prApprovedForSubmit) {
     console.warn(
       JSON.stringify({
         event: "pr_feedback_fix_skipped_not_approved",
@@ -130,6 +130,8 @@ export async function runPrFeedbackWorker(input: {
     feedbackPath,
     triageItemCount,
     responsesPath,
+    requireApprovalBeforeSubmit: policy.requireApprovalBeforeSubmit,
+    prApprovedForSubmit,
   });
 
   console.log(
