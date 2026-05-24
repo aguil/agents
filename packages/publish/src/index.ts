@@ -166,6 +166,13 @@ export {
   viewerHasPendingPullRequestReview,
 } from "./github-context";
 export {
+  buildSelectCommand,
+  createSelectionNotifyChannels,
+  dispatchSelectionNotifications,
+  type SelectionNotificationPayload,
+  type SelectionNotifyChannel,
+} from "./selection-notify";
+export {
   countCodeReviewTriageItems,
   countPrFeedbackTriageItems,
   isCodeReviewDryRunResultPath,
