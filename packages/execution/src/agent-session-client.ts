@@ -32,12 +32,15 @@ export interface SessionStartParams {
   readonly prompt: string;
   readonly roleId?: string;
   readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface SessionContinueParams {
   readonly runId: string;
   readonly guidance: string;
   readonly turnIndex: number;
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 }
 
 /** Multi-turn agent session protocol (app_server runtime). */
