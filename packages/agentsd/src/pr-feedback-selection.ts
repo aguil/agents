@@ -21,10 +21,6 @@ export async function syncPrFeedbackSelection(input: {
   readonly candidates: readonly WorkItem[];
 }): Promise<readonly WorkItem[]> {
   const policy = input.definition.prFeedbackPolicy;
-  if (policy.profile === "discover_only") {
-    return [];
-  }
-
   const prFeedbackItems = input.candidates.filter(
     (item) => item.kind === "github_pr_feedback",
   );
@@ -33,6 +29,10 @@ export async function syncPrFeedbackSelection(input: {
   );
 
   if (prFeedbackItems.length === 0) {
+    return [...otherItems];
+  }
+
+  if (policy.profile === "discover_only") {
     return [...otherItems];
   }
 
@@ -55,7 +55,8 @@ export async function syncPrFeedbackSelection(input: {
     })
     .filter((entry): entry is PrFeedbackPendingEntry => entry !== null);
 
-  let doc = await readSelectionDocument(input.hostWorkspacePath);
+  const initialDoc = await readSelectionDocument(input.hostWorkspacePath);
+  let doc = initialDoc;
   const pendingFingerprintBefore = pendingFingerprint(doc.pending);
   doc = upsertPendingFromWorkItems({ existing: doc, entries: pendingEntries });
   const pendingFingerprintAfter = pendingFingerprint(doc.pending);
@@ -73,13 +74,19 @@ export async function syncPrFeedbackSelection(input: {
   if (shouldNotify && policy.profile === "interactive") {
     const selectCommand = buildSelectCommand({
       selectionId: doc.selectionId,
+      workspacePath: input.hostWorkspacePath,
       identifiers: doc.pending.map((p) => p.identifier),
     });
     const channels = createSelectionNotifyChannels({
       channelKinds: policy.notifyChannels.map((c) => c.kind),
       webhookUrl: policy.webhookUrl,
     });
-    await dispatchSelectionNotifications({
+    doc = {
+      ...doc,
+      notifiedAt: new Date(now).toISOString(),
+      notifyFingerprint: pendingFingerprint(doc.pending),
+    };
+    void dispatchSelectionNotifications({
       channels,
       payload: {
         selectionId: doc.selectionId,
@@ -88,14 +95,11 @@ export async function syncPrFeedbackSelection(input: {
         selectCommand,
       },
     });
-    doc = {
-      ...doc,
-      notifiedAt: new Date(now).toISOString(),
-      notifyFingerprint: pendingFingerprint(doc.pending),
-    };
   }
 
-  await writeSelectionDocument(input.hostWorkspacePath, doc);
+  if (JSON.stringify(doc) !== JSON.stringify(initialDoc)) {
+    await writeSelectionDocument(input.hostWorkspacePath, doc);
+  }
 
   const approved = new Set(doc.approved);
   const dispatchable = prFeedbackItems.filter((item) =>

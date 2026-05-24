@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 import type { PrFeedbackPendingEntry } from "@aguil/agents-workflow";
 
+/** Bound webhook notify so candidate polling cannot hang on a slow endpoint. */
+const WEBHOOK_NOTIFY_TIMEOUT_MS = 10_000;
+const DESKTOP_NOTIFY_TIMEOUT_MS = 5_000;
+
 export interface SelectionNotificationPayload {
   readonly selectionId: string;
   readonly workspacePath: string;
@@ -16,10 +20,12 @@ export interface SelectionNotifyChannel {
 
 export function buildSelectCommand(input: {
   readonly selectionId: string;
+  readonly workspacePath: string;
   readonly identifiers: readonly string[];
 }): string {
   const parts = [
     "agents pr-feedback select",
+    `--workspace ${JSON.stringify(input.workspacePath)}`,
     `--selection-id ${input.selectionId}`,
     ...input.identifiers.map((id) => `--approve ${id}`),
   ];
@@ -156,8 +162,16 @@ async function sendSystemNotification(
 async function runNotifyCommand(cmd: readonly string[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const proc = spawn(cmd[0], cmd.slice(1), { stdio: "ignore" });
-    proc.on("error", () => resolve());
+    const timer = setTimeout(() => {
+      proc.kill("SIGTERM");
+      resolve();
+    }, DESKTOP_NOTIFY_TIMEOUT_MS);
+    proc.on("error", () => {
+      clearTimeout(timer);
+      resolve();
+    });
     proc.on("close", (code) => {
+      clearTimeout(timer);
       if (code === 0) {
         resolve();
       } else {
@@ -178,6 +192,7 @@ async function sendWebhook(
       event: "pr_feedback_selection_required",
       ...payload,
     }),
+    signal: AbortSignal.timeout(WEBHOOK_NOTIFY_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`webhook HTTP ${response.status}`);
