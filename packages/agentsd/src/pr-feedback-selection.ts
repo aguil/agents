@@ -56,7 +56,10 @@ export async function syncPrFeedbackSelection(input: {
     .filter((entry): entry is PrFeedbackPendingEntry => entry !== null);
 
   let doc = await readSelectionDocument(input.hostWorkspacePath);
+  const pendingFingerprintBefore = pendingFingerprint(doc.pending);
   doc = upsertPendingFromWorkItems({ existing: doc, entries: pendingEntries });
+  const pendingFingerprintAfter = pendingFingerprint(doc.pending);
+  const pendingChanged = pendingFingerprintBefore !== pendingFingerprintAfter;
 
   const now = Date.now();
   const lastNotified = doc.notifiedAt ? Date.parse(doc.notifiedAt) : Number.NaN;
@@ -65,7 +68,7 @@ export async function syncPrFeedbackSelection(input: {
     (doc.notifiedAt === null ||
       Number.isNaN(lastNotified) ||
       now - lastNotified >= policy.notifyCooldownMs ||
-      doc.notifyFingerprint !== pendingFingerprint(doc.pending));
+      pendingChanged);
 
   if (shouldNotify && policy.profile === "interactive") {
     const selectCommand = buildSelectCommand({
