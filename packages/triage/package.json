@@ -12,6 +12,6 @@
     "@aguil/agents-reporting": "workspace:*"
   },
   "optionalDependencies": {
-    "@toon-format/toon": "^2.2.0"
+    "@toon-format/toon": "^2.3.0"
   }
 }
