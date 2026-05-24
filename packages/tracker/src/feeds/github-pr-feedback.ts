@@ -250,10 +250,12 @@ async function listPrFeedbackPullsFromWorkspaces(
     readonly pullNumber: number;
     readonly identifier: string;
   }[] = [];
+  let probes = 0;
   for (const entry of entries) {
-    if (maxPulls !== undefined && pulls.length >= maxPulls) {
+    if (maxPulls !== undefined && probes >= maxPulls) {
       break;
     }
+    probes += 1;
     const path = resolve(root, entry);
     if (path !== root && !path.startsWith(`${root}/`)) {
       continue;
