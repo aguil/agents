@@ -158,13 +158,24 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
         : pulls.filter((pull) => pull.repository === this.options.repository);
     const limit = this.options.maxOpen ?? 20;
     const limited = scoped.slice(0, limit);
+    const concurrency = Math.max(
+      1,
+      Math.min(this.options.threadConcurrency ?? 3, limited.length),
+    );
+    const withThreads = await mapWithConcurrency(
+      limited,
+      concurrency,
+      async (pull) => ({
+        pull,
+        threads: await collectUnresolvedReviewThreads({
+          workspacePath,
+          repository: pull.repository,
+          pullNumber: pull.pullNumber,
+        }),
+      }),
+    );
     const terminal: WorkItem[] = [];
-    for (const pull of limited) {
-      const threads = await collectUnresolvedReviewThreads({
-        workspacePath,
-        repository: pull.repository,
-        pullNumber: pull.pullNumber,
-      });
+    for (const { pull, threads } of withThreads) {
       if (threads.length > 0) {
         continue;
       }
