@@ -1,6 +1,11 @@
+import { readdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { GitHubReviewInboxSource } from "@aguil/agents-code-review-inbox";
 import { collectUnresolvedReviewThreads } from "@aguil/agents-pr-feedback";
-import { listWorkItemMarkers } from "@aguil/agents-workspace";
+import {
+  WORK_ITEM_MARKER_FILENAME,
+  type WorkItemMarker,
+} from "@aguil/agents-workspace";
 import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
 
@@ -159,7 +164,11 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       return [];
     }
 
-    const fromMarkers = await listPrFeedbackPullsFromWorkspaces(workspaceRoot);
+    const maxProbes = context?.maxTerminalProbes;
+    const fromMarkers = await listPrFeedbackPullsFromWorkspaces(
+      workspaceRoot,
+      maxProbes,
+    );
     const scoped =
       this.options.repository === undefined
         ? fromMarkers
@@ -170,11 +179,7 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       return [];
     }
 
-    const maxProbes = context?.maxTerminalProbes;
-    const toProbe =
-      maxProbes === undefined
-        ? scoped
-        : scoped.slice(0, Math.max(0, maxProbes));
+    const toProbe = scoped;
 
     const concurrency = Math.max(
       1,
@@ -224,6 +229,7 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
 
 async function listPrFeedbackPullsFromWorkspaces(
   workspaceRoot: string,
+  maxPulls?: number,
 ): Promise<
   readonly {
     readonly repository: string;
@@ -231,13 +237,34 @@ async function listPrFeedbackPullsFromWorkspaces(
     readonly identifier: string;
   }[]
 > {
-  const markers = await listWorkItemMarkers(workspaceRoot);
+  const root = resolve(workspaceRoot);
+  let entries: string[];
+  try {
+    entries = await readdir(root);
+  } catch {
+    return [];
+  }
+
   const pulls: {
     readonly repository: string;
     readonly pullNumber: number;
     readonly identifier: string;
   }[] = [];
-  for (const marker of markers) {
+  for (const entry of entries) {
+    if (maxPulls !== undefined && pulls.length >= maxPulls) {
+      break;
+    }
+    const path = resolve(root, entry);
+    if (path !== root && !path.startsWith(`${root}/`)) {
+      continue;
+    }
+    let marker: WorkItemMarker;
+    try {
+      const raw = await readFile(join(path, WORK_ITEM_MARKER_FILENAME), "utf8");
+      marker = JSON.parse(raw) as WorkItemMarker;
+    } catch {
+      continue;
+    }
     if (marker.kind !== "github_pr_feedback") {
       continue;
     }

@@ -584,15 +584,15 @@ export class WorkQueueOrchestrator {
   }
 
   private async shouldMarkCompleted(item: WorkItem): Promise<boolean> {
+    if (item.kind === "github_issue" || item.kind === "github_pr_review") {
+      return true;
+    }
     const refresh = await this.fetchStatesForItem(item.id, item.kind);
     if (item.kind === "github_pr_feedback") {
       if (refresh.hadFeedErrors) {
         return false;
       }
       return refresh.states.length === 0;
-    }
-    if (item.kind === "github_issue" || item.kind === "github_pr_review") {
-      return true;
     }
     if (refresh.states.length === 0) {
       return true;
