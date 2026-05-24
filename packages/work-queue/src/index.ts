@@ -28,6 +28,7 @@ export interface RunningEntry {
   readonly startedAtMs: number;
   readonly attempt: number | null;
   readonly workerKind: string;
+  readonly abortController: AbortController;
 }
 
 export interface WorkQueueSnapshot {
@@ -41,6 +42,7 @@ export type WorkQueueWorker = (input: {
   readonly workspacePath: string;
   readonly attempt: number | null;
   readonly prompt: string;
+  readonly signal?: AbortSignal;
 }) => Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
@@ -60,24 +62,55 @@ export interface WorkQueueOrchestratorOptions {
   readonly now?: () => number;
   /** Abort implementation dispatches running longer than this (ms). */
   readonly implementationStallTimeoutMs?: number;
+  /** Max concurrent dispatches per `WorkItem.kind` (feed kind). */
+  readonly perFeedMaxConcurrent?: Readonly<Record<string, number>>;
+  readonly filterCandidates?: (
+    items: readonly WorkItem[],
+  ) => Promise<readonly WorkItem[]>;
 }
 
 /** Poll-based scheduler (Symphony coordination layer; ADR 0003). */
 export class WorkQueueOrchestrator {
+  private definition: WorkflowDefinition;
+  private feeds: readonly WorkFeedClient[];
+  private perFeedMaxConcurrent?: Readonly<Record<string, number>>;
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
   private readonly retryAttempts = new Map<string, RetryEntry>();
   private readonly completed = new Set<string>();
+  /** Stall fired before dispatch settled; retry after in-flight worker exits. */
+  private readonly stallAwaitingSettlement = new Map<
+    string,
+    {
+      readonly item: WorkItem;
+      readonly attempt: number;
+      readonly error: string;
+    }
+  >();
   private pendingDispatches = 0;
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
 
-  constructor(private readonly options: WorkQueueOrchestratorOptions) {}
+  constructor(private readonly options: WorkQueueOrchestratorOptions) {
+    this.definition = options.definition;
+    this.feeds = options.feeds;
+    this.perFeedMaxConcurrent = options.perFeedMaxConcurrent;
+  }
+
+  private countRunningForKind(kind: string): number {
+    let count = 0;
+    for (const entry of this.running.values()) {
+      if (entry.item.kind === kind) {
+        count += 1;
+      }
+    }
+    return count;
+  }
 
   private availableAgentSlots(): number {
     return Math.max(
       0,
-      this.options.definition.maxConcurrentAgents -
+      this.definition.maxConcurrentAgents -
         this.running.size -
         this.pendingDispatches,
     );
@@ -105,6 +138,8 @@ export class WorkQueueOrchestrator {
     void this.tick().finally(() => this.scheduleNext());
   }
 
+  private inFlightDispatches = new Set<Promise<void>>();
+
   stop(): void {
     this.stopped = true;
     if (this.pollTimer !== undefined) {
@@ -113,13 +148,37 @@ export class WorkQueueOrchestrator {
     }
   }
 
+  async stopAndDrain(
+    input: { readonly timeoutMs?: number } = {},
+  ): Promise<void> {
+    this.stop();
+    const timeoutMs = input.timeoutMs ?? 60_000;
+    const pending = [...this.inFlightDispatches];
+    if (pending.length === 0) {
+      return;
+    }
+    console.log(
+      JSON.stringify({
+        event: "agentsd_stopping",
+        in_flight: pending.length,
+        timeout_ms: timeoutMs,
+      }),
+    );
+    await Promise.race([
+      Promise.all(pending),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  }
+
   private scheduleNext(): void {
     if (this.stopped) {
       return;
     }
     this.pollTimer = setTimeout(() => {
       void this.tick().finally(() => this.scheduleNext());
-    }, this.options.definition.pollingIntervalMs);
+    }, this.definition.pollingIntervalMs);
   }
 
   async tick(): Promise<void> {
@@ -133,7 +192,19 @@ export class WorkQueueOrchestrator {
       if (dispatched >= slots) {
         break;
       }
-      if (this.running.has(item.id) || this.claimed.has(item.id)) {
+      if (
+        this.completed.has(item.id) ||
+        this.running.has(item.id) ||
+        this.claimed.has(item.id) ||
+        this.stallAwaitingSettlement.has(item.id)
+      ) {
+        continue;
+      }
+      const feedCap = this.perFeedMaxConcurrent?.[item.kind];
+      if (
+        feedCap !== undefined &&
+        this.countRunningForKind(item.kind) >= feedCap
+      ) {
         continue;
       }
       const rendered = this.options.renderPrompt(item, null);
@@ -143,7 +214,9 @@ export class WorkQueueOrchestrator {
       this.claimed.add(item.id);
       dispatched += 1;
       this.reservePendingDispatch();
-      dispatchPromises.push(this.dispatch(item, rendered.prompt, null));
+      const promise = this.dispatch(item, rendered.prompt, null);
+      dispatchPromises.push(promise);
+      this.trackDispatch(promise);
     }
     if (dispatchPromises.length > 0) {
       void Promise.all(dispatchPromises).catch((error) => {
@@ -172,7 +245,11 @@ export class WorkQueueOrchestrator {
         }
       }),
     );
-    return batches.flat();
+    const flat = batches.flat();
+    if (this.options.filterCandidates !== undefined) {
+      return [...(await this.options.filterCandidates(flat))];
+    }
+    return flat;
   }
 
   private reconcileStalledWorkers(): void {
@@ -188,6 +265,7 @@ export class WorkQueueOrchestrator {
       if (now - entry.startedAtMs <= stallMs) {
         continue;
       }
+      const supersededAttempt = entry.attempt ?? 0;
       console.warn(
         JSON.stringify({
           event: "implementation_worker_stalled",
@@ -195,15 +273,16 @@ export class WorkQueueOrchestrator {
           identifier: entry.item.identifier,
           elapsed_ms: now - entry.startedAtMs,
           stall_timeout_ms: stallMs,
+          superseded_attempt: supersededAttempt,
         }),
       );
+      entry.abortController.abort();
       this.running.delete(id);
-      this.scheduleRetry(
-        entry.item,
-        (entry.attempt ?? 0) + 1,
-        "implementation worker exceeded stall timeout",
-        0,
-      );
+      this.stallAwaitingSettlement.set(id, {
+        item: entry.item,
+        attempt: supersededAttempt + 1,
+        error: "implementation worker exceeded stall timeout",
+      });
     }
   }
 
@@ -225,14 +304,17 @@ export class WorkQueueOrchestrator {
     for (const [id, entry] of this.running) {
       const fresh = byId.get(id);
       if (fresh === undefined) {
-        this.release(id, entry.item.identifier);
+        this.running.delete(id);
+        this.claimed.delete(id);
+        this.completed.add(id);
         continue;
       }
       if (isTerminalState(fresh.state)) {
         this.running.delete(id);
         this.claimed.delete(id);
+        this.completed.add(id);
         await removeIssueWorkspace({
-          workspaceRoot: this.options.definition.workspaceRoot,
+          workspaceRoot: this.definition.workspaceRoot,
           identifier: entry.item.identifier,
           hooks: this.options.hooks,
         });
@@ -274,15 +356,14 @@ export class WorkQueueOrchestrator {
 
     this.releasePendingDispatch();
     const startedAtMs = now;
+    const abortController = new AbortController();
     this.running.set(item.id, {
       item,
       workspacePath,
       startedAtMs,
       attempt,
-      workerKind: resolveWorkerKindForItem(
-        item,
-        this.options.definition.workers,
-      ),
+      workerKind: resolveWorkerKindForItem(item, this.definition.workers),
+      abortController,
     });
 
     const clearRunningIfCurrent = (): void => {
@@ -292,22 +373,53 @@ export class WorkQueueOrchestrator {
       }
     };
 
+    const stalledWhileRunning = (): boolean =>
+      this.stallAwaitingSettlement.has(item.id);
+
     try {
       const result = await this.options.worker({
         item,
         workspacePath,
         attempt,
         prompt,
+        signal: abortController.signal,
       });
       clearRunningIfCurrent();
+      const stallPending = this.stallAwaitingSettlement.get(item.id);
+      if (stallPending !== undefined) {
+        this.stallAwaitingSettlement.delete(item.id);
+        this.scheduleRetry(
+          stallPending.item,
+          stallPending.attempt,
+          stallPending.error,
+          0,
+        );
+        return;
+      }
       if (result.status === "succeeded") {
-        this.completed.add(item.id);
+        if (await this.shouldMarkCompleted(item)) {
+          this.completed.add(item.id);
+        }
         this.claimed.delete(item.id);
       } else {
         this.scheduleRetry(item, (attempt ?? 0) + 1, result.error ?? "failed");
       }
     } catch (error) {
       clearRunningIfCurrent();
+      const stallPending = this.stallAwaitingSettlement.get(item.id);
+      if (stallPending !== undefined) {
+        this.stallAwaitingSettlement.delete(item.id);
+        this.scheduleRetry(
+          stallPending.item,
+          stallPending.attempt,
+          stallPending.error,
+          0,
+        );
+        return;
+      }
+      if (stalledWhileRunning() || abortController.signal.aborted) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.scheduleRetry(item, (attempt ?? 0) + 1, message);
     } finally {
@@ -338,7 +450,7 @@ export class WorkQueueOrchestrator {
       delayOverrideMs ??
       Math.min(
         10_000 * 2 ** Math.max(0, attempt - 1),
-        this.options.definition.maxRetryBackoffMs,
+        this.definition.maxRetryBackoffMs,
       );
     this.retryAttempts.set(item.id, {
       issueId: item.id,
@@ -368,7 +480,11 @@ export class WorkQueueOrchestrator {
     const dispatchPromises: Promise<void>[] = [];
     let slots = this.availableAgentSlots();
     for (const { id, entry, item } of resolved) {
-      if (this.completed.has(id) || slots <= 0) {
+      if (
+        this.completed.has(id) ||
+        this.stallAwaitingSettlement.has(id) ||
+        slots <= 0
+      ) {
         continue;
       }
       this.retryAttempts.delete(id);
@@ -383,9 +499,9 @@ export class WorkQueueOrchestrator {
       }
       slots -= 1;
       this.reservePendingDispatch();
-      dispatchPromises.push(
-        this.dispatch(item, rendered.prompt, entry.attempt),
-      );
+      const promise = this.dispatch(item, rendered.prompt, entry.attempt);
+      dispatchPromises.push(promise);
+      this.trackDispatch(promise);
     }
     if (dispatchPromises.length > 0) {
       void Promise.all(dispatchPromises).catch((error) => {
@@ -411,10 +527,64 @@ export class WorkQueueOrchestrator {
     return all.find((i) => i.id === id);
   }
 
+  private async shouldMarkCompleted(item: WorkItem): Promise<boolean> {
+    if (item.kind === "github_pr_feedback") {
+      const states = await this.fetchStatesForItem(item.id);
+      return states.length === 0;
+    }
+    if (item.kind === "github_issue" || item.kind === "github_pr_review") {
+      return true;
+    }
+    const states = await this.fetchStatesForItem(item.id);
+    if (states.length === 0) {
+      return true;
+    }
+    return isTerminalState(states[0].state);
+  }
+
+  private async fetchStatesForItem(id: string): Promise<readonly WorkItem[]> {
+    const states: WorkItem[] = [];
+    for (const feed of this.feeds) {
+      try {
+        states.push(...(await feed.fetchStates([id])));
+      } catch {
+        // ignore per-feed errors
+      }
+    }
+    return states;
+  }
+
+  private trackDispatch(promise: Promise<void>): void {
+    this.inFlightDispatches.add(promise);
+    void promise.finally(() => {
+      this.inFlightDispatches.delete(promise);
+    });
+  }
+
+  updateDefinition(
+    definition: WorkflowDefinition,
+    feedConfig?: {
+      readonly feeds: readonly WorkFeedClient[];
+      readonly perFeedMaxConcurrent?: Readonly<Record<string, number>>;
+    },
+  ): void {
+    this.definition = definition;
+    if (feedConfig !== undefined) {
+      this.feeds = feedConfig.feeds;
+      this.perFeedMaxConcurrent = feedConfig.perFeedMaxConcurrent;
+    }
+  }
+
+  /** Await in-flight dispatches (for tests and shutdown). */
+  async flush(): Promise<void> {
+    await Promise.all([...this.inFlightDispatches]);
+  }
+
   private release(id: string, _identifier: string): void {
     this.running.delete(id);
     this.claimed.delete(id);
     this.retryAttempts.delete(id);
+    this.stallAwaitingSettlement.delete(id);
   }
 
   async startupTerminalCleanup(): Promise<void> {
@@ -423,7 +593,7 @@ export class WorkQueueOrchestrator {
         const terminal = await feed.fetchTerminal();
         for (const item of terminal) {
           await removeIssueWorkspace({
-            workspaceRoot: this.options.definition.workspaceRoot,
+            workspaceRoot: this.definition.workspaceRoot,
             identifier: item.identifier,
             hooks: this.options.hooks,
           });

@@ -10,6 +10,7 @@ import {
   collectAgentRun,
   FakeAgentAdapter,
   FakeAgentSessionClient,
+  JsonRpcAgentSessionClient,
   SessionAgentAdapterClient,
   sessionEventToAgentEvent,
 } from "@aguil/agents-execution";
@@ -33,9 +34,18 @@ export function createSubprocessAdapter(
 
 export function createSessionClient(
   impl: ImplementationExecutionConfig,
-): FakeAgentSessionClient | SessionAgentAdapterClient {
+):
+  | FakeAgentSessionClient
+  | SessionAgentAdapterClient
+  | JsonRpcAgentSessionClient {
   if (impl.command === null) {
     return new FakeAgentSessionClient({ protocol: impl.protocol ?? "fake" });
+  }
+  if (impl.protocol === "json_rpc_session_v1") {
+    return new JsonRpcAgentSessionClient({
+      command: impl.command,
+      protocol: impl.protocol,
+    });
   }
   return new SessionAgentAdapterClient({
     command: impl.command,
@@ -50,6 +60,7 @@ export async function runImplementationSubprocess(input: {
   readonly prompt: string;
   readonly impl: ImplementationExecutionConfig;
   readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
@@ -67,8 +78,12 @@ export async function runImplementationSubprocess(input: {
     "utf8",
   );
 
+  if (input.signal?.aborted) {
+    return { status: "failed", error: "aborted" };
+  }
+
   const adapter = createSubprocessAdapter(input.impl);
-  const result = await collectAgentRun(adapter, {
+  const runPromise = collectAgentRun(adapter, {
     runId,
     roleId: "implementation",
     prompt: input.prompt,
@@ -82,6 +97,11 @@ export async function runImplementationSubprocess(input: {
       identifier: input.item.identifier,
     },
   });
+  const result = await raceWithAbort(runPromise, input.signal);
+
+  if (result === "aborted") {
+    return { status: "failed", error: "aborted" };
+  }
 
   const runStatus = result.result.status;
   if (runStatus === "failed" || runStatus === "timed_out") {
@@ -90,11 +110,40 @@ export async function runImplementationSubprocess(input: {
   return { status: "succeeded" };
 }
 
+async function raceWithAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T | "aborted"> {
+  if (signal === undefined) {
+    return promise;
+  }
+  if (signal.aborted) {
+    return "aborted";
+  }
+  return new Promise<T | "aborted">((resolve, reject) => {
+    const onAbort = (): void => {
+      resolve("aborted");
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function runImplementationAppServer(input: {
   readonly item: WorkItem;
   readonly workspacePath: string;
   readonly prompt: string;
   readonly definition: WorkflowDefinition;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
@@ -118,6 +167,9 @@ export async function runImplementationAppServer(input: {
   const timeoutMs = impl.turnTimeoutMs ?? 3_600_000;
 
   for (let turn = 0; turn < maxTurns; turn += 1) {
+    if (input.signal?.aborted) {
+      return { status: "failed", error: "aborted" };
+    }
     const stream =
       turn === 0
         ? client.startSession({

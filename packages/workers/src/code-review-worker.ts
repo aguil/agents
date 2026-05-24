@@ -8,6 +8,7 @@ import {
 } from "@aguil/agents-publish";
 import type { WorkItem } from "@aguil/agents-tracker";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
+import { createDetachedPullRequestWorktree } from "./isolated-pr-worktree";
 
 export async function runCodeReviewWorker(input: {
   readonly item: WorkItem;
@@ -16,6 +17,7 @@ export async function runCodeReviewWorker(input: {
   readonly adapter: AgentAdapter;
   readonly definition: WorkflowDefinition;
   readonly prompt: string;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
@@ -31,9 +33,35 @@ export async function runCodeReviewWorker(input: {
     };
   }
 
+  if (input.signal?.aborted) {
+    return { status: "failed", error: "aborted" };
+  }
+
   const scratchpadRoot = agentsCodeReviewRunsRoot(input.workspacePath);
+  let reviewWorkspace = input.hostWorkspacePath;
+  let cleanupWorktree: (() => Promise<void>) | undefined;
+  if (input.definition.codeReviewPolicy.useWorktree) {
+    try {
+      const isolated = await createDetachedPullRequestWorktree({
+        artifactAnchorWorkspacePath: input.hostWorkspacePath,
+        pullNumber: prNumber,
+      });
+      reviewWorkspace = isolated.worktreePath;
+      cleanupWorktree = isolated.cleanup;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        JSON.stringify({
+          event: "code_review_worktree_failed",
+          work_item_id: input.item.id,
+          error: message,
+        }),
+      );
+    }
+  }
+
   const result = await runCodeReview({
-    workspacePath: input.hostWorkspacePath,
+    workspacePath: reviewWorkspace,
     scratchpadRoot,
     reviewPrNumber: prNumber,
     adapter: input.adapter,
@@ -43,6 +71,10 @@ export async function runCodeReviewWorker(input: {
       work_item_id: input.item.id,
     },
   });
+
+  if (cleanupWorktree !== undefined) {
+    await cleanupWorktree();
+  }
 
   const resultPath = join(scratchpadRoot, result.runId, "result.json");
   let triageItemCount = 0;

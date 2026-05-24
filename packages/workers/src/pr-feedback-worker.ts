@@ -6,6 +6,10 @@ import {
 } from "@aguil/agents-publish";
 import type { WorkItem } from "@aguil/agents-tracker";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
+import {
+  isPrApprovedForWork,
+  readSelectionDocument,
+} from "@aguil/agents-workflow";
 import { runPrFeedbackFixes } from "./pr-feedback-fix";
 
 export async function runPrFeedbackWorker(input: {
@@ -13,6 +17,7 @@ export async function runPrFeedbackWorker(input: {
   readonly workspacePath: string;
   readonly hostWorkspacePath: string;
   readonly definition: WorkflowDefinition;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
@@ -26,6 +31,29 @@ export async function runPrFeedbackWorker(input: {
       status: "failed",
       error: "missing repository or pull_number metadata",
     };
+  }
+
+  if (input.signal?.aborted) {
+    return { status: "failed", error: "aborted" };
+  }
+
+  const selection = await readSelectionDocument(input.hostWorkspacePath);
+  const approved = new Set(selection.approved);
+  if (
+    !isPrApprovedForWork(
+      input.definition.prFeedbackPolicy,
+      approved,
+      input.item.metadata,
+    )
+  ) {
+    console.warn(
+      JSON.stringify({
+        event: "pr_feedback_fix_skipped_not_approved",
+        work_item_id: input.item.id,
+        identifier: input.item.identifier,
+      }),
+    );
+    return { status: "succeeded" };
   }
 
   let { outputDir, document } = await collectPrFeedback({

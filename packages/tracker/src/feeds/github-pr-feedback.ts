@@ -150,7 +150,46 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
   }
 
   async fetchTerminal(): Promise<readonly WorkItem[]> {
-    return [];
+    const workspacePath = this.options.workspacePath;
+    const pulls = await this.inbox.listAuthoredOpen({ workspacePath });
+    const scoped =
+      this.options.repository === undefined
+        ? pulls
+        : pulls.filter((pull) => pull.repository === this.options.repository);
+    const limit = this.options.maxOpen ?? 20;
+    const limited = scoped.slice(0, limit);
+    const terminal: WorkItem[] = [];
+    for (const pull of limited) {
+      const threads = await collectUnresolvedReviewThreads({
+        workspacePath,
+        repository: pull.repository,
+        pullNumber: pull.pullNumber,
+      });
+      if (threads.length > 0) {
+        continue;
+      }
+      terminal.push({
+        id: `${pull.repository}/pull/${pull.pullNumber}/feedback`,
+        identifier: `${pull.repository}#${pull.pullNumber}-feedback`,
+        title: pull.title,
+        description: "no unresolved review threads",
+        state: "feedback_done",
+        kind: "github_pr_feedback",
+        priority: 2,
+        url: pull.url,
+        labels: [],
+        blockedBy: [],
+        createdAt: null,
+        updatedAt: pull.updatedAt,
+        branchName: null,
+        metadata: {
+          repository: pull.repository,
+          pull_number: String(pull.pullNumber),
+          unresolved_thread_count: "0",
+        },
+      });
+    }
+    return terminal;
   }
 }
 
