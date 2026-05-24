@@ -102,10 +102,12 @@ merging the platform PR.
 **Stall / reload behavior today:** when `agent.stall_timeout_ms` fires, the
 orchestrator aborts the in-flight worker via `AbortSignal` and retries after the
 dispatch settles ([#41](https://github.com/aguil/agents/issues/41)). Editing
-`WORKFLOW.md` reloads the workflow definition, feed clients, and per-feed
-concurrency without restart ([#38](https://github.com/aguil/agents/issues/38)
-partial). Poll interval follows the reloaded definition on the next tick; worker
-router and implementation adapter wiring are still fixed at process start.
+`WORKFLOW.md` reloads the workflow definition, feed clients, per-feed
+concurrency caps, workspace hooks, implementation stall timeout, and subprocess
+code-review adapter selection on the next dispatch
+([#38](https://github.com/aguil/agents/issues/38) partial). Poll interval
+follows the reloaded definition on the next tick. Implementation workers already
+read `implementation.*` from the active definition each dispatch.
 
 **Startup terminal cleanup** runs in the background (does not block the poll
 loop). For `github_pr_feedback`, it only re-checks PRs that already have a

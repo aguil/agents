@@ -23,12 +23,10 @@ export { createWorkflowAgentAdapter } from "./workflow-adapter";
 export function createWorkerRouter(
   options: WorkerRouterOptions,
 ): WorkQueueWorker {
-  const adapter =
-    options.adapter ??
-    createWorkflowAgentAdapter(options.definition.implementation);
-
   return async ({ item, workspacePath, prompt, signal }) => {
     const definition = options.getDefinition?.() ?? options.definition;
+    const adapter =
+      options.adapter ?? createWorkflowAgentAdapter(definition.implementation);
     const workerKind = resolveWorkerKind(item, definition.workers);
     try {
       switch (workerKind) {
