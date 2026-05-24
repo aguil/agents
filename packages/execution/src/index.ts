@@ -25,6 +25,8 @@ export interface AgentRunRequest {
   readonly timeoutMs: number;
   readonly allowedCommands: readonly string[];
   readonly metadata?: Readonly<Record<string, string>>;
+  /** When aborted, subprocess adapters terminate the child (SIGTERM then SIGKILL). */
+  readonly signal?: AbortSignal;
 }
 
 export interface AgentRunResult {
@@ -273,6 +275,15 @@ export class SubprocessAgentAdapter implements AgentAdapter {
     const stderrTail = createTailBuffer(25);
     const startedAtMs = Date.now();
 
+    let aborted = false;
+    let abortHardKillTimer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = (): void => {
+      aborted = true;
+      proc.kill("SIGTERM");
+      abortHardKillTimer = setTimeout(() => proc.kill("SIGKILL"), 1_000);
+    };
+    request.signal?.addEventListener("abort", onAbort, { once: true });
+
     const timeoutTimer =
       request.timeoutMs > 0
         ? setTimeout(() => {
@@ -349,17 +360,51 @@ export class SubprocessAgentAdapter implements AgentAdapter {
         stderrDrainer,
       ]);
     } finally {
+      request.signal?.removeEventListener("abort", onAbort);
       if (timeoutTimer !== undefined) {
         clearTimeout(timeoutTimer);
       }
       if (hardKillTimer !== undefined) {
         clearTimeout(hardKillTimer);
       }
+      if (abortHardKillTimer !== undefined) {
+        clearTimeout(abortHardKillTimer);
+      }
       clearInterval(heartbeatTimer);
       await Promise.all([
         stdoutWriter.flushAndClose(),
         stderrWriter.flushAndClose(),
       ]);
+    }
+
+    if (aborted) {
+      queue.push(
+        createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "error",
+          message: `${this.name} aborted`,
+          data: {
+            reason: "aborted",
+            elapsedMs: Date.now() - startedAtMs,
+            exitCode,
+            command: command.cmd,
+            cwd: command.cwd ?? request.workspacePath,
+            stdoutBytes,
+            stderrBytes,
+            lastOutputTimestamp,
+            stdoutTail: stdoutTail.values(),
+            stderrTail: stderrTail.values(),
+            stdoutLogPath,
+            stderrLogPath,
+          },
+        }),
+      );
+      queue.close();
+      for await (const event of queue) {
+        yield event;
+      }
+      return;
     }
 
     if (timedOut) {
@@ -466,7 +511,13 @@ export async function collectAgentRun(
       findings.push(event.data);
     }
     if (event.type === "error") {
-      status = hasTimedOut(event.data) ? "timed_out" : "failed";
+      if (hasTimedOut(event.data)) {
+        status = "timed_out";
+      } else if (hasAborted(event.data)) {
+        status = "cancelled";
+      } else {
+        status = "failed";
+      }
     }
   }
 
@@ -654,6 +705,14 @@ function hasTimedOut(data: unknown): boolean {
     typeof data === "object" &&
     data !== null &&
     (data as { readonly reason?: unknown }).reason === "timed_out"
+  );
+}
+
+function hasAborted(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { readonly reason?: unknown }).reason === "aborted"
   );
 }
 

@@ -83,7 +83,7 @@ export async function runImplementationSubprocess(input: {
   }
 
   const adapter = createSubprocessAdapter(input.impl);
-  const runPromise = collectAgentRun(adapter, {
+  const collected = await collectAgentRun(adapter, {
     runId,
     roleId: "implementation",
     prompt: input.prompt,
@@ -92,50 +92,22 @@ export async function runImplementationSubprocess(input: {
     scratchpadPath,
     timeoutMs: input.timeoutMs,
     allowedCommands: [],
+    signal: input.signal,
     metadata: {
       work_item_id: input.item.id,
       identifier: input.item.identifier,
     },
   });
-  const result = await raceWithAbort(runPromise, input.signal);
 
-  if (result === "aborted") {
+  if (input.signal?.aborted || collected.result.status === "cancelled") {
     return { status: "failed", error: "aborted" };
   }
 
-  const runStatus = result.result.status;
+  const runStatus = collected.result.status;
   if (runStatus === "failed" || runStatus === "timed_out") {
     return { status: "failed", error: `adapter ${runStatus}` };
   }
   return { status: "succeeded" };
-}
-
-async function raceWithAbort<T>(
-  promise: Promise<T>,
-  signal: AbortSignal | undefined,
-): Promise<T | "aborted"> {
-  if (signal === undefined) {
-    return promise;
-  }
-  if (signal.aborted) {
-    return "aborted";
-  }
-  return new Promise<T | "aborted">((resolve, reject) => {
-    const onAbort = (): void => {
-      resolve("aborted");
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      },
-    );
-  });
 }
 
 export async function runImplementationAppServer(input: {
@@ -178,12 +150,15 @@ export async function runImplementationAppServer(input: {
             scratchpadPath,
             prompt: input.prompt,
             timeoutMs,
+            signal: input.signal,
           })
         : client.continueTurn({
             runId,
             guidance:
               "Continue working on the task. Do not repeat the full original prompt.",
             turnIndex: turn,
+            timeoutMs,
+            signal: input.signal,
           });
 
     let failed = false;
@@ -196,6 +171,9 @@ export async function runImplementationAppServer(input: {
       if (agentEvent.type === "error") {
         failed = true;
       }
+    }
+    if (input.signal?.aborted) {
+      return { status: "failed", error: "aborted" };
     }
     if (failed) {
       return { status: "failed", error: `session turn ${turn} failed` };
