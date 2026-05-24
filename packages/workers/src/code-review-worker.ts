@@ -57,6 +57,10 @@ export async function runCodeReviewWorker(input: {
           error: message,
         }),
       );
+      return {
+        status: "failed",
+        error: `isolated worktree required but failed: ${message}`,
+      };
     }
   }
 
