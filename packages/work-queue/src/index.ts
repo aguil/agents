@@ -571,30 +571,46 @@ export class WorkQueueOrchestrator {
   }
 
   private async shouldMarkCompleted(item: WorkItem): Promise<boolean> {
+    const refresh = await this.fetchStatesForItem(item.id, item.kind);
     if (item.kind === "github_pr_feedback") {
-      const states = await this.fetchStatesForItem(item.id);
-      return states.length === 0;
+      if (refresh.hadFeedErrors) {
+        return false;
+      }
+      return refresh.states.length === 0;
     }
     if (item.kind === "github_issue" || item.kind === "github_pr_review") {
       return true;
     }
-    const states = await this.fetchStatesForItem(item.id);
-    if (states.length === 0) {
+    if (refresh.states.length === 0) {
       return true;
     }
-    return isTerminalState(states[0].state);
+    return isTerminalState(refresh.states[0].state);
   }
 
-  private async fetchStatesForItem(id: string): Promise<readonly WorkItem[]> {
+  private feedHandlesItemKind(feed: WorkFeedClient, kind: string): boolean {
+    return feed.feedKind === kind || feed.feedKind === `${kind}s`;
+  }
+
+  private async fetchStatesForItem(
+    id: string,
+    kind: string,
+  ): Promise<{
+    readonly states: readonly WorkItem[];
+    readonly hadFeedErrors: boolean;
+  }> {
     const states: WorkItem[] = [];
+    let hadFeedErrors = false;
     for (const feed of this.feeds) {
+      if (!this.feedHandlesItemKind(feed, kind)) {
+        continue;
+      }
       try {
         states.push(...(await feed.fetchStates([id])));
       } catch {
-        // ignore per-feed errors
+        hadFeedErrors = true;
       }
     }
-    return states;
+    return { states, hadFeedErrors };
   }
 
   private trackDispatch(promise: Promise<void>): void {
