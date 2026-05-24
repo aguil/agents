@@ -939,6 +939,7 @@ export {
   type SessionStartParams,
   sessionEventToAgentEvent,
 } from "./agent-session-client";
+export { JsonRpcAgentSessionClient } from "./json-rpc-session-client";
 export {
   type AppServerAdapterOptions,
   AppServerAgentAdapter,
