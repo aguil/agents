@@ -91,6 +91,7 @@ export class WorkQueueOrchestrator {
   >();
   private pendingDispatches = 0;
   private readonly pendingByKind = new Map<string, number>();
+  private readonly runningByKind = new Map<string, number>();
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
 
@@ -106,13 +107,28 @@ export class WorkQueueOrchestrator {
   }
 
   private countRunningForKind(kind: string): number {
-    let count = 0;
-    for (const entry of this.running.values()) {
-      if (entry.item.kind === kind) {
-        count += 1;
-      }
+    return this.runningByKind.get(kind) ?? 0;
+  }
+
+  private trackRunningEntry(entry: RunningEntry): void {
+    this.running.set(entry.item.id, entry);
+    const kind = entry.item.kind;
+    this.runningByKind.set(kind, (this.runningByKind.get(kind) ?? 0) + 1);
+  }
+
+  private untrackRunningEntry(id: string): void {
+    const entry = this.running.get(id);
+    if (entry === undefined) {
+      return;
     }
-    return count;
+    const kind = entry.item.kind;
+    const next = (this.runningByKind.get(kind) ?? 1) - 1;
+    if (next <= 0) {
+      this.runningByKind.delete(kind);
+    } else {
+      this.runningByKind.set(kind, next);
+    }
+    this.untrackRunningEntry(id);
   }
 
   private availableAgentSlots(): number {
@@ -292,7 +308,7 @@ export class WorkQueueOrchestrator {
         }),
       );
       entry.abortController.abort();
-      this.running.delete(id);
+      this.untrackRunningEntry(id);
       this.stallAwaitingSettlement.set(id, {
         item: entry.item,
         attempt: supersededAttempt + 1,
@@ -319,13 +335,13 @@ export class WorkQueueOrchestrator {
     for (const [id, entry] of this.running) {
       const fresh = byId.get(id);
       if (fresh === undefined) {
-        this.running.delete(id);
+        this.untrackRunningEntry(id);
         this.claimed.delete(id);
         this.completed.add(id);
         continue;
       }
       if (isTerminalState(fresh.state)) {
-        this.running.delete(id);
+        this.untrackRunningEntry(id);
         this.claimed.delete(id);
         this.completed.add(id);
         await removeIssueWorkspace({
@@ -376,7 +392,7 @@ export class WorkQueueOrchestrator {
     this.releasePendingDispatch(item.kind);
     const startedAtMs = now;
     const abortController = new AbortController();
-    this.running.set(item.id, {
+    this.trackRunningEntry({
       item,
       workspacePath,
       startedAtMs,
@@ -388,7 +404,7 @@ export class WorkQueueOrchestrator {
     const clearRunningIfCurrent = (): void => {
       const current = this.running.get(item.id);
       if (current !== undefined && current.startedAtMs === startedAtMs) {
-        this.running.delete(item.id);
+        this.untrackRunningEntry(item.id);
       }
     };
 
@@ -612,7 +628,7 @@ export class WorkQueueOrchestrator {
   }
 
   private release(id: string, _identifier: string): void {
-    this.running.delete(id);
+    this.untrackRunningEntry(id);
     this.claimed.delete(id);
     this.retryAttempts.delete(id);
     this.stallAwaitingSettlement.delete(id);
