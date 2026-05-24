@@ -10,6 +10,7 @@
     "@aguil/agents-code-review-inbox": "workspace:*",
     "@aguil/agents-github": "workspace:*",
     "@aguil/agents-pr-feedback": "workspace:*",
+    "@aguil/agents-workspace": "workspace:*",
     "@aguil/agents-workflow": "workspace:*"
   }
 }

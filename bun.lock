@@ -26,6 +26,7 @@
       "name": "@aguil/agentsd",
       "version": "0.0.0",
       "dependencies": {
+        "@aguil/agents-publish": "workspace:*",
         "@aguil/agents-tracker": "workspace:*",
         "@aguil/agents-work-queue": "workspace:*",
         "@aguil/agents-workers": "workspace:*",
@@ -140,6 +141,7 @@
         "@aguil/agents-github": "workspace:*",
         "@aguil/agents-pr-feedback": "workspace:*",
         "@aguil/agents-workflow": "workspace:*",
+        "@aguil/agents-workspace": "workspace:*",
       },
     },
     "packages/triage": {

@@ -8,6 +8,7 @@ import {
   submitPrFeedbackReplies,
 } from "@aguil/agents-pr-feedback";
 import { expandReposRoot, findClonePath } from "./code-review-workspace";
+import { runPrFeedbackSelectCli } from "./pr-feedback-select";
 
 function printPrFeedbackUsage(): void {
   console.log(`Usage: agents pr-feedback <command> [options]
@@ -15,6 +16,7 @@ function printPrFeedbackUsage(): void {
 Commands:
   collect   Export unresolved review threads to feedback.json (scope A)
   submit    Post thread replies from a responses draft (operator-approved)
+  select    Approve/dismiss PRs for agentsd interactive selection
 
 Global:
   --workspace <path>   Workspace for gh (default: cwd)
@@ -94,6 +96,9 @@ export async function runPrFeedbackCli(
 
   const cmd = rest[0];
   const tail = rest.slice(1);
+  if (cmd === "select") {
+    return runPrFeedbackSelectCli(tail);
+  }
   if (cmd !== "collect" && cmd !== "submit") {
     console.error(`Unknown pr-feedback command '${cmd ?? ""}'.`);
     printPrFeedbackUsage();

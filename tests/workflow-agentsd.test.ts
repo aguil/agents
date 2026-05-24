@@ -191,6 +191,24 @@ test("codex front matter aliases into agent runtime", () => {
   expect(agent.runtime).toBe("app_server");
 });
 
+test("codex.protocol is not aliased into agent.protocol", () => {
+  const agent = applyCodexAlias(
+    { protocol: "explicit_protocol" },
+    { protocol: "codex_app_server_v2", command: "codex app-server" },
+  );
+  expect(agent.protocol).toBe("explicit_protocol");
+  const fresh = applyCodexAlias({}, { protocol: "codex_app_server_v2" });
+  expect(fresh.protocol).toBeUndefined();
+  const parsed = parseImplementationExecution({
+    config: {
+      codex: { protocol: "codex_app_server_v2", command: "codex app-server" },
+    },
+    workflowDir: "/tmp/workflow",
+    env: {},
+  });
+  expect(parsed.protocol).toBeNull();
+});
+
 test("parseImplementationExecution preserves shell command argv", () => {
   const parsed = parseImplementationExecution({
     config: { agent: { command: "codex app-server", runtime: "app_server" } },
@@ -323,4 +341,46 @@ test("evaluatePrFeedbackPublish requires responses for submit", () => {
   });
   expect(decision.shouldPublish).toBe(false);
   expect(decision.skipReason).toBe("responses_document_missing");
+});
+
+test("evaluatePrFeedbackPublish requires approval before submit by default", () => {
+  const publish = {
+    codeReview: {
+      mode: "off" as const,
+      reviewSummary: "impact" as const,
+      staleHead: "skip" as const,
+      replacePending: false,
+      requireEmptyTriage: true,
+    },
+    prFeedback: {
+      mode: "submit" as const,
+      requireEmptyTriage: true,
+      requireResponsesDocument: true,
+    },
+  };
+  const blocked = evaluatePrFeedbackPublish({
+    publish,
+    triageItemCount: 0,
+    responsesPath: "/tmp/responses.json",
+    prApprovedForSubmit: false,
+  });
+  expect(blocked.shouldPublish).toBe(false);
+  expect(blocked.skipReason).toBe("approval_required");
+
+  const allowed = evaluatePrFeedbackPublish({
+    publish,
+    triageItemCount: 0,
+    responsesPath: "/tmp/responses.json",
+    prApprovedForSubmit: true,
+  });
+  expect(allowed.shouldPublish).toBe(true);
+
+  const policyOff = evaluatePrFeedbackPublish({
+    publish,
+    triageItemCount: 0,
+    responsesPath: "/tmp/responses.json",
+    requireApprovalBeforeSubmit: false,
+    prApprovedForSubmit: false,
+  });
+  expect(policyOff.shouldPublish).toBe(true);
 });

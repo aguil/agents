@@ -1,10 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { parseCodeReviewPolicy } from "./code-review-policy";
 import {
   parseImplementationExecution,
   validateImplementationRuntime,
 } from "./implementation-runtime";
+import { parsePrFeedbackPolicy } from "./pr-feedback-policy";
 import { resolveConfigString } from "./resolve-vars";
 import type {
   PublishCodeReviewConfig,
@@ -100,6 +102,9 @@ function buildWorkflowDefinition(input: {
 
   const feeds = parseFeeds(input.config.feeds);
   const workers = parseWorkers(input.config.workers);
+  const prFeedbackPolicy = parsePrFeedbackPolicy(input.config);
+  const codeReviewPolicy = parseCodeReviewPolicy(input.config);
+  const perFeedMaxConcurrent = parsePerFeedMaxConcurrent(feeds);
   const implementation = parseImplementationExecution({
     config: input.config,
     workflowDir: input.workflowDir,
@@ -113,7 +118,10 @@ function buildWorkflowDefinition(input: {
     workflowDir: input.workflowDir,
     feeds,
     workers,
-    publish: parsePublishConfig(publishRaw),
+    publish: parsePublishConfig(publishRaw, codeReviewPolicy),
+    prFeedbackPolicy,
+    codeReviewPolicy,
+    perFeedMaxConcurrent,
     pollingIntervalMs: positiveInt(polling.interval_ms, 30_000),
     workspaceRoot,
     maxConcurrentAgents: positiveInt(agent.max_concurrent_agents, 10),
@@ -128,6 +136,20 @@ export function validateWorkflowDefinition(
   definition: WorkflowDefinition,
 ): string | undefined {
   return validateImplementationRuntime(definition.implementation);
+}
+
+function parsePerFeedMaxConcurrent(
+  feeds: readonly WorkflowFeedConfig[],
+): Readonly<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const feed of feeds) {
+    const max = feed.raw.max_concurrent;
+    if (typeof max === "number" && Number.isFinite(max) && max > 0) {
+      // Orchestrator keys caps by work-item kind; duplicate feed kinds share one limit.
+      out[feed.kind] = Math.floor(max);
+    }
+  }
+  return out;
 }
 
 function parseFeeds(value: unknown): readonly WorkflowFeedConfig[] {
@@ -175,6 +197,7 @@ function parseWorkers(value: unknown): Readonly<Record<string, string>> {
 
 function parsePublishConfig(
   raw: Record<string, unknown>,
+  codeReviewPolicy: import("./code-review-policy").CodeReviewPolicyConfig,
 ): WorkflowPublishConfig {
   const codeReviewRaw = asRecord(raw.code_review);
   const prFeedbackRaw = asRecord(raw.pr_feedback);
@@ -195,7 +218,10 @@ function parsePublishConfig(
     reviewSummary: parseReviewSummary(codeReviewRaw.review_summary),
     staleHead: codeReviewRaw.stale_head === "post" ? "post" : "skip",
     replacePending: codeReviewRaw.replace_pending === true,
-    requireEmptyTriage: codeReviewRaw.require_empty_triage !== false,
+    // publish_with_findings (#39): operator opts in to posting when triage has items.
+    requireEmptyTriage: codeReviewPolicy.publishWithFindings
+      ? false
+      : codeReviewRaw.require_empty_triage !== false,
   };
 
   const prFeedback: PublishPrFeedbackConfig = {

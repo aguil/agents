@@ -6,6 +6,10 @@ import {
 } from "@aguil/agents-publish";
 import type { WorkItem } from "@aguil/agents-tracker";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
+import {
+  isPrApprovedForWork,
+  readSelectionDocument,
+} from "@aguil/agents-workflow";
 import { runPrFeedbackFixes } from "./pr-feedback-fix";
 
 export async function runPrFeedbackWorker(input: {
@@ -13,9 +17,11 @@ export async function runPrFeedbackWorker(input: {
   readonly workspacePath: string;
   readonly hostWorkspacePath: string;
   readonly definition: WorkflowDefinition;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
+  readonly closeWorkItem?: boolean;
 }> {
   const repo = input.item.metadata.repository;
   const prRaw = input.item.metadata.pull_number;
@@ -26,6 +32,29 @@ export async function runPrFeedbackWorker(input: {
       status: "failed",
       error: "missing repository or pull_number metadata",
     };
+  }
+
+  if (input.signal?.aborted) {
+    return { status: "failed", error: "aborted" };
+  }
+
+  const policy = input.definition.prFeedbackPolicy;
+  const selection = await readSelectionDocument(input.hostWorkspacePath);
+  const approved = new Set(selection.approved);
+  const prApprovedForSubmit = isPrApprovedForWork(
+    policy,
+    approved,
+    input.item.metadata,
+  );
+  if (!prApprovedForSubmit) {
+    console.warn(
+      JSON.stringify({
+        event: "pr_feedback_fix_skipped_not_approved",
+        work_item_id: input.item.id,
+        identifier: input.item.identifier,
+      }),
+    );
+    return { status: "succeeded" };
   }
 
   let { outputDir, document } = await collectPrFeedback({
@@ -102,6 +131,8 @@ export async function runPrFeedbackWorker(input: {
     feedbackPath,
     triageItemCount,
     responsesPath,
+    requireApprovalBeforeSubmit: policy.requireApprovalBeforeSubmit,
+    prApprovedForSubmit,
   });
 
   console.log(
@@ -127,5 +158,7 @@ export async function runPrFeedbackWorker(input: {
   if (submitResult.error !== undefined) {
     return { status: "failed", error: submitResult.error };
   }
-  return { status: "succeeded" };
+  const blocksRequeue =
+    submitResult.decision.skipReason === "approval_required";
+  return { status: "succeeded", closeWorkItem: !blocksRequeue };
 }

@@ -48,8 +48,10 @@ same adapter family as `agents code-review`. `execution.implementation.adapter`
 also drives **code review** and **pr-feedback fix** workers (not a separate fake
 default in `agentsd`).
 
-**App server:** multi-turn loop via `AgentSessionClient` (stub session driver
-until a full JSON-RPC client is added). Requires `agent.command`.
+**App server:** multi-turn loop via `AgentSessionClient` and the
+`json_rpc_session_v1` line-delimited JSON-RPC driver (`agent.command` required).
+Set `agent.protocol` to `json_rpc_session_v1` explicitly; the `codex:` alias
+maps command and timeouts only (not `codex.protocol` — see ADR 0004).
 
 ### Publish execution (when enabled in `WORKFLOW.md`)
 
@@ -75,9 +77,10 @@ retried on the next poll tick (best-effort; in-flight work may still complete).
 - PR feedback auto-submit requires an operator-authored responses document.
 - Implementation workers follow configured runtime; subprocess adapters use the
   same CLI boundaries as the code-review harness.
-- PR feedback **fix** workers treat review-thread bodies as operational input;
-  untrusted-reviewer / allowlist policy is **not** enforced yet — see
-  [#36](https://github.com/aguil/agents/issues/36).
+- PR feedback **fix** workers run only for operator-**approved** PRs
+  (interactive selection via `agents pr-feedback select` after notification).
+  Treat review-thread bodies as operational input; use trusted reviewers on
+  approved PRs.
 
 ## Known limitations (platform landed)
 
@@ -85,24 +88,68 @@ PR [#33](https://github.com/aguil/agents/pull/33) lands the scheduler and
 workers; the items below are tracked for **shippable E2E**, not blockers for
 merging the platform PR.
 
-| Topic                                                                         | GitHub issue                                     |
-| ----------------------------------------------------------------------------- | ------------------------------------------------ |
-| PR feedback playbook + operator policy (ingest, allowlist, multi-round drain) | [#36](https://github.com/aguil/agents/issues/36) |
-| Work-item terminal semantics; stop post-success retry churn                   | [#37](https://github.com/aguil/agents/issues/37) |
-| `WORKFLOW.md` hot reload (orchestrator/router/publish); graceful shutdown     | [#38](https://github.com/aguil/agents/issues/38) |
-| Code-review worker parity (worktree, publish-with-findings)                   | [#39](https://github.com/aguil/agents/issues/39) |
-| Per-feed concurrency, JSONL observability, production runbook                 | [#40](https://github.com/aguil/agents/issues/40) |
-| Stall timeout: cancel or isolate in-flight implementation workers             | [#41](https://github.com/aguil/agents/issues/41) |
-| `codex:` alias vs ADR 0004 (`codex.protocol` field)                           | [#42](https://github.com/aguil/agents/issues/42) |
-| Real `app_server` JSON-RPC client                                             | [#34](https://github.com/aguil/agents/issues/34) |
-| MCP feed, `github_issues` dogfood, publish integration tests                  | [#35](https://github.com/aguil/agents/issues/35) |
+| Topic                                                                        | GitHub issue                                                                              |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| PR feedback ingest on posted review activity (beyond static thread snapshot) | [#36](https://github.com/aguil/agents/issues/36) (partial: interactive selection shipped) |
+| Work-item terminal semantics; stop post-success retry churn                  | [#37](https://github.com/aguil/agents/issues/37) (shipped)                                |
+| `WORKFLOW.md` hot reload (orchestrator/router/publish); graceful shutdown    | [#38](https://github.com/aguil/agents/issues/38)                                          |
+| Code-review worker parity (worktree, publish-with-findings)                  | [#39](https://github.com/aguil/agents/issues/39)                                          |
+| Per-feed concurrency, JSONL observability, production runbook                | [#40](https://github.com/aguil/agents/issues/40)                                          |
+| Stall timeout: cancel or isolate in-flight implementation workers            | [#41](https://github.com/aguil/agents/issues/41) (shipped)                                |
+| Real `app_server` JSON-RPC client                                            | [#34](https://github.com/aguil/agents/issues/34) (shipped: `json_rpc_session_v1`)         |
+| MCP feed, `github_issues` dogfood, publish integration tests                 | [#35](https://github.com/aguil/agents/issues/35)                                          |
 
-**Stall / reload behavior today:** `agent.stall_timeout_ms` releases a work item
-from the running map and may retry while the prior worker is still executing
-([#41](https://github.com/aguil/agents/issues/41)). Editing `WORKFLOW.md` on
-disk updates prompt templates via reload, but poll interval, workers, publish,
-and adapter settings require restart until
-[#38](https://github.com/aguil/agents/issues/38).
+**Stall / reload behavior today:** when `agent.stall_timeout_ms` fires, the
+orchestrator aborts the in-flight worker via `AbortSignal` and retries after the
+dispatch settles ([#41](https://github.com/aguil/agents/issues/41)). Editing
+`WORKFLOW.md` reloads the workflow definition, feed clients, per-feed
+concurrency caps, workspace hooks, implementation stall timeout, and subprocess
+code-review adapter selection on the next dispatch
+([#38](https://github.com/aguil/agents/issues/38) partial). Poll interval
+follows the reloaded definition on the next tick. Implementation workers already
+read `implementation.*` from the active definition each dispatch.
+
+**Tracked follow-ups (not blocking agentsd ship):**
+
+- Per-feed `max_concurrent` keys vs work-item `kind` mismatch
+  ([#47](https://github.com/aguil/agents/issues/47))
+- Extra GitHub thread scan on PR-feedback completion when submit is deferred
+  ([#48](https://github.com/aguil/agents/issues/48))
+
+**Startup terminal cleanup** runs in the background (does not block the poll
+loop). For `github_pr_feedback`, it only re-checks PRs that already have a
+per-item workspace under `workspace.root` (`.agents-work-item.json` marker), not
+every authored open PR.
+
+## Interactive PR feedback selection
+
+Default `policy.pr_feedback.profile` is **`interactive`**:
+
+1. `agentsd` discovers authored PRs with unresolved threads and writes
+   `.agentsd/pr-feedback-selection.json` under `AGENTSD_WORKSPACE`.
+2. JSONL event `pr_feedback_selection_required` plus optional **system**
+   notification (`notify-send` / `terminal-notifier`) and **webhook**.
+3. Operator approves PRs:
+   `agents pr-feedback select --selection-id <id> --approve owner/repo#n`.
+4. Only approved PRs run the `pr_feedback` worker (collect → triage → fix).
+
+`profile: unattended` requires explicit `policy.pr_feedback.allow` list.
+
+## Production profile
+
+| Setting                      | Recommendation                                                                   |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| `AGENTSD_WORKSPACE`          | Host repo path for `gh` and selection state                                      |
+| `publish.*`                  | Keep **`off`** until playbook gates are configured                               |
+| `policy.pr_feedback.profile` | `interactive` for operator-approved PRs                                          |
+| `feeds[].max_concurrent`     | Cap per-feed parallelism (see `WORKFLOW.example.md`)                             |
+| Notifications                | `notify-send` (Linux) or Slack via `SLACK_WEBHOOK_URL` + `slack_webhook` channel |
+
+Golden-path smoke: `bun test tests/agentsd-followup.test.ts`. Example issue
+feed:
+[`docs/examples/WORKFLOW.github-issues.example.md`](examples/WORKFLOW.github-issues.example.md).
+Notify receiver example:
+[`docs/examples/notify-receiver/`](examples/notify-receiver/).
 
 ## One-shot CLI
 

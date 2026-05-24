@@ -1,3 +1,6 @@
+import type { CodeReviewPolicyConfig } from "./code-review-policy";
+import type { PrFeedbackPolicyConfig } from "./pr-feedback-policy";
+
 export type WorkflowLoadErrorCode =
   | "missing_workflow_file"
   | "workflow_parse_error"
@@ -56,6 +59,9 @@ export interface WorkflowDefinition {
   readonly feeds: readonly WorkflowFeedConfig[];
   readonly workers: Readonly<Record<string, string>>;
   readonly publish: WorkflowPublishConfig;
+  readonly prFeedbackPolicy: PrFeedbackPolicyConfig;
+  readonly codeReviewPolicy: CodeReviewPolicyConfig;
+  readonly perFeedMaxConcurrent: Readonly<Record<string, number>>;
   readonly pollingIntervalMs: number;
   readonly workspaceRoot: string;
   readonly maxConcurrentAgents: number;

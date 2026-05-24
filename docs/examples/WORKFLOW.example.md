@@ -14,8 +14,17 @@ execution:
     adapter: fake
 hooks:
   timeout_ms: 60000
+policy:
+  pr_feedback:
+    profile: interactive
+    notify:
+      channels:
+        - kind: jsonl
+        - kind: system
+      cooldown_ms: 300000
 feeds:
   - kind: github_issues
+    max_concurrent: 2
     repository: org/repo
     active_states:
       - open
@@ -25,6 +34,7 @@ feeds:
     include_team: true
     max_open: 5
   - kind: github_pr_feedback
+    max_concurrent: 2
 workers:
   github_issue: implementation
   github_pr_review: code_review

@@ -10,6 +10,7 @@ import {
   collectAgentRun,
   FakeAgentAdapter,
   FakeAgentSessionClient,
+  JsonRpcAgentSessionClient,
   SessionAgentAdapterClient,
   sessionEventToAgentEvent,
 } from "@aguil/agents-execution";
@@ -33,9 +34,18 @@ export function createSubprocessAdapter(
 
 export function createSessionClient(
   impl: ImplementationExecutionConfig,
-): FakeAgentSessionClient | SessionAgentAdapterClient {
+):
+  | FakeAgentSessionClient
+  | SessionAgentAdapterClient
+  | JsonRpcAgentSessionClient {
   if (impl.command === null) {
     return new FakeAgentSessionClient({ protocol: impl.protocol ?? "fake" });
+  }
+  if (impl.protocol === "json_rpc_session_v1") {
+    return new JsonRpcAgentSessionClient({
+      command: impl.command,
+      protocol: impl.protocol,
+    });
   }
   return new SessionAgentAdapterClient({
     command: impl.command,
@@ -50,6 +60,7 @@ export async function runImplementationSubprocess(input: {
   readonly prompt: string;
   readonly impl: ImplementationExecutionConfig;
   readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
@@ -67,8 +78,12 @@ export async function runImplementationSubprocess(input: {
     "utf8",
   );
 
+  if (input.signal?.aborted) {
+    return { status: "failed", error: "aborted" };
+  }
+
   const adapter = createSubprocessAdapter(input.impl);
-  const result = await collectAgentRun(adapter, {
+  const collected = await collectAgentRun(adapter, {
     runId,
     roleId: "implementation",
     prompt: input.prompt,
@@ -77,13 +92,18 @@ export async function runImplementationSubprocess(input: {
     scratchpadPath,
     timeoutMs: input.timeoutMs,
     allowedCommands: [],
+    signal: input.signal,
     metadata: {
       work_item_id: input.item.id,
       identifier: input.item.identifier,
     },
   });
 
-  const runStatus = result.result.status;
+  if (input.signal?.aborted || collected.result.status === "cancelled") {
+    return { status: "failed", error: "aborted" };
+  }
+
+  const runStatus = collected.result.status;
   if (runStatus === "failed" || runStatus === "timed_out") {
     return { status: "failed", error: `adapter ${runStatus}` };
   }
@@ -95,6 +115,7 @@ export async function runImplementationAppServer(input: {
   readonly workspacePath: string;
   readonly prompt: string;
   readonly definition: WorkflowDefinition;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
@@ -118,6 +139,9 @@ export async function runImplementationAppServer(input: {
   const timeoutMs = impl.turnTimeoutMs ?? 3_600_000;
 
   for (let turn = 0; turn < maxTurns; turn += 1) {
+    if (input.signal?.aborted) {
+      return { status: "failed", error: "aborted" };
+    }
     const stream =
       turn === 0
         ? client.startSession({
@@ -126,12 +150,15 @@ export async function runImplementationAppServer(input: {
             scratchpadPath,
             prompt: input.prompt,
             timeoutMs,
+            signal: input.signal,
           })
         : client.continueTurn({
             runId,
             guidance:
               "Continue working on the task. Do not repeat the full original prompt.",
             turnIndex: turn,
+            timeoutMs,
+            signal: input.signal,
           });
 
     let failed = false;
@@ -144,6 +171,9 @@ export async function runImplementationAppServer(input: {
       if (agentEvent.type === "error") {
         failed = true;
       }
+    }
+    if (input.signal?.aborted) {
+      return { status: "failed", error: "aborted" };
     }
     if (failed) {
       return { status: "failed", error: `session turn ${turn} failed` };

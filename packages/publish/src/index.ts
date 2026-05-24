@@ -15,7 +15,8 @@ export type PublishSkipReason =
   | "stale_head"
   | "pending_review_exists"
   | "responses_document_missing"
-  | "submit_not_implemented";
+  | "submit_not_implemented"
+  | "approval_required";
 
 export interface CodeReviewPublishInput {
   readonly publish: WorkflowPublishConfig;
@@ -96,6 +97,10 @@ export interface PrFeedbackPublishInput {
   readonly publish: WorkflowPublishConfig;
   readonly triageItemCount: number;
   readonly responsesPath?: string;
+  /** When true (default), submit requires operator approval in selection state. */
+  readonly requireApprovalBeforeSubmit?: boolean;
+  /** Set when {@link requireApprovalBeforeSubmit} is active; must be true to submit. */
+  readonly prApprovedForSubmit?: boolean;
 }
 
 export function evaluatePrFeedbackPublish(
@@ -125,6 +130,16 @@ export function evaluatePrFeedbackPublish(
       "responses_document_missing",
       undefined,
       "pr-feedback submit --draft …",
+    );
+  }
+  if (
+    input.requireApprovalBeforeSubmit !== false &&
+    input.prApprovedForSubmit !== true
+  ) {
+    return off(
+      "approval_required",
+      undefined,
+      "agents pr-feedback select --approve <owner/repo#n>",
     );
   }
   return { shouldPublish: true, mode: "submit" };
@@ -165,6 +180,13 @@ export {
   fetchPullRequestHeadSha,
   viewerHasPendingPullRequestReview,
 } from "./github-context";
+export {
+  buildSelectCommand,
+  createSelectionNotifyChannels,
+  dispatchSelectionNotifications,
+  type SelectionNotificationPayload,
+  type SelectionNotifyChannel,
+} from "./selection-notify";
 export {
   countCodeReviewTriageItems,
   countPrFeedbackTriageItems,

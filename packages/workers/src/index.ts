@@ -12,6 +12,7 @@ import { createWorkflowAgentAdapter } from "./workflow-adapter";
 
 export interface WorkerRouterOptions {
   readonly definition: WorkflowDefinition;
+  readonly getDefinition?: () => WorkflowDefinition;
   readonly adapter?: AgentAdapter;
   readonly hostWorkspacePath: string;
 }
@@ -22,13 +23,11 @@ export { createWorkflowAgentAdapter } from "./workflow-adapter";
 export function createWorkerRouter(
   options: WorkerRouterOptions,
 ): WorkQueueWorker {
-  const adapter =
-    options.adapter ??
-    createWorkflowAgentAdapter(options.definition.implementation);
-  const workers = options.definition.workers;
-
-  return async ({ item, workspacePath, prompt }) => {
-    const workerKind = resolveWorkerKind(item, workers);
+  return async ({ item, workspacePath, prompt, signal }) => {
+    const definition = options.getDefinition?.() ?? options.definition;
+    const adapter =
+      options.adapter ?? createWorkflowAgentAdapter(definition.implementation);
+    const workerKind = resolveWorkerKind(item, definition.workers);
     try {
       switch (workerKind) {
         case "code_review":
@@ -37,22 +36,25 @@ export function createWorkerRouter(
             workspacePath,
             hostWorkspacePath: options.hostWorkspacePath,
             adapter,
-            definition: options.definition,
+            definition,
             prompt,
+            signal,
           });
         case "pr_feedback":
           return await runPrFeedbackWorker({
             item,
             workspacePath,
             hostWorkspacePath: options.hostWorkspacePath,
-            definition: options.definition,
+            definition,
+            signal,
           });
         case "implementation":
           return await runImplementationWorker({
             item,
             workspacePath,
             prompt,
-            definition: options.definition,
+            definition,
+            signal,
           });
         default:
           return {
@@ -93,6 +95,7 @@ async function runImplementationWorker(input: {
   readonly workspacePath: string;
   readonly prompt: string;
   readonly definition: WorkflowDefinition;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
@@ -112,12 +115,17 @@ async function runImplementationWorker(input: {
   );
 
   const timeoutMs = impl.turnTimeoutMs ?? 3_600_000;
+  if (input.signal?.aborted) {
+    return { status: "failed", error: "aborted" };
+  }
+
   if (impl.mode === "app_server") {
     return runImplementationAppServer({
       item: input.item,
       workspacePath: input.workspacePath,
       prompt: input.prompt,
       definition: input.definition,
+      signal: input.signal,
     });
   }
 
@@ -127,5 +135,6 @@ async function runImplementationWorker(input: {
     prompt: input.prompt,
     impl,
     timeoutMs,
+    signal: input.signal,
   });
 }

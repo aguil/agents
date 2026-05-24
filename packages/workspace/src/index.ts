@@ -18,6 +18,13 @@ export interface WorkspaceHooks {
   readonly timeoutMs: number;
 }
 
+export {
+  listWorkItemMarkers,
+  WORK_ITEM_MARKER_FILENAME,
+  type WorkItemMarker,
+  writeWorkItemMarker,
+} from "./work-item-marker";
+
 export function sanitizeWorkspaceKey(identifier: string): string {
   const key = identifier.replace(WORKSPACE_KEY_RE, "_");
   if (key.length === 0 || key === "." || key === "..") {

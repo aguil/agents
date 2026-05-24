@@ -1,10 +1,7 @@
 import { resolve } from "node:path";
 import { createWorkFeeds, workItemTemplateVars } from "@aguil/agents-tracker";
 import { WorkQueueOrchestrator } from "@aguil/agents-work-queue";
-import {
-  createWorkerRouter,
-  createWorkflowAgentAdapter,
-} from "@aguil/agents-workers";
+import { createWorkerRouter } from "@aguil/agents-workers";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
 import {
   loadWorkflowFile,
@@ -13,6 +10,7 @@ import {
   watchWorkflowFile,
 } from "@aguil/agents-workflow";
 import type { WorkspaceHooks } from "@aguil/agents-workspace";
+import { syncPrFeedbackSelection } from "./pr-feedback-selection";
 
 export interface AgentsdOptions {
   readonly workflowPath?: string;
@@ -47,32 +45,34 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
     return 1;
   }
 
-  const feeds = createWorkFeeds({
-    workflowDir: definition.workflowDir,
-    workspacePath: hostWorkspace,
-    feeds: definition.feeds,
-    mcpInvoke: argv.includes("--with-mcp") ? defaultMcpInvoke : undefined,
-  });
+  let activeDefinition = definition;
+  const feeds = () =>
+    createWorkFeeds({
+      workflowDir: activeDefinition.workflowDir,
+      workspacePath: hostWorkspace,
+      feeds: activeDefinition.feeds,
+      mcpInvoke: argv.includes("--with-mcp") ? defaultMcpInvoke : undefined,
+    });
 
-  if (feeds.length === 0) {
+  if (feeds().length === 0) {
     console.warn(
       "[agentsd] no work feeds configured; polling will idle until WORKFLOW.md defines feeds",
     );
   }
 
-  const hooks = workflowHooks(definition);
-  let activeDefinition = definition;
+  const hooks = () => workflowHooks(activeDefinition);
 
   const orchestrator = new WorkQueueOrchestrator({
     definition: activeDefinition,
-    feeds,
-    hooks,
+    feeds: feeds(),
+    hooks: hooks(),
     implementationStallTimeoutMs:
       activeDefinition.implementation.stallTimeoutMs,
+    perFeedMaxConcurrent: activeDefinition.perFeedMaxConcurrent,
     worker: createWorkerRouter({
       definition: activeDefinition,
+      getDefinition: () => activeDefinition,
       hostWorkspacePath: hostWorkspace,
-      adapter: createWorkflowAgentAdapter(activeDefinition.implementation),
     }),
     renderPrompt: (item, attempt) => {
       const rendered = renderStrictTemplate(activeDefinition.promptTemplate, {
@@ -87,6 +87,12 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
           : "You are working on a tracked work item.";
       return { ok: true, prompt: body };
     },
+    filterCandidates: async (items) =>
+      syncPrFeedbackSelection({
+        definition: activeDefinition,
+        hostWorkspacePath: hostWorkspace,
+        candidates: items,
+      }),
   });
 
   const watcher = watchWorkflowFile(workflowPath, (next, error) => {
@@ -96,13 +102,34 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
     }
     if (next !== undefined) {
       activeDefinition = next;
+      orchestrator.updateDefinition(next, {
+        feeds: feeds(),
+        perFeedMaxConcurrent: next.perFeedMaxConcurrent,
+        hooks: hooks(),
+      });
       console.log(
-        JSON.stringify({ event: "workflow_reloaded", path: workflowPath }),
+        JSON.stringify({
+          event: "workflow_reloaded",
+          path: workflowPath,
+          polling_interval_ms: next.pollingIntervalMs,
+          publish_code_review: next.publish.codeReview.mode,
+          publish_pr_feedback: next.publish.prFeedback.mode,
+          implementation_adapter: next.implementation.adapter,
+          implementation_protocol: next.implementation.protocol,
+        }),
       );
     }
   });
 
-  await orchestrator.startupTerminalCleanup();
+  void orchestrator.startupTerminalCleanup().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      JSON.stringify({
+        event: "startup_terminal_cleanup_failed",
+        error: message,
+      }),
+    );
+  });
   orchestrator.start();
 
   console.log(
@@ -110,9 +137,10 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
       event: "agentsd_started",
       workflow_path: workflowPath,
       workspace_root: activeDefinition.workspaceRoot,
-      feeds: feeds.map((f) => f.feedKind),
+      feeds: feeds().map((f) => f.feedKind),
       publish_code_review: activeDefinition.publish.codeReview.mode,
       publish_pr_feedback: activeDefinition.publish.prFeedback.mode,
+      pr_feedback_profile: activeDefinition.prFeedbackPolicy.profile,
       implementation_runtime: activeDefinition.implementation.mode,
       implementation_adapter: activeDefinition.implementation.adapter,
       implementation_protocol: activeDefinition.implementation.protocol,
@@ -121,9 +149,10 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
 
   await new Promise<void>((resolvePromise) => {
     const onSignal = () => {
-      orchestrator.stop();
-      watcher.close();
-      resolvePromise();
+      void orchestrator.stopAndDrain({ timeoutMs: 60_000 }).finally(() => {
+        watcher.close();
+        resolvePromise();
+      });
     };
     process.once("SIGINT", onSignal);
     process.once("SIGTERM", onSignal);

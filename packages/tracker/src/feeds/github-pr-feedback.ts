@@ -1,6 +1,12 @@
+import { readdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { GitHubReviewInboxSource } from "@aguil/agents-code-review-inbox";
 import { collectUnresolvedReviewThreads } from "@aguil/agents-pr-feedback";
-import type { WorkFeedClient } from "../feed-client";
+import {
+  WORK_ITEM_MARKER_FILENAME,
+  type WorkItemMarker,
+} from "@aguil/agents-workspace";
+import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
 
 export interface GitHubPrFeedbackFeedOptions {
@@ -149,9 +155,142 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
     return items;
   }
 
-  async fetchTerminal(): Promise<readonly WorkItem[]> {
+  async fetchTerminal(
+    context?: WorkFeedTerminalContext,
+  ): Promise<readonly WorkItem[]> {
+    const workspacePath = this.options.workspacePath;
+    const workspaceRoot = context?.workspaceRoot;
+    if (workspaceRoot === undefined) {
+      return [];
+    }
+
+    const maxProbes = context?.maxTerminalProbes;
+    const fromMarkers = await listPrFeedbackPullsFromWorkspaces(
+      workspaceRoot,
+      maxProbes,
+    );
+    const scoped =
+      this.options.repository === undefined
+        ? fromMarkers
+        : fromMarkers.filter(
+            (pull) => pull.repository === this.options.repository,
+          );
+    if (scoped.length === 0) {
+      return [];
+    }
+
+    const toProbe = scoped;
+
+    const concurrency = Math.max(
+      1,
+      Math.min(this.options.threadConcurrency ?? 3, toProbe.length),
+    );
+    const withThreads = await mapWithConcurrency(
+      toProbe,
+      concurrency,
+      async (pull) => ({
+        pull,
+        threads: await collectUnresolvedReviewThreads({
+          workspacePath,
+          repository: pull.repository,
+          pullNumber: pull.pullNumber,
+        }),
+      }),
+    );
+    const terminal: WorkItem[] = [];
+    for (const { pull, threads } of withThreads) {
+      if (threads.length > 0) {
+        continue;
+      }
+      terminal.push({
+        id: `${pull.repository}/pull/${pull.pullNumber}/feedback`,
+        identifier: `${pull.repository}#${pull.pullNumber}-feedback`,
+        title: pull.identifier,
+        description: "no unresolved review threads",
+        state: "feedback_done",
+        kind: "github_pr_feedback",
+        priority: 2,
+        url: `https://github.com/${pull.repository}/pull/${pull.pullNumber}`,
+        labels: [],
+        blockedBy: [],
+        createdAt: null,
+        updatedAt: null,
+        branchName: null,
+        metadata: {
+          repository: pull.repository,
+          pull_number: String(pull.pullNumber),
+          unresolved_thread_count: "0",
+        },
+      });
+    }
+    return terminal;
+  }
+}
+
+async function listPrFeedbackPullsFromWorkspaces(
+  workspaceRoot: string,
+  maxPulls?: number,
+): Promise<
+  readonly {
+    readonly repository: string;
+    readonly pullNumber: number;
+    readonly identifier: string;
+  }[]
+> {
+  const root = resolve(workspaceRoot);
+  let entries: string[];
+  try {
+    entries = await readdir(root);
+  } catch {
     return [];
   }
+
+  const pulls: {
+    readonly repository: string;
+    readonly pullNumber: number;
+    readonly identifier: string;
+  }[] = [];
+  let probes = 0;
+  for (const entry of entries) {
+    if (maxPulls !== undefined && probes >= maxPulls) {
+      break;
+    }
+    probes += 1;
+    const path = resolve(root, entry);
+    if (path !== root && !path.startsWith(`${root}/`)) {
+      continue;
+    }
+    let marker: WorkItemMarker;
+    try {
+      const raw = await readFile(join(path, WORK_ITEM_MARKER_FILENAME), "utf8");
+      marker = JSON.parse(raw) as WorkItemMarker;
+    } catch {
+      continue;
+    }
+    if (marker.kind !== "github_pr_feedback") {
+      continue;
+    }
+    const parsed = parsePrFeedbackIdentifier(marker.identifier);
+    if (parsed === null) {
+      continue;
+    }
+    pulls.push({ ...parsed, identifier: marker.identifier });
+  }
+  return pulls;
+}
+
+export function parsePrFeedbackIdentifier(
+  identifier: string,
+): { readonly repository: string; readonly pullNumber: number } | null {
+  const match = /^(.+)#(\d+)-feedback$/.exec(identifier);
+  if (match === null) {
+    return null;
+  }
+  const pullNumber = Number(match[2]);
+  if (!Number.isInteger(pullNumber) || pullNumber <= 0) {
+    return null;
+  }
+  return { repository: match[1], pullNumber };
 }
 
 async function mapWithConcurrency<T, R>(

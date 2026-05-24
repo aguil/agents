@@ -1,13 +1,16 @@
-import type { WorkFeedClient } from "../feed-client";
+import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
 
 export class FakeWorkFeed implements WorkFeedClient {
-  readonly feedKind = "fake";
+  readonly feedKind: string;
 
   constructor(
     private items: WorkItem[],
     private readonly terminal: WorkItem[] = [],
-  ) {}
+    feedKind = "fake",
+  ) {
+    this.feedKind = feedKind;
+  }
 
   async fetchCandidates(): Promise<readonly WorkItem[]> {
     return this.items;
@@ -18,7 +21,9 @@ export class FakeWorkFeed implements WorkFeedClient {
     return this.items.filter((i) => wanted.has(i.id));
   }
 
-  async fetchTerminal(): Promise<readonly WorkItem[]> {
+  async fetchTerminal(
+    _context?: WorkFeedTerminalContext,
+  ): Promise<readonly WorkItem[]> {
     return this.terminal;
   }
 

@@ -13,6 +13,8 @@ export interface ExecutePrFeedbackSubmitInput {
   readonly feedbackPath: string;
   readonly triageItemCount: number;
   readonly responsesPath?: string;
+  readonly requireApprovalBeforeSubmit?: boolean;
+  readonly prApprovedForSubmit?: boolean;
 }
 
 export interface ExecutePrFeedbackSubmitResult {
@@ -33,6 +35,8 @@ export async function executePrFeedbackSubmit(
     publish: input.publish,
     triageItemCount: input.triageItemCount,
     responsesPath: responsesExists ? responsesPath : undefined,
+    requireApprovalBeforeSubmit: input.requireApprovalBeforeSubmit,
+    prApprovedForSubmit: input.prApprovedForSubmit,
   });
 
   if (!decision.shouldPublish || decision.mode !== "submit") {

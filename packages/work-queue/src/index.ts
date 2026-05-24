@@ -4,6 +4,7 @@ import {
   ensureIssueWorkspace,
   removeIssueWorkspace,
   type WorkspaceHooks,
+  writeWorkItemMarker,
 } from "@aguil/agents-workspace";
 
 export type RunAttemptStatus =
@@ -28,6 +29,7 @@ export interface RunningEntry {
   readonly startedAtMs: number;
   readonly attempt: number | null;
   readonly workerKind: string;
+  readonly abortController: AbortController;
 }
 
 export interface WorkQueueSnapshot {
@@ -41,9 +43,15 @@ export type WorkQueueWorker = (input: {
   readonly workspacePath: string;
   readonly attempt: number | null;
   readonly prompt: string;
+  readonly signal?: AbortSignal;
 }) => Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
+  /**
+   * When true after success, mark the work item completed for this orchestrator
+   * session even if the feed still reports active state (e.g. unresolved threads).
+   */
+  readonly closeWorkItem?: boolean;
 }>;
 
 export interface WorkQueueOrchestratorOptions {
@@ -60,36 +68,101 @@ export interface WorkQueueOrchestratorOptions {
   readonly now?: () => number;
   /** Abort implementation dispatches running longer than this (ms). */
   readonly implementationStallTimeoutMs?: number;
+  /** Max concurrent dispatches per `WorkItem.kind` (feed kind). */
+  readonly perFeedMaxConcurrent?: Readonly<Record<string, number>>;
+  readonly filterCandidates?: (
+    items: readonly WorkItem[],
+  ) => Promise<readonly WorkItem[]>;
 }
 
 /** Poll-based scheduler (Symphony coordination layer; ADR 0003). */
 export class WorkQueueOrchestrator {
+  private definition: WorkflowDefinition;
+  private feeds: readonly WorkFeedClient[];
+  private perFeedMaxConcurrent?: Readonly<Record<string, number>>;
+  private workspaceHooks?: WorkspaceHooks;
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
   private readonly retryAttempts = new Map<string, RetryEntry>();
   private readonly completed = new Set<string>();
+  /** Stall fired before dispatch settled; retry after in-flight worker exits. */
+  private readonly stallAwaitingSettlement = new Map<
+    string,
+    {
+      readonly item: WorkItem;
+      readonly attempt: number;
+      readonly error: string;
+    }
+  >();
   private pendingDispatches = 0;
+  private readonly pendingByKind = new Map<string, number>();
+  private readonly runningByKind = new Map<string, number>();
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
+  private implementationStallTimeoutMs?: number;
 
-  constructor(private readonly options: WorkQueueOrchestratorOptions) {}
+  constructor(private readonly options: WorkQueueOrchestratorOptions) {
+    this.definition = options.definition;
+    this.feeds = options.feeds;
+    this.perFeedMaxConcurrent = options.perFeedMaxConcurrent;
+    this.workspaceHooks = options.hooks;
+    this.implementationStallTimeoutMs =
+      options.implementationStallTimeoutMs ??
+      options.definition.implementation.stallTimeoutMs;
+  }
+
+  private countRunningForKind(kind: string): number {
+    return this.runningByKind.get(kind) ?? 0;
+  }
+
+  private trackRunningEntry(entry: RunningEntry): void {
+    this.running.set(entry.item.id, entry);
+    const kind = entry.item.kind;
+    this.runningByKind.set(kind, (this.runningByKind.get(kind) ?? 0) + 1);
+  }
+
+  private untrackRunningEntry(id: string): void {
+    const entry = this.running.get(id);
+    if (entry === undefined) {
+      return;
+    }
+    const kind = entry.item.kind;
+    const next = (this.runningByKind.get(kind) ?? 1) - 1;
+    if (next <= 0) {
+      this.runningByKind.delete(kind);
+    } else {
+      this.runningByKind.set(kind, next);
+    }
+    this.running.delete(id);
+  }
+
+  private countInFlightForKind(kind: string): number {
+    return this.countRunningForKind(kind) + (this.pendingByKind.get(kind) ?? 0);
+  }
 
   private availableAgentSlots(): number {
     return Math.max(
       0,
-      this.options.definition.maxConcurrentAgents -
+      this.definition.maxConcurrentAgents -
         this.running.size -
         this.pendingDispatches,
     );
   }
 
-  private reservePendingDispatch(): void {
+  private reservePendingDispatch(kind: string): void {
     this.pendingDispatches += 1;
+    this.pendingByKind.set(kind, (this.pendingByKind.get(kind) ?? 0) + 1);
   }
 
-  private releasePendingDispatch(): void {
+  private releasePendingDispatch(kind: string): void {
     if (this.pendingDispatches > 0) {
       this.pendingDispatches -= 1;
+    }
+    const pendingForKind = this.pendingByKind.get(kind) ?? 0;
+    if (pendingForKind <= 1) {
+      this.pendingByKind.delete(kind);
+    } else {
+      this.pendingByKind.set(kind, pendingForKind - 1);
     }
   }
 
@@ -105,11 +178,44 @@ export class WorkQueueOrchestrator {
     void this.tick().finally(() => this.scheduleNext());
   }
 
+  private inFlightDispatches = new Set<Promise<void>>();
+
   stop(): void {
     this.stopped = true;
     if (this.pollTimer !== undefined) {
       clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
+    }
+  }
+
+  async stopAndDrain(
+    input: { readonly timeoutMs?: number } = {},
+  ): Promise<void> {
+    this.stop();
+    const timeoutMs = input.timeoutMs ?? 60_000;
+    const deadline = Date.now() + timeoutMs;
+    let logged = false;
+    while (Date.now() < deadline) {
+      const pending = [...this.inFlightDispatches];
+      if (pending.length === 0) {
+        return;
+      }
+      if (!logged) {
+        logged = true;
+        console.log(
+          JSON.stringify({
+            event: "agentsd_stopping",
+            in_flight: pending.length,
+            timeout_ms: timeoutMs,
+          }),
+        );
+      }
+      await Promise.race([
+        Promise.all(pending),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 100);
+        }),
+      ]);
     }
   }
 
@@ -119,12 +225,18 @@ export class WorkQueueOrchestrator {
     }
     this.pollTimer = setTimeout(() => {
       void this.tick().finally(() => this.scheduleNext());
-    }, this.options.definition.pollingIntervalMs);
+    }, this.definition.pollingIntervalMs);
   }
 
   async tick(): Promise<void> {
     await this.reconcile();
+    if (this.stopped) {
+      return;
+    }
     const candidates = await this.fetchAllCandidates();
+    if (this.stopped) {
+      return;
+    }
     const sorted = sortCandidates(candidates);
     const slots = this.availableAgentSlots();
     const dispatchPromises: Promise<void>[] = [];
@@ -133,7 +245,19 @@ export class WorkQueueOrchestrator {
       if (dispatched >= slots) {
         break;
       }
-      if (this.running.has(item.id) || this.claimed.has(item.id)) {
+      if (
+        this.completed.has(item.id) ||
+        this.running.has(item.id) ||
+        this.claimed.has(item.id) ||
+        this.stallAwaitingSettlement.has(item.id)
+      ) {
+        continue;
+      }
+      const feedCap = this.perFeedMaxConcurrent?.[item.kind];
+      if (
+        feedCap !== undefined &&
+        this.countInFlightForKind(item.kind) >= feedCap
+      ) {
         continue;
       }
       const rendered = this.options.renderPrompt(item, null);
@@ -142,8 +266,10 @@ export class WorkQueueOrchestrator {
       }
       this.claimed.add(item.id);
       dispatched += 1;
-      this.reservePendingDispatch();
-      dispatchPromises.push(this.dispatch(item, rendered.prompt, null));
+      this.reservePendingDispatch(item.kind);
+      const promise = this.dispatch(item, rendered.prompt, null);
+      dispatchPromises.push(promise);
+      this.trackDispatch(promise);
     }
     if (dispatchPromises.length > 0) {
       void Promise.all(dispatchPromises).catch((error) => {
@@ -161,7 +287,7 @@ export class WorkQueueOrchestrator {
 
   private async fetchAllCandidates(): Promise<WorkItem[]> {
     const batches = await Promise.all(
-      this.options.feeds.map(async (feed) => {
+      this.feeds.map(async (feed) => {
         try {
           return await feed.fetchCandidates();
         } catch (error) {
@@ -172,11 +298,15 @@ export class WorkQueueOrchestrator {
         }
       }),
     );
-    return batches.flat();
+    const flat = batches.flat();
+    if (this.options.filterCandidates !== undefined) {
+      return [...(await this.options.filterCandidates(flat))];
+    }
+    return flat;
   }
 
   private reconcileStalledWorkers(): void {
-    const stallMs = this.options.implementationStallTimeoutMs;
+    const stallMs = this.implementationStallTimeoutMs;
     if (stallMs === undefined || stallMs <= 0) {
       return;
     }
@@ -188,6 +318,7 @@ export class WorkQueueOrchestrator {
       if (now - entry.startedAtMs <= stallMs) {
         continue;
       }
+      const supersededAttempt = entry.attempt ?? 0;
       console.warn(
         JSON.stringify({
           event: "implementation_worker_stalled",
@@ -195,15 +326,16 @@ export class WorkQueueOrchestrator {
           identifier: entry.item.identifier,
           elapsed_ms: now - entry.startedAtMs,
           stall_timeout_ms: stallMs,
+          superseded_attempt: supersededAttempt,
         }),
       );
-      this.running.delete(id);
-      this.scheduleRetry(
-        entry.item,
-        (entry.attempt ?? 0) + 1,
-        "implementation worker exceeded stall timeout",
-        0,
-      );
+      entry.abortController.abort();
+      this.untrackRunningEntry(id);
+      this.stallAwaitingSettlement.set(id, {
+        item: entry.item,
+        attempt: supersededAttempt + 1,
+        error: "implementation worker exceeded stall timeout",
+      });
     }
   }
 
@@ -214,7 +346,7 @@ export class WorkQueueOrchestrator {
       return;
     }
     const states: WorkItem[] = [];
-    for (const feed of this.options.feeds) {
+    for (const feed of this.feeds) {
       try {
         states.push(...(await feed.fetchStates(ids)));
       } catch {
@@ -225,16 +357,19 @@ export class WorkQueueOrchestrator {
     for (const [id, entry] of this.running) {
       const fresh = byId.get(id);
       if (fresh === undefined) {
-        this.release(id, entry.item.identifier);
+        this.untrackRunningEntry(id);
+        this.claimed.delete(id);
+        this.completed.add(id);
         continue;
       }
       if (isTerminalState(fresh.state)) {
-        this.running.delete(id);
+        this.untrackRunningEntry(id);
         this.claimed.delete(id);
+        this.completed.add(id);
         await removeIssueWorkspace({
-          workspaceRoot: this.options.definition.workspaceRoot,
+          workspaceRoot: this.definition.workspaceRoot,
           identifier: entry.item.identifier,
-          hooks: this.options.hooks,
+          hooks: this.workspaceHooks,
         });
       }
     }
@@ -248,13 +383,17 @@ export class WorkQueueOrchestrator {
     const now = this.options.now?.() ?? Date.now();
     let workspacePath: string;
     try {
-      const hooks = this.options.hooks;
+      const hooks = this.workspaceHooks;
       const ws = await ensureIssueWorkspace({
-        workspaceRoot: this.options.definition.workspaceRoot,
+        workspaceRoot: this.definition.workspaceRoot,
         identifier: item.identifier,
         hooks,
       });
       workspacePath = ws.path;
+      await writeWorkItemMarker(workspacePath, {
+        identifier: item.identifier,
+        kind: item.kind,
+      });
       if (hooks?.beforeRun !== undefined) {
         const { runWorkspaceHook } = await import("@aguil/agents-workspace");
         await runWorkspaceHook(
@@ -265,32 +404,34 @@ export class WorkQueueOrchestrator {
         );
       }
     } catch (error) {
-      this.releasePendingDispatch();
+      this.releasePendingDispatch(item.kind);
       this.claimed.delete(item.id);
       const message = error instanceof Error ? error.message : String(error);
       this.scheduleRetry(item, 1, message);
       return;
     }
 
-    this.releasePendingDispatch();
+    this.releasePendingDispatch(item.kind);
     const startedAtMs = now;
-    this.running.set(item.id, {
+    const abortController = new AbortController();
+    this.trackRunningEntry({
       item,
       workspacePath,
       startedAtMs,
       attempt,
-      workerKind: resolveWorkerKindForItem(
-        item,
-        this.options.definition.workers,
-      ),
+      workerKind: resolveWorkerKindForItem(item, this.definition.workers),
+      abortController,
     });
 
     const clearRunningIfCurrent = (): void => {
       const current = this.running.get(item.id);
       if (current !== undefined && current.startedAtMs === startedAtMs) {
-        this.running.delete(item.id);
+        this.untrackRunningEntry(item.id);
       }
     };
+
+    const stalledWhileRunning = (): boolean =>
+      this.stallAwaitingSettlement.has(item.id);
 
     try {
       const result = await this.options.worker({
@@ -298,26 +439,57 @@ export class WorkQueueOrchestrator {
         workspacePath,
         attempt,
         prompt,
+        signal: abortController.signal,
       });
       clearRunningIfCurrent();
+      const stallPending = this.stallAwaitingSettlement.get(item.id);
+      if (stallPending !== undefined) {
+        this.stallAwaitingSettlement.delete(item.id);
+        this.scheduleRetry(
+          stallPending.item,
+          stallPending.attempt,
+          stallPending.error,
+          0,
+        );
+        return;
+      }
       if (result.status === "succeeded") {
-        this.completed.add(item.id);
+        const markCompleted =
+          result.closeWorkItem === true ||
+          (await this.shouldMarkCompleted(item));
+        if (markCompleted) {
+          this.completed.add(item.id);
+        }
         this.claimed.delete(item.id);
       } else {
         this.scheduleRetry(item, (attempt ?? 0) + 1, result.error ?? "failed");
       }
     } catch (error) {
       clearRunningIfCurrent();
+      const stallPending = this.stallAwaitingSettlement.get(item.id);
+      if (stallPending !== undefined) {
+        this.stallAwaitingSettlement.delete(item.id);
+        this.scheduleRetry(
+          stallPending.item,
+          stallPending.attempt,
+          stallPending.error,
+          0,
+        );
+        return;
+      }
+      if (stalledWhileRunning() || abortController.signal.aborted) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.scheduleRetry(item, (attempt ?? 0) + 1, message);
     } finally {
-      if (this.options.hooks?.afterRun !== undefined) {
+      if (this.workspaceHooks?.afterRun !== undefined) {
         const { runWorkspaceHook } = await import("@aguil/agents-workspace");
         await runWorkspaceHook(
           "afterRun",
-          this.options.hooks.afterRun,
+          this.workspaceHooks.afterRun,
           workspacePath,
-          this.options.hooks,
+          this.workspaceHooks,
         );
       }
     }
@@ -338,7 +510,7 @@ export class WorkQueueOrchestrator {
       delayOverrideMs ??
       Math.min(
         10_000 * 2 ** Math.max(0, attempt - 1),
-        this.options.definition.maxRetryBackoffMs,
+        this.definition.maxRetryBackoffMs,
       );
     this.retryAttempts.set(item.id, {
       issueId: item.id,
@@ -368,7 +540,19 @@ export class WorkQueueOrchestrator {
     const dispatchPromises: Promise<void>[] = [];
     let slots = this.availableAgentSlots();
     for (const { id, entry, item } of resolved) {
-      if (this.completed.has(id) || slots <= 0) {
+      if (
+        this.completed.has(id) ||
+        this.stallAwaitingSettlement.has(id) ||
+        slots <= 0
+      ) {
+        continue;
+      }
+      const feedCap = this.perFeedMaxConcurrent?.[item?.kind ?? ""];
+      if (
+        item !== undefined &&
+        feedCap !== undefined &&
+        this.countInFlightForKind(item.kind) >= feedCap
+      ) {
         continue;
       }
       this.retryAttempts.delete(id);
@@ -382,10 +566,10 @@ export class WorkQueueOrchestrator {
         continue;
       }
       slots -= 1;
-      this.reservePendingDispatch();
-      dispatchPromises.push(
-        this.dispatch(item, rendered.prompt, entry.attempt),
-      );
+      this.reservePendingDispatch(item.kind);
+      const promise = this.dispatch(item, rendered.prompt, entry.attempt);
+      dispatchPromises.push(promise);
+      this.trackDispatch(promise);
     }
     if (dispatchPromises.length > 0) {
       void Promise.all(dispatchPromises).catch((error) => {
@@ -401,7 +585,7 @@ export class WorkQueueOrchestrator {
   }
 
   private async findCandidateById(id: string): Promise<WorkItem | undefined> {
-    for (const feed of this.options.feeds) {
+    for (const feed of this.feeds) {
       const states = await feed.fetchStates([id]);
       if (states.length > 0) {
         return states[0];
@@ -411,21 +595,100 @@ export class WorkQueueOrchestrator {
     return all.find((i) => i.id === id);
   }
 
+  private async shouldMarkCompleted(item: WorkItem): Promise<boolean> {
+    if (item.kind === "github_issue" || item.kind === "github_pr_review") {
+      return true;
+    }
+    const refresh = await this.fetchStatesForItem(item.id, item.kind);
+    if (item.kind === "github_pr_feedback") {
+      if (refresh.hadFeedErrors) {
+        return false;
+      }
+      return refresh.states.length === 0;
+    }
+    if (refresh.states.length === 0) {
+      return true;
+    }
+    return isTerminalState(refresh.states[0].state);
+  }
+
+  private feedHandlesItemKind(feed: WorkFeedClient, kind: string): boolean {
+    return feed.feedKind === kind || feed.feedKind === `${kind}s`;
+  }
+
+  private async fetchStatesForItem(
+    id: string,
+    kind: string,
+  ): Promise<{
+    readonly states: readonly WorkItem[];
+    readonly hadFeedErrors: boolean;
+  }> {
+    const states: WorkItem[] = [];
+    let hadFeedErrors = false;
+    for (const feed of this.feeds) {
+      if (!this.feedHandlesItemKind(feed, kind)) {
+        continue;
+      }
+      try {
+        states.push(...(await feed.fetchStates([id])));
+      } catch {
+        hadFeedErrors = true;
+      }
+    }
+    return { states, hadFeedErrors };
+  }
+
+  private trackDispatch(promise: Promise<void>): void {
+    this.inFlightDispatches.add(promise);
+    void promise.finally(() => {
+      this.inFlightDispatches.delete(promise);
+    });
+  }
+
+  updateDefinition(
+    definition: WorkflowDefinition,
+    feedConfig?: {
+      readonly feeds: readonly WorkFeedClient[];
+      readonly perFeedMaxConcurrent?: Readonly<Record<string, number>>;
+      readonly hooks?: WorkspaceHooks;
+    },
+  ): void {
+    this.definition = definition;
+    this.implementationStallTimeoutMs =
+      definition.implementation.stallTimeoutMs;
+    if (feedConfig !== undefined) {
+      this.feeds = feedConfig.feeds;
+      this.perFeedMaxConcurrent = feedConfig.perFeedMaxConcurrent;
+      if (feedConfig.hooks !== undefined) {
+        this.workspaceHooks = feedConfig.hooks;
+      }
+    }
+  }
+
+  /** Await in-flight dispatches (for tests and shutdown). */
+  async flush(): Promise<void> {
+    await Promise.all([...this.inFlightDispatches]);
+  }
+
   private release(id: string, _identifier: string): void {
-    this.running.delete(id);
+    this.untrackRunningEntry(id);
     this.claimed.delete(id);
     this.retryAttempts.delete(id);
+    this.stallAwaitingSettlement.delete(id);
   }
 
   async startupTerminalCleanup(): Promise<void> {
-    for (const feed of this.options.feeds) {
+    for (const feed of this.feeds) {
       try {
-        const terminal = await feed.fetchTerminal();
+        const terminal = await feed.fetchTerminal({
+          workspaceRoot: this.definition.workspaceRoot,
+          maxTerminalProbes: 8,
+        });
         for (const item of terminal) {
           await removeIssueWorkspace({
-            workspaceRoot: this.options.definition.workspaceRoot,
+            workspaceRoot: this.definition.workspaceRoot,
             identifier: item.identifier,
-            hooks: this.options.hooks,
+            hooks: this.workspaceHooks,
           });
         }
       } catch (error) {

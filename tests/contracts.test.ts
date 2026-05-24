@@ -2067,6 +2067,58 @@ test("marks subprocess agents as timed out", async () => {
   }
 });
 
+test("cancels subprocess agents when AbortSignal aborts", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agents-abort-"));
+  try {
+    const controller = new AbortController();
+    const adapter = new SubprocessAgentAdapter({
+      name: "stall-test-agent",
+      capabilities: {
+        streaming: true,
+        structuredOutput: true,
+        readOnlyMode: true,
+        mcp: false,
+        cancellation: true,
+      },
+      buildCommand: () => ({
+        cmd: [
+          process.execPath,
+          "--eval",
+          "await new Promise((resolve) => setTimeout(resolve, 30_000));",
+        ],
+        cwd: tempDir,
+      }),
+    });
+
+    const runPromise = collectAgentRun(adapter, {
+      runId: "run-abort-1",
+      roleId: "implementation",
+      prompt: "Implement the task.",
+      workspacePath: tempDir,
+      contextBundlePath: join(tempDir, "context.json"),
+      scratchpadPath: tempDir,
+      timeoutMs: 60_000,
+      allowedCommands: [],
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 50);
+    const run = await runPromise;
+
+    expect(run.result.status).toBe("cancelled");
+    expect(
+      run.events.some(
+        (event) =>
+          event.type === "error" &&
+          typeof event.data === "object" &&
+          event.data !== null &&
+          (event.data as { reason?: string }).reason === "aborted",
+      ),
+    ).toBe(true);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("captures subprocess stdout/stderr artifacts for debugging", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "agents-streaming-"));
   try {

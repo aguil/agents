@@ -1,5 +1,9 @@
 export { type CreateFeedsOptions, createWorkFeeds } from "./create-feeds";
-export type { WorkFeedClient, WorkFeedClientFactory } from "./feed-client";
+export type {
+  WorkFeedClient,
+  WorkFeedClientFactory,
+  WorkFeedTerminalContext,
+} from "./feed-client";
 export { FakeWorkFeed } from "./feeds/fake";
 export {
   GitHubIssuesFeed,
@@ -8,6 +12,7 @@ export {
 export {
   GitHubPrFeedbackFeed,
   type GitHubPrFeedbackFeedOptions,
+  parsePrFeedbackIdentifier,
 } from "./feeds/github-pr-feedback";
 export {
   GitHubPrReviewFeed,

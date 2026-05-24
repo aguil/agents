@@ -1,4 +1,4 @@
-import type { WorkFeedClient } from "../feed-client";
+import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
 
 export interface McpTrackerFeedConfig {
@@ -67,7 +67,9 @@ export class McpTrackerFeed implements WorkFeedClient {
     return items;
   }
 
-  async fetchTerminal(): Promise<readonly WorkItem[]> {
+  async fetchTerminal(
+    _context?: WorkFeedTerminalContext,
+  ): Promise<readonly WorkItem[]> {
     const raw = await this.invokeTool(
       this.config.server,
       this.config.listTool,
