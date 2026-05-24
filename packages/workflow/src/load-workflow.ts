@@ -145,6 +145,7 @@ function parsePerFeedMaxConcurrent(
   for (const feed of feeds) {
     const max = feed.raw.max_concurrent;
     if (typeof max === "number" && Number.isFinite(max) && max > 0) {
+      // Orchestrator keys caps by work-item kind; duplicate feed kinds share one limit.
       out[feed.kind] = Math.floor(max);
     }
   }
@@ -217,6 +218,7 @@ function parsePublishConfig(
     reviewSummary: parseReviewSummary(codeReviewRaw.review_summary),
     staleHead: codeReviewRaw.stale_head === "post" ? "post" : "skip",
     replacePending: codeReviewRaw.replace_pending === true,
+    // publish_with_findings (#39): operator opts in to posting when triage has items.
     requireEmptyTriage: codeReviewPolicy.publishWithFindings
       ? false
       : codeReviewRaw.require_empty_triage !== false,
