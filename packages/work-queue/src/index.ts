@@ -94,12 +94,16 @@ export class WorkQueueOrchestrator {
   private readonly runningByKind = new Map<string, number>();
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
+  private implementationStallTimeoutMs?: number;
 
   constructor(private readonly options: WorkQueueOrchestratorOptions) {
     this.definition = options.definition;
     this.feeds = options.feeds;
     this.perFeedMaxConcurrent = options.perFeedMaxConcurrent;
     this.workspaceHooks = options.hooks;
+    this.implementationStallTimeoutMs =
+      options.implementationStallTimeoutMs ??
+      options.definition.implementation.stallTimeoutMs;
   }
 
   private countRunningForKind(kind: string): number {
@@ -297,7 +301,7 @@ export class WorkQueueOrchestrator {
   }
 
   private reconcileStalledWorkers(): void {
-    const stallMs = this.options.implementationStallTimeoutMs;
+    const stallMs = this.implementationStallTimeoutMs;
     if (stallMs === undefined || stallMs <= 0) {
       return;
     }
@@ -642,6 +646,8 @@ export class WorkQueueOrchestrator {
     },
   ): void {
     this.definition = definition;
+    this.implementationStallTimeoutMs =
+      definition.implementation.stallTimeoutMs;
     if (feedConfig !== undefined) {
       this.feeds = feedConfig.feeds;
       this.perFeedMaxConcurrent = feedConfig.perFeedMaxConcurrent;
