@@ -97,12 +97,13 @@ merging the platform PR.
 | Real `app_server` JSON-RPC client                                            | [#34](https://github.com/aguil/agents/issues/34)                                          |
 | MCP feed, `github_issues` dogfood, publish integration tests                 | [#35](https://github.com/aguil/agents/issues/35)                                          |
 
-**Stall / reload behavior today:** `agent.stall_timeout_ms` releases a work item
-from the running map and may retry while the prior worker is still executing
-([#41](https://github.com/aguil/agents/issues/41)). Editing `WORKFLOW.md` on
-disk updates prompt templates via reload, but poll interval, workers, publish,
-and adapter settings require restart until
-[#38](https://github.com/aguil/agents/issues/38).
+**Stall / reload behavior today:** when `agent.stall_timeout_ms` fires, the
+orchestrator aborts the in-flight worker via `AbortSignal` and retries after the
+dispatch settles ([#41](https://github.com/aguil/agents/issues/41)). Editing
+`WORKFLOW.md` reloads the workflow definition, feed clients, and per-feed
+concurrency without restart ([#38](https://github.com/aguil/agents/issues/38)
+partial). Poll interval follows the reloaded definition on the next tick; worker
+router and implementation adapter wiring are still fixed at process start.
 
 ## Interactive PR feedback selection
 
