@@ -68,6 +68,12 @@ test("selection store approve and isPrApprovedForWork", async () => {
         pull_number: "2",
       }),
     ).toBe(false);
+    expect(() =>
+      applySelectionCommand({
+        doc,
+        approve: ["org/repo#99"],
+      }),
+    ).toThrow(/approval_not_pending/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

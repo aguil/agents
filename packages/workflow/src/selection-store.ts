@@ -126,7 +126,12 @@ export function applySelectionCommand(input: {
     dismissed.add(id);
     approved.delete(id);
   }
+  const pendingIds = new Set(input.doc.pending.map((p) => p.identifier));
   for (const id of input.approve ?? []) {
+    const alreadyApproved = input.doc.approved.includes(id);
+    if (!pendingIds.has(id) && !alreadyApproved) {
+      throw new Error(`approval_not_pending: ${id}`);
+    }
     approved.add(id);
     dismissed.delete(id);
   }
