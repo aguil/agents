@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkItem } from "@aguil/agents-tracker";
-import { FakeWorkFeed } from "@aguil/agents-tracker";
+import { FakeWorkFeed, parsePrFeedbackIdentifier } from "@aguil/agents-tracker";
 import { WorkQueueOrchestrator } from "@aguil/agents-work-queue";
 import {
   applyCodexAlias,
@@ -14,6 +14,14 @@ import {
   upsertPendingFromWorkItems,
   writeSelectionDocument,
 } from "@aguil/agents-workflow";
+
+test("parsePrFeedbackIdentifier parses owner/repo pull suffix", () => {
+  expect(parsePrFeedbackIdentifier("aguil/agents#43-feedback")).toEqual({
+    repository: "aguil/agents",
+    pullNumber: 43,
+  });
+  expect(parsePrFeedbackIdentifier("not-feedback")).toBeNull();
+});
 
 test("applyCodexAlias ignores codex.protocol", () => {
   const agent = applyCodexAlias({}, { protocol: "codex_app_server_v2" });
