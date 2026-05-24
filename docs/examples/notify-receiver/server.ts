@@ -1,6 +1,7 @@
 const port = Number(process.env.PORT ?? 18765);
 
 Bun.serve({
+  hostname: "127.0.0.1",
   port,
   async fetch(req) {
     const url = new URL(req.url);
