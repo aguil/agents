@@ -74,6 +74,7 @@ export class WorkQueueOrchestrator {
   private definition: WorkflowDefinition;
   private feeds: readonly WorkFeedClient[];
   private perFeedMaxConcurrent?: Readonly<Record<string, number>>;
+  private workspaceHooks?: WorkspaceHooks;
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
   private readonly retryAttempts = new Map<string, RetryEntry>();
@@ -95,6 +96,7 @@ export class WorkQueueOrchestrator {
     this.definition = options.definition;
     this.feeds = options.feeds;
     this.perFeedMaxConcurrent = options.perFeedMaxConcurrent;
+    this.workspaceHooks = options.hooks;
   }
 
   private countRunningForKind(kind: string): number {
@@ -234,7 +236,7 @@ export class WorkQueueOrchestrator {
 
   private async fetchAllCandidates(): Promise<WorkItem[]> {
     const batches = await Promise.all(
-      this.options.feeds.map(async (feed) => {
+      this.feeds.map(async (feed) => {
         try {
           return await feed.fetchCandidates();
         } catch (error) {
@@ -293,7 +295,7 @@ export class WorkQueueOrchestrator {
       return;
     }
     const states: WorkItem[] = [];
-    for (const feed of this.options.feeds) {
+    for (const feed of this.feeds) {
       try {
         states.push(...(await feed.fetchStates(ids)));
       } catch {
@@ -316,7 +318,7 @@ export class WorkQueueOrchestrator {
         await removeIssueWorkspace({
           workspaceRoot: this.definition.workspaceRoot,
           identifier: entry.item.identifier,
-          hooks: this.options.hooks,
+          hooks: this.workspaceHooks,
         });
       }
     }
@@ -330,7 +332,7 @@ export class WorkQueueOrchestrator {
     const now = this.options.now?.() ?? Date.now();
     let workspacePath: string;
     try {
-      const hooks = this.options.hooks;
+      const hooks = this.workspaceHooks;
       const ws = await ensureIssueWorkspace({
         workspaceRoot: this.options.definition.workspaceRoot,
         identifier: item.identifier,
@@ -423,13 +425,13 @@ export class WorkQueueOrchestrator {
       const message = error instanceof Error ? error.message : String(error);
       this.scheduleRetry(item, (attempt ?? 0) + 1, message);
     } finally {
-      if (this.options.hooks?.afterRun !== undefined) {
+      if (this.workspaceHooks?.afterRun !== undefined) {
         const { runWorkspaceHook } = await import("@aguil/agents-workspace");
         await runWorkspaceHook(
           "afterRun",
-          this.options.hooks.afterRun,
+          this.workspaceHooks.afterRun,
           workspacePath,
-          this.options.hooks,
+          this.workspaceHooks,
         );
       }
     }
@@ -517,7 +519,7 @@ export class WorkQueueOrchestrator {
   }
 
   private async findCandidateById(id: string): Promise<WorkItem | undefined> {
-    for (const feed of this.options.feeds) {
+    for (const feed of this.feeds) {
       const states = await feed.fetchStates([id]);
       if (states.length > 0) {
         return states[0];
@@ -566,12 +568,16 @@ export class WorkQueueOrchestrator {
     feedConfig?: {
       readonly feeds: readonly WorkFeedClient[];
       readonly perFeedMaxConcurrent?: Readonly<Record<string, number>>;
+      readonly hooks?: WorkspaceHooks;
     },
   ): void {
     this.definition = definition;
     if (feedConfig !== undefined) {
       this.feeds = feedConfig.feeds;
       this.perFeedMaxConcurrent = feedConfig.perFeedMaxConcurrent;
+      if (feedConfig.hooks !== undefined) {
+        this.workspaceHooks = feedConfig.hooks;
+      }
     }
   }
 
@@ -588,14 +594,14 @@ export class WorkQueueOrchestrator {
   }
 
   async startupTerminalCleanup(): Promise<void> {
-    for (const feed of this.options.feeds) {
+    for (const feed of this.feeds) {
       try {
         const terminal = await feed.fetchTerminal();
         for (const item of terminal) {
           await removeIssueWorkspace({
             workspaceRoot: this.definition.workspaceRoot,
             identifier: item.identifier,
-            hooks: this.options.hooks,
+            hooks: this.workspaceHooks,
           });
         }
       } catch (error) {

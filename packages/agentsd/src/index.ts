@@ -109,6 +109,7 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
       orchestrator.updateDefinition(next, {
         feeds: feeds(),
         perFeedMaxConcurrent: next.perFeedMaxConcurrent,
+        hooks: hooks(),
       });
       console.log(
         JSON.stringify({
@@ -122,7 +123,15 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
     }
   });
 
-  await orchestrator.startupTerminalCleanup();
+  void orchestrator.startupTerminalCleanup().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      JSON.stringify({
+        event: "startup_terminal_cleanup_failed",
+        error: message,
+      }),
+    );
+  });
   orchestrator.start();
 
   console.log(
