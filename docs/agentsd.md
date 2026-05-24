@@ -109,6 +109,13 @@ code-review adapter selection on the next dispatch
 follows the reloaded definition on the next tick. Implementation workers already
 read `implementation.*` from the active definition each dispatch.
 
+**Tracked follow-ups (not blocking agentsd ship):**
+
+- Per-feed `max_concurrent` keys vs work-item `kind` mismatch
+  ([#47](https://github.com/aguil/agents/issues/47))
+- Extra GitHub thread scan on PR-feedback completion when submit is deferred
+  ([#48](https://github.com/aguil/agents/issues/48))
+
 **Startup terminal cleanup** runs in the background (does not block the poll
 loop). For `github_pr_feedback`, it only re-checks PRs that already have a
 per-item workspace under `workspace.root` (`.agents-work-item.json` marker), not
