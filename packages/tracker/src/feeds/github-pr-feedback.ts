@@ -170,12 +170,18 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       return [];
     }
 
+    const maxProbes = context?.maxTerminalProbes;
+    const toProbe =
+      maxProbes === undefined
+        ? scoped
+        : scoped.slice(0, Math.max(0, maxProbes));
+
     const concurrency = Math.max(
       1,
-      Math.min(this.options.threadConcurrency ?? 3, scoped.length),
+      Math.min(this.options.threadConcurrency ?? 3, toProbe.length),
     );
     const withThreads = await mapWithConcurrency(
-      scoped,
+      toProbe,
       concurrency,
       async (pull) => ({
         pull,

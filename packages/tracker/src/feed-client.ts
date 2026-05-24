@@ -3,6 +3,8 @@ import type { WorkItem } from "./work-item";
 export interface WorkFeedTerminalContext {
   /** When set, feeds may scope terminal discovery to existing work-item workspaces. */
   readonly workspaceRoot?: string;
+  /** Cap expensive per-workspace probes during background startup cleanup. */
+  readonly maxTerminalProbes?: number;
 }
 
 export interface WorkFeedClient {

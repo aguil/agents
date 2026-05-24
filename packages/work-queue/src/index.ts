@@ -668,6 +668,7 @@ export class WorkQueueOrchestrator {
       try {
         const terminal = await feed.fetchTerminal({
           workspaceRoot: this.definition.workspaceRoot,
+          maxTerminalProbes: 8,
         });
         for (const item of terminal) {
           await removeIssueWorkspace({
