@@ -94,6 +94,7 @@ export class JsonRpcAgentSessionClient implements AgentSessionClient {
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
 
+    let emitted = false;
     for (const line of lines) {
       let parsed: Record<string, unknown>;
       try {
@@ -120,6 +121,7 @@ export class JsonRpcAgentSessionClient implements AgentSessionClient {
         typeof result.turn_id === "string" ? result.turn_id : "turn-0";
 
       if (eventType === "session_started" || eventType === "turn_completed") {
+        emitted = true;
         yield {
           type: eventType,
           timestamp: now,
@@ -134,6 +136,7 @@ export class JsonRpcAgentSessionClient implements AgentSessionClient {
         };
       }
       if (eventType === "turn_failed" || eventType === "turn_stalled") {
+        emitted = true;
         yield {
           type: eventType,
           timestamp: now,
@@ -146,6 +149,20 @@ export class JsonRpcAgentSessionClient implements AgentSessionClient {
       }
     }
 
-    await proc.exited;
+    const exitCode = await proc.exited;
+    if (exitCode !== 0 || !emitted) {
+      const stderr = await new Response(proc.stderr).text();
+      yield {
+        type: "turn_failed",
+        timestamp: new Date().toISOString(),
+        sessionId: `failed-${input.runId}`,
+        threadId: `thread-${input.runId}`,
+        turnId: "turn-0",
+        message:
+          exitCode !== 0
+            ? `json-rpc subprocess exited ${exitCode}${stderr.trim().length > 0 ? `: ${stderr.trim()}` : ""}`
+            : "json-rpc subprocess produced no session events",
+      };
+    }
   }
 }
