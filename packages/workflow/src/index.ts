@@ -1,4 +1,8 @@
 export {
+  type CodeReviewPolicyConfig,
+  parseCodeReviewPolicy,
+} from "./code-review-policy";
+export {
   applyCodexAlias,
   parseImplementationExecution,
   validateImplementationRuntime,
@@ -9,11 +13,31 @@ export {
   validateWorkflowDefinition,
 } from "./load-workflow";
 export {
+  defaultPrFeedbackPolicy,
+  isPrApprovedForWork,
+  type PrFeedbackPolicyConfig,
+  type PrFeedbackProfile,
+  parsePrFeedbackPolicy,
+  prIdentifierFromWorkItemMetadata,
+} from "./pr-feedback-policy";
+export {
   expandPathValue,
   resolveConfigString,
   resolveEnvVarReference,
   resolveShellCommand,
 } from "./resolve-vars";
+export {
+  applySelectionCommand,
+  emptySelectionDocument,
+  PR_FEEDBACK_SELECTION_SCHEMA_ID,
+  type PrFeedbackPendingEntry,
+  type PrFeedbackSelectionDocument,
+  pendingFingerprint,
+  readSelectionDocument,
+  selectionStorePath,
+  upsertPendingFromWorkItems,
+  writeSelectionDocument,
+} from "./selection-store";
 export {
   renderStrictTemplate,
   type TemplateRenderError,
