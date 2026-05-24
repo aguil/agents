@@ -142,6 +142,99 @@ Work
   await rm(dir, { recursive: true, force: true });
 });
 
+async function prFeedbackOrchestratorHarness(input: {
+  readonly closeWorkItem: boolean;
+}): Promise<{ runs: number; cleanup: () => Promise<void> }> {
+  const item: WorkItem = {
+    id: "org/repo/pull/1/feedback",
+    identifier: "org/repo#1-feedback",
+    title: "PR feedback",
+    description: "1 unresolved review thread(s)",
+    state: "feedback_pending",
+    kind: "github_pr_feedback",
+    priority: 2,
+    url: null,
+    labels: [],
+    blockedBy: [],
+    createdAt: null,
+    updatedAt: null,
+    branchName: null,
+    metadata: {
+      repository: "org/repo",
+      pull_number: "1",
+      unresolved_thread_count: "1",
+    },
+  };
+  const feed = new FakeWorkFeed([item], [], "github_pr_feedback");
+  let runs = 0;
+  const dir = await mkdtemp(join(tmpdir(), "wq-prfb-"));
+  const workflowPath = join(dir, "WORKFLOW.md");
+  const { writeFile, mkdir } = await import("node:fs/promises");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    workflowPath,
+    `---
+polling:
+  interval_ms: 50
+workspace:
+  root: ${join(dir, "ws")}
+agent:
+  max_concurrent_agents: 2
+---
+Work
+`,
+    "utf8",
+  );
+  const { loadWorkflowFile } = await import("@aguil/agents-workflow");
+  const loaded = await loadWorkflowFile(workflowPath);
+  const definition = loaded.definition;
+  if (definition === undefined) {
+    throw new Error("missing definition");
+  }
+
+  const orchestrator = new WorkQueueOrchestrator({
+    definition,
+    feeds: [feed],
+    renderPrompt: () => ({ ok: true, prompt: "p" }),
+    worker: async () => {
+      runs += 1;
+      return { status: "succeeded", closeWorkItem: input.closeWorkItem };
+    },
+  });
+
+  await orchestrator.tick();
+  await orchestrator.flush();
+  await orchestrator.tick();
+  await orchestrator.flush();
+
+  return {
+    runs,
+    cleanup: () => rm(dir, { recursive: true, force: true }),
+  };
+}
+
+test("WorkQueueOrchestrator re-dispatches github_pr_feedback while threads stay open", async () => {
+  const { runs, cleanup } = await prFeedbackOrchestratorHarness({
+    closeWorkItem: false,
+  });
+  try {
+    expect(runs).toBe(2);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("WorkQueueOrchestrator closes github_pr_feedback after closeWorkItem success", async () => {
+  const { runs, cleanup } = await prFeedbackOrchestratorHarness({
+    closeWorkItem: true,
+  });
+  try {
+    expect(runs).toBe(1);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("JsonRpcAgentSessionClient parses fake server output", async () => {
   const serverPath = join(
     import.meta.dir,

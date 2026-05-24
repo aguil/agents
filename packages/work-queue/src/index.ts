@@ -47,6 +47,11 @@ export type WorkQueueWorker = (input: {
 }) => Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
+  /**
+   * When true after success, mark the work item completed for this orchestrator
+   * session even if the feed still reports active state (e.g. unresolved threads).
+   */
+  readonly closeWorkItem?: boolean;
 }>;
 
 export interface WorkQueueOrchestratorOptions {
@@ -449,7 +454,10 @@ export class WorkQueueOrchestrator {
         return;
       }
       if (result.status === "succeeded") {
-        if (await this.shouldMarkCompleted(item)) {
+        const markCompleted =
+          result.closeWorkItem === true ||
+          (await this.shouldMarkCompleted(item));
+        if (markCompleted) {
           this.completed.add(item.id);
         }
         this.claimed.delete(item.id);

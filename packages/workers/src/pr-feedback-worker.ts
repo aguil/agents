@@ -21,6 +21,7 @@ export async function runPrFeedbackWorker(input: {
 }): Promise<{
   readonly status: "succeeded" | "failed";
   readonly error?: string;
+  readonly closeWorkItem?: boolean;
 }> {
   const repo = input.item.metadata.repository;
   const prRaw = input.item.metadata.pull_number;
@@ -157,5 +158,7 @@ export async function runPrFeedbackWorker(input: {
   if (submitResult.error !== undefined) {
     return { status: "failed", error: submitResult.error };
   }
-  return { status: "succeeded" };
+  const blocksRequeue =
+    submitResult.decision.skipReason === "approval_required";
+  return { status: "succeeded", closeWorkItem: !blocksRequeue };
 }
