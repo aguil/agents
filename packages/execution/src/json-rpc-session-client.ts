@@ -4,6 +4,7 @@ import type {
   SessionEvent,
   SessionStartParams,
 } from "./agent-session-client";
+import { parseShellArgv } from "./shell-argv";
 
 /**
  * Line-delimited JSON-RPC session driver over a provider subprocess stdio.
@@ -61,10 +62,7 @@ export class JsonRpcAgentSessionClient implements AgentSessionClient {
     readonly signal?: AbortSignal;
     readonly timeoutMs?: number;
   }): AsyncIterable<SessionEvent> {
-    const parts = this.options.command
-      .trim()
-      .split(/\s+/)
-      .filter((p: string) => p.length > 0);
+    const parts = parseShellArgv(this.options.command);
     if (parts.length === 0) {
       yield failedEvent(input.runId, "empty agent.command");
       return;
@@ -83,7 +81,7 @@ export class JsonRpcAgentSessionClient implements AgentSessionClient {
     };
 
     const proc = Bun.spawn({
-      cmd: parts,
+      cmd: [...parts],
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
