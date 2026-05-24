@@ -78,11 +78,6 @@ export function upsertPendingFromWorkItems(input: {
   const dismissed = new Set(input.existing.dismissed);
   const approved = new Set(input.existing.approved);
   const byId = new Map<string, PrFeedbackPendingEntry>();
-  for (const entry of input.existing.pending) {
-    if (!dismissed.has(entry.identifier) && !approved.has(entry.identifier)) {
-      byId.set(entry.identifier, entry);
-    }
-  }
   for (const entry of input.entries) {
     if (dismissed.has(entry.identifier) || approved.has(entry.identifier)) {
       continue;
