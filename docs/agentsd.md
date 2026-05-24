@@ -50,7 +50,8 @@ default in `agentsd`).
 
 **App server:** multi-turn loop via `AgentSessionClient` and the
 `json_rpc_session_v1` line-delimited JSON-RPC driver (`agent.command` required).
-Set `agent.protocol` to `json_rpc_session_v1` or use a `codex:` alias block.
+Set `agent.protocol` to `json_rpc_session_v1` explicitly; the `codex:` alias
+maps command and timeouts only (not `codex.protocol` — see ADR 0004).
 
 ### Publish execution (when enabled in `WORKFLOW.md`)
 
