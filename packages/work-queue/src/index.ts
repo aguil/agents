@@ -90,6 +90,7 @@ export class WorkQueueOrchestrator {
     }
   >();
   private pendingDispatches = 0;
+  private readonly pendingByKind = new Map<string, number>();
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
 
@@ -98,6 +99,10 @@ export class WorkQueueOrchestrator {
     this.feeds = options.feeds;
     this.perFeedMaxConcurrent = options.perFeedMaxConcurrent;
     this.workspaceHooks = options.hooks;
+  }
+
+  private countInFlightForKind(kind: string): number {
+    return this.countRunningForKind(kind) + (this.pendingByKind.get(kind) ?? 0);
   }
 
   private countRunningForKind(kind: string): number {
@@ -119,13 +124,20 @@ export class WorkQueueOrchestrator {
     );
   }
 
-  private reservePendingDispatch(): void {
+  private reservePendingDispatch(kind: string): void {
     this.pendingDispatches += 1;
+    this.pendingByKind.set(kind, (this.pendingByKind.get(kind) ?? 0) + 1);
   }
 
-  private releasePendingDispatch(): void {
+  private releasePendingDispatch(kind: string): void {
     if (this.pendingDispatches > 0) {
       this.pendingDispatches -= 1;
+    }
+    const pendingForKind = this.pendingByKind.get(kind) ?? 0;
+    if (pendingForKind <= 1) {
+      this.pendingByKind.delete(kind);
+    } else {
+      this.pendingByKind.set(kind, pendingForKind - 1);
     }
   }
 
@@ -206,7 +218,7 @@ export class WorkQueueOrchestrator {
       const feedCap = this.perFeedMaxConcurrent?.[item.kind];
       if (
         feedCap !== undefined &&
-        this.countRunningForKind(item.kind) >= feedCap
+        this.countInFlightForKind(item.kind) >= feedCap
       ) {
         continue;
       }
@@ -216,7 +228,7 @@ export class WorkQueueOrchestrator {
       }
       this.claimed.add(item.id);
       dispatched += 1;
-      this.reservePendingDispatch();
+      this.reservePendingDispatch(item.kind);
       const promise = this.dispatch(item, rendered.prompt, null);
       dispatchPromises.push(promise);
       this.trackDispatch(promise);
@@ -354,14 +366,14 @@ export class WorkQueueOrchestrator {
         );
       }
     } catch (error) {
-      this.releasePendingDispatch();
+      this.releasePendingDispatch(item.kind);
       this.claimed.delete(item.id);
       const message = error instanceof Error ? error.message : String(error);
       this.scheduleRetry(item, 1, message);
       return;
     }
 
-    this.releasePendingDispatch();
+    this.releasePendingDispatch(item.kind);
     const startedAtMs = now;
     const abortController = new AbortController();
     this.running.set(item.id, {
@@ -494,6 +506,14 @@ export class WorkQueueOrchestrator {
       ) {
         continue;
       }
+      const feedCap = this.perFeedMaxConcurrent?.[item?.kind ?? ""];
+      if (
+        item !== undefined &&
+        feedCap !== undefined &&
+        this.countInFlightForKind(item.kind) >= feedCap
+      ) {
+        continue;
+      }
       this.retryAttempts.delete(id);
       if (item === undefined) {
         this.release(id, entry.identifier);
@@ -505,7 +525,7 @@ export class WorkQueueOrchestrator {
         continue;
       }
       slots -= 1;
-      this.reservePendingDispatch();
+      this.reservePendingDispatch(item.kind);
       const promise = this.dispatch(item, rendered.prompt, entry.attempt);
       dispatchPromises.push(promise);
       this.trackDispatch(promise);
