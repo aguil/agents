@@ -102,10 +102,6 @@ export class WorkQueueOrchestrator {
     this.workspaceHooks = options.hooks;
   }
 
-  private countInFlightForKind(kind: string): number {
-    return this.countRunningForKind(kind) + (this.pendingByKind.get(kind) ?? 0);
-  }
-
   private countRunningForKind(kind: string): number {
     return this.runningByKind.get(kind) ?? 0;
   }
@@ -128,7 +124,11 @@ export class WorkQueueOrchestrator {
     } else {
       this.runningByKind.set(kind, next);
     }
-    this.untrackRunningEntry(id);
+    this.running.delete(id);
+  }
+
+  private countInFlightForKind(kind: string): number {
+    return this.countRunningForKind(kind) + (this.pendingByKind.get(kind) ?? 0);
   }
 
   private availableAgentSlots(): number {
@@ -184,23 +184,30 @@ export class WorkQueueOrchestrator {
   ): Promise<void> {
     this.stop();
     const timeoutMs = input.timeoutMs ?? 60_000;
-    const pending = [...this.inFlightDispatches];
-    if (pending.length === 0) {
-      return;
+    const deadline = Date.now() + timeoutMs;
+    let logged = false;
+    while (Date.now() < deadline) {
+      const pending = [...this.inFlightDispatches];
+      if (pending.length === 0) {
+        return;
+      }
+      if (!logged) {
+        logged = true;
+        console.log(
+          JSON.stringify({
+            event: "agentsd_stopping",
+            in_flight: pending.length,
+            timeout_ms: timeoutMs,
+          }),
+        );
+      }
+      await Promise.race([
+        Promise.all(pending),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 100);
+        }),
+      ]);
     }
-    console.log(
-      JSON.stringify({
-        event: "agentsd_stopping",
-        in_flight: pending.length,
-        timeout_ms: timeoutMs,
-      }),
-    );
-    await Promise.race([
-      Promise.all(pending),
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, timeoutMs);
-      }),
-    ]);
   }
 
   private scheduleNext(): void {
@@ -214,7 +221,13 @@ export class WorkQueueOrchestrator {
 
   async tick(): Promise<void> {
     await this.reconcile();
+    if (this.stopped) {
+      return;
+    }
     const candidates = await this.fetchAllCandidates();
+    if (this.stopped) {
+      return;
+    }
     const sorted = sortCandidates(candidates);
     const slots = this.availableAgentSlots();
     const dispatchPromises: Promise<void>[] = [];
