@@ -4,6 +4,7 @@ import {
   ensureIssueWorkspace,
   removeIssueWorkspace,
   type WorkspaceHooks,
+  writeWorkItemMarker,
 } from "@aguil/agents-workspace";
 
 export type RunAttemptStatus =
@@ -334,11 +335,15 @@ export class WorkQueueOrchestrator {
     try {
       const hooks = this.workspaceHooks;
       const ws = await ensureIssueWorkspace({
-        workspaceRoot: this.options.definition.workspaceRoot,
+        workspaceRoot: this.definition.workspaceRoot,
         identifier: item.identifier,
         hooks,
       });
       workspacePath = ws.path;
+      await writeWorkItemMarker(workspacePath, {
+        identifier: item.identifier,
+        kind: item.kind,
+      });
       if (hooks?.beforeRun !== undefined) {
         const { runWorkspaceHook } = await import("@aguil/agents-workspace");
         await runWorkspaceHook(
@@ -596,7 +601,9 @@ export class WorkQueueOrchestrator {
   async startupTerminalCleanup(): Promise<void> {
     for (const feed of this.feeds) {
       try {
-        const terminal = await feed.fetchTerminal();
+        const terminal = await feed.fetchTerminal({
+          workspaceRoot: this.definition.workspaceRoot,
+        });
         for (const item of terminal) {
           await removeIssueWorkspace({
             workspaceRoot: this.definition.workspaceRoot,
