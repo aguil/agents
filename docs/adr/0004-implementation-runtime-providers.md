@@ -33,10 +33,8 @@ reference profile, not a required dependency.
    after `$VAR` resolution — not a Codex-specific check.
 
 **Consequences:** See [`docs/agentsd.md`](../agentsd.md) for operator-facing
-runtime options.
-
-**Follow-up:** `applyCodexAlias` currently maps `codex.protocol` into
-`agent.protocol`; align implementation with this ADR or amend the ADR —
-[#42](https://github.com/aguil/agents/issues/42).
+runtime options. `applyCodexAlias` maps only `command`, `runtime` (when
+`command` is set), and stall/turn timeouts — not `codex.protocol` (set
+`agent.protocol` explicitly when needed).
 
 **References:** ADR 0003; provider-agnostic execution review plan.

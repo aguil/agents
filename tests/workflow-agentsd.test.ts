@@ -191,6 +191,24 @@ test("codex front matter aliases into agent runtime", () => {
   expect(agent.runtime).toBe("app_server");
 });
 
+test("codex.protocol is not aliased into agent.protocol", () => {
+  const agent = applyCodexAlias(
+    { protocol: "explicit_protocol" },
+    { protocol: "codex_app_server_v2", command: "codex app-server" },
+  );
+  expect(agent.protocol).toBe("explicit_protocol");
+  const fresh = applyCodexAlias({}, { protocol: "codex_app_server_v2" });
+  expect(fresh.protocol).toBeUndefined();
+  const parsed = parseImplementationExecution({
+    config: {
+      codex: { protocol: "codex_app_server_v2", command: "codex app-server" },
+    },
+    workflowDir: "/tmp/workflow",
+    env: {},
+  });
+  expect(parsed.protocol).toBeNull();
+});
+
 test("parseImplementationExecution preserves shell command argv", () => {
   const parsed = parseImplementationExecution({
     config: { agent: { command: "codex app-server", runtime: "app_server" } },
