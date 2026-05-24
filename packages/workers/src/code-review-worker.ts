@@ -60,68 +60,81 @@ export async function runCodeReviewWorker(input: {
     }
   }
 
-  const result = await runCodeReview({
-    workspacePath: reviewWorkspace,
-    scratchpadRoot,
-    reviewPrNumber: prNumber,
-    adapter: input.adapter,
-    metadata: {
-      ...input.item.metadata,
-      agentsd_prompt: input.prompt.slice(0, 200),
-      work_item_id: input.item.id,
-    },
-  });
-
-  if (cleanupWorktree !== undefined) {
-    await cleanupWorktree();
-  }
-
-  const resultPath = join(scratchpadRoot, result.runId, "result.json");
-  let triageItemCount = 0;
   try {
-    triageItemCount = await countCodeReviewTriageItems({
-      workspacePath: input.hostWorkspacePath,
-      resultPath,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(
-      JSON.stringify({
-        event: "code_review_triage_failed",
+    const result = await runCodeReview({
+      workspacePath: reviewWorkspace,
+      scratchpadRoot,
+      reviewPrNumber: prNumber,
+      adapter: input.adapter,
+      metadata: {
+        ...input.item.metadata,
+        agentsd_prompt: input.prompt.slice(0, 200),
         work_item_id: input.item.id,
-        error: message,
-      }),
-    );
-  }
+      },
+    });
 
-  const publishResult = await executeCodeReviewPublish({
-    publish: input.definition.publish,
-    result,
-    resultPath,
-    workspacePath: input.hostWorkspacePath,
-    triageItemCount,
-    prNumber,
-    repository: repo,
-    reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
-  });
+    const resultPath = join(scratchpadRoot, result.runId, "result.json");
+    let triageItemCount = 0;
+    try {
+      triageItemCount = await countCodeReviewTriageItems({
+        workspacePath: input.hostWorkspacePath,
+        resultPath,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        JSON.stringify({
+          event: "code_review_triage_failed",
+          work_item_id: input.item.id,
+          error: message,
+        }),
+      );
+    }
 
-  logPublishOutcome(input.item, publishResult.decision, {
-    triage_item_count: triageItemCount,
-    publish_executed: publishResult.executed,
-    review_url: publishResult.reviewUrl,
-    publish_error: publishResult.postError,
-  });
+    const publishResult = await executeCodeReviewPublish({
+      publish: input.definition.publish,
+      result,
+      resultPath,
+      workspacePath: input.hostWorkspacePath,
+      triageItemCount,
+      prNumber,
+      repository: repo,
+      reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
+    });
 
-  if (result.status === "error") {
-    return { status: "failed", error: "code review harness error" };
+    logPublishOutcome(input.item, publishResult.decision, {
+      triage_item_count: triageItemCount,
+      publish_executed: publishResult.executed,
+      review_url: publishResult.reviewUrl,
+      publish_error: publishResult.postError,
+    });
+
+    if (result.status === "error") {
+      return { status: "failed", error: "code review harness error" };
+    }
+    if (publishResult.executed && publishResult.postError !== undefined) {
+      return {
+        status: "failed",
+        error: publishResult.postError,
+      };
+    }
+    return { status: "succeeded" };
+  } finally {
+    if (cleanupWorktree !== undefined) {
+      try {
+        await cleanupWorktree();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          JSON.stringify({
+            event: "code_review_worktree_cleanup_failed",
+            work_item_id: input.item.id,
+            error: message,
+          }),
+        );
+      }
+    }
   }
-  if (publishResult.executed && publishResult.postError !== undefined) {
-    return {
-      status: "failed",
-      error: publishResult.postError,
-    };
-  }
-  return { status: "succeeded" };
 }
 
 function logPublishOutcome(
