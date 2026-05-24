@@ -48,8 +48,9 @@ same adapter family as `agents code-review`. `execution.implementation.adapter`
 also drives **code review** and **pr-feedback fix** workers (not a separate fake
 default in `agentsd`).
 
-**App server:** multi-turn loop via `AgentSessionClient` (stub session driver
-until a full JSON-RPC client is added). Requires `agent.command`.
+**App server:** multi-turn loop via `AgentSessionClient` and the
+`json_rpc_session_v1` line-delimited JSON-RPC driver (`agent.command` required).
+Set `agent.protocol` to `json_rpc_session_v1` or use a `codex:` alias block.
 
 ### Publish execution (when enabled in `WORKFLOW.md`)
 
@@ -94,7 +95,7 @@ merging the platform PR.
 | Code-review worker parity (worktree, publish-with-findings)                  | [#39](https://github.com/aguil/agents/issues/39)                                          |
 | Per-feed concurrency, JSONL observability, production runbook                | [#40](https://github.com/aguil/agents/issues/40)                                          |
 | Stall timeout: cancel or isolate in-flight implementation workers            | [#41](https://github.com/aguil/agents/issues/41) (shipped)                                |
-| Real `app_server` JSON-RPC client                                            | [#34](https://github.com/aguil/agents/issues/34)                                          |
+| Real `app_server` JSON-RPC client                                            | [#34](https://github.com/aguil/agents/issues/34) (shipped: `json_rpc_session_v1`)         |
 | MCP feed, `github_issues` dogfood, publish integration tests                 | [#35](https://github.com/aguil/agents/issues/35)                                          |
 
 **Stall / reload behavior today:** when `agent.stall_timeout_ms` fires, the
@@ -104,6 +105,11 @@ dispatch settles ([#41](https://github.com/aguil/agents/issues/41)). Editing
 concurrency without restart ([#38](https://github.com/aguil/agents/issues/38)
 partial). Poll interval follows the reloaded definition on the next tick; worker
 router and implementation adapter wiring are still fixed at process start.
+
+**Startup terminal cleanup** runs in the background (does not block the poll
+loop). For `github_pr_feedback`, it only re-checks PRs that already have a
+per-item workspace under `workspace.root` (`.agents-work-item.json` marker), not
+every authored open PR.
 
 ## Interactive PR feedback selection
 
