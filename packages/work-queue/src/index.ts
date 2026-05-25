@@ -18,6 +18,7 @@ export type RunAttemptStatus =
 export interface RetryEntry {
   readonly issueId: string;
   readonly identifier: string;
+  readonly item: WorkItem;
   readonly attempt: number;
   readonly dueAtMs: number;
   readonly error: string | null;
@@ -529,6 +530,7 @@ export class WorkQueueOrchestrator {
     this.retryAttempts.set(item.id, {
       issueId: item.id,
       identifier: item.identifier,
+      item,
       attempt,
       dueAtMs: now + delay,
       error,
@@ -544,16 +546,10 @@ export class WorkQueueOrchestrator {
         due.push({ id, entry });
       }
     }
-    const resolved = await Promise.all(
-      due.map(async ({ id, entry }) => ({
-        id,
-        entry,
-        item: await this.findCandidateById(id),
-      })),
-    );
     const dispatchPromises: Promise<void>[] = [];
     let slots = this.availableAgentSlots();
-    for (const { id, entry, item } of resolved) {
+    for (const { id, entry } of due) {
+      const item = entry.item;
       if (
         this.completed.has(id) ||
         this.stallAwaitingSettlement.has(id) ||
@@ -561,19 +557,14 @@ export class WorkQueueOrchestrator {
       ) {
         continue;
       }
-      const feedCap = this.perFeedMaxConcurrent?.[item?.kind ?? ""];
+      const feedCap = this.perFeedMaxConcurrent?.[item.kind];
       if (
-        item !== undefined &&
         feedCap !== undefined &&
         this.countInFlightForKind(item.kind) >= feedCap
       ) {
         continue;
       }
       this.retryAttempts.delete(id);
-      if (item === undefined) {
-        this.release(id, entry.identifier);
-        continue;
-      }
       const rendered = this.options.renderPrompt(item, entry.attempt);
       if (!rendered.ok) {
         this.release(id, entry.identifier);
@@ -596,17 +587,6 @@ export class WorkQueueOrchestrator {
         );
       });
     }
-  }
-
-  private async findCandidateById(id: string): Promise<WorkItem | undefined> {
-    for (const feed of this.feeds) {
-      const states = await feed.fetchStates([id]);
-      if (states.length > 0) {
-        return states[0];
-      }
-    }
-    const all = await this.fetchAllCandidates();
-    return all.find((i) => i.id === id);
   }
 
   private async shouldMarkCompleted(item: WorkItem): Promise<boolean> {
