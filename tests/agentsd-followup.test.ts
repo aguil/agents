@@ -73,6 +73,46 @@ test("ingestReasonForPull flags fingerprint delta as new_review_activity", async
   ).toEqual({ enqueue: false, reason: "unchanged_threads" });
 });
 
+test("prFeedbackOfferAfterIngest re-offers unchanged threads for selection retention", async () => {
+  const { ingestReasonForPull, prFeedbackOfferAfterIngest } = await import(
+    "@aguil/agents-tracker"
+  );
+  const ingest = ingestReasonForPull({
+    identifier: "org/repo#1-feedback",
+    fingerprint: "t1",
+    threadCount: 1,
+    prior: {
+      schemaId: "pr-feedback-ingest/v1",
+      pulls: {
+        "org/repo#1-feedback": {
+          threadFingerprint: "t1",
+          threadCount: 1,
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      },
+    },
+  });
+  expect(ingest.enqueue).toBe(false);
+  expect(
+    prFeedbackOfferAfterIngest({
+      ingest,
+      threadCount: 1,
+      prId: "org/repo#1",
+      pendingPrIds: new Set(),
+      approvedPrIds: new Set(["org/repo#1"]),
+    }),
+  ).toEqual({ offer: true, reason: "approved_dispatch" });
+  expect(
+    prFeedbackOfferAfterIngest({
+      ingest,
+      threadCount: 1,
+      prId: "org/repo#1",
+      pendingPrIds: new Set(["org/repo#1"]),
+      approvedPrIds: new Set(),
+    }),
+  ).toEqual({ offer: true, reason: "selection_pending" });
+});
+
 test("parsePrFeedbackPolicy defaults to interactive", () => {
   const policy = parsePrFeedbackPolicy({});
   expect(policy.profile).toBe("interactive");

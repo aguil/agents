@@ -75,6 +75,29 @@ export function ingestReasonForPull(input: {
   return { enqueue: false, reason: "unchanged_threads" };
 }
 
+/** Re-offer unchanged-thread PRs still tracked in the interactive selection store. */
+export function prFeedbackOfferAfterIngest(input: {
+  readonly ingest: { readonly enqueue: boolean; readonly reason: string };
+  readonly threadCount: number;
+  readonly prId: string;
+  readonly pendingPrIds: ReadonlySet<string>;
+  readonly approvedPrIds: ReadonlySet<string>;
+}): { readonly offer: boolean; readonly reason: string } {
+  if (input.ingest.enqueue) {
+    return { offer: true, reason: input.ingest.reason };
+  }
+  if (input.threadCount === 0) {
+    return { offer: false, reason: input.ingest.reason };
+  }
+  if (input.approvedPrIds.has(input.prId)) {
+    return { offer: true, reason: "approved_dispatch" };
+  }
+  if (input.pendingPrIds.has(input.prId)) {
+    return { offer: true, reason: "selection_pending" };
+  }
+  return { offer: false, reason: input.ingest.reason };
+}
+
 function isIngestDocument(value: unknown): value is PrFeedbackIngestDocument {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
