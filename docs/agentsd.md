@@ -65,10 +65,13 @@ retried on the next poll tick (best-effort; in-flight work may still complete).
 
 ## Environment
 
-| Variable                   | Effect                                                   |
-| -------------------------- | -------------------------------------------------------- |
-| `AGENTSD_PUBLISH=disabled` | Force all publish modes off                              |
-| `AGENTSD_WORKSPACE`        | Host repo path for `gh` / harness context (default: cwd) |
+| Variable                   | Effect                                                                  |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `AGENTSD_PUBLISH=disabled` | Force all publish modes off                                             |
+| `AGENTSD_WORKSPACE`        | Host repo path for `gh` / harness context (default: cwd)                |
+| `AGENTSD_MCP_HANDLER`      | Module path exporting `mcpInvoke` (with `agentsd --with-mcp`)           |
+| `AGENTSD_MCP_COMMAND`      | Shell command: JSON request on stdin, JSON response on last stdout line |
+| `AGENTSD_NOTIFY_EMAIL_TO`  | When set, selection notify emits `pr_feedback_selection_email` JSONL    |
 
 ## Trust posture
 
@@ -88,33 +91,32 @@ PR [#33](https://github.com/aguil/agents/pull/33) lands the scheduler and
 workers; the items below are tracked for **shippable E2E**, not blockers for
 merging the platform PR.
 
-| Topic                                                                        | GitHub issue                                                                              |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| PR feedback ingest on posted review activity (beyond static thread snapshot) | [#36](https://github.com/aguil/agents/issues/36) (partial: interactive selection shipped) |
-| Work-item terminal semantics; stop post-success retry churn                  | [#37](https://github.com/aguil/agents/issues/37) (shipped)                                |
-| `WORKFLOW.md` hot reload (orchestrator/router/publish); graceful shutdown    | [#38](https://github.com/aguil/agents/issues/38)                                          |
-| Code-review worker parity (worktree, publish-with-findings)                  | [#39](https://github.com/aguil/agents/issues/39)                                          |
-| Per-feed concurrency, JSONL observability, production runbook                | [#40](https://github.com/aguil/agents/issues/40)                                          |
-| Stall timeout: cancel or isolate in-flight implementation workers            | [#41](https://github.com/aguil/agents/issues/41) (shipped)                                |
-| Real `app_server` JSON-RPC client                                            | [#34](https://github.com/aguil/agents/issues/34) (shipped: `json_rpc_session_v1`)         |
-| MCP feed, `github_issues` dogfood, publish integration tests                 | [#35](https://github.com/aguil/agents/issues/35)                                          |
+| Topic                                                                     | GitHub issue                                                                                        |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| PR feedback ingest on posted review activity (thread fingerprint deltas)  | [#36](https://github.com/aguil/agents/issues/36) (partial: ingest + interactive selection shipped)  |
+| Work-item terminal semantics; stop post-success retry churn               | [#37](https://github.com/aguil/agents/issues/37) (shipped)                                          |
+| `WORKFLOW.md` hot reload (orchestrator/router/publish); graceful shutdown | [#38](https://github.com/aguil/agents/issues/38) (partial: reload + `stopAndDrain` shipped)         |
+| Code-review worker parity (worktree, publish-with-findings)               | [#39](https://github.com/aguil/agents/issues/39) (partial: `use_worktree`, `publish_with_findings`) |
+| Per-feed concurrency, JSONL observability, production runbook             | [#40](https://github.com/aguil/agents/issues/40) (partial: runbook + monitor context)               |
+| Stall timeout: cancel or isolate in-flight implementation workers         | [#41](https://github.com/aguil/agents/issues/41) (shipped)                                          |
+| Real `app_server` JSON-RPC client                                         | [#34](https://github.com/aguil/agents/issues/34) (shipped: `json_rpc_session_v1`)                   |
+| MCP feed, `github_issues` dogfood, publish integration tests              | [#35](https://github.com/aguil/agents/issues/35)                                                    |
 
 **Stall / reload behavior today:** when `agent.stall_timeout_ms` fires, the
 orchestrator aborts the in-flight worker via `AbortSignal` and retries after the
 dispatch settles ([#41](https://github.com/aguil/agents/issues/41)). Editing
 `WORKFLOW.md` reloads the workflow definition, feed clients, per-feed
-concurrency caps, workspace hooks, implementation stall timeout, and subprocess
-code-review adapter selection on the next dispatch
-([#38](https://github.com/aguil/agents/issues/38) partial). Poll interval
-follows the reloaded definition on the next tick. Implementation workers already
-read `implementation.*` from the active definition each dispatch.
+concurrency caps (keyed by work-item `kind`), workspace hooks, implementation
+stall timeout, and subprocess adapter selection on the next dispatch
+([#38](https://github.com/aguil/agents/issues/38)). Poll interval follows the
+reloaded definition on the next tick. SIGINT/SIGTERM call `stopAndDrain` to
+await in-flight workers (up to 60s). Implementation workers read
+`implementation.*` from the active definition each dispatch.
 
-**Tracked follow-ups (not blocking agentsd ship):**
-
-- Per-feed `max_concurrent` keys vs work-item `kind` mismatch
-  ([#47](https://github.com/aguil/agents/issues/47))
-- Extra GitHub thread scan on PR-feedback completion when submit is deferred
-  ([#48](https://github.com/aguil/agents/issues/48))
+**MCP feed:** configure `feeds: [{ kind: mcp, server: …, list_tool: … }]` and
+run `agentsd --with-mcp` with `AGENTSD_MCP_HANDLER` (module exporting
+`mcpInvoke`) or `AGENTSD_MCP_COMMAND` (stdio JSON bridge). Tool output must
+normalize to `{ issues: [...] }` for list/get (see `McpTrackerFeed`).
 
 **Startup terminal cleanup** runs in the background (does not block the poll
 loop). For `github_pr_feedback`, it only re-checks PRs that already have a
@@ -125,13 +127,21 @@ every authored open PR.
 
 Default `policy.pr_feedback.profile` is **`interactive`**:
 
-1. `agentsd` discovers authored PRs with unresolved threads and writes
+1. `agentsd` discovers authored PRs with unresolved threads (and **new review
+   activity** when thread fingerprints change vs
+   `.agentsd/pr-feedback-ingest.json`) and writes
    `.agentsd/pr-feedback-selection.json` under `AGENTSD_WORKSPACE`.
 2. JSONL event `pr_feedback_selection_required` plus optional **system**
-   notification (`notify-send` / `terminal-notifier`) and **webhook**.
-3. Operator approves PRs:
+   notification (`notify-send` / `terminal-notifier`), **webhook**, **Slack**
+   (`SLACK_WEBHOOK_URL`), or **email** (`AGENTSD_NOTIFY_EMAIL_TO` → JSONL
+   event).
+3. Optional **monitor** workspace: `policy.pr_feedback.notify.monitor` writes
+   `monitor-context.json` for a control-repo IDE session.
+4. Operator approves PRs:
    `agents pr-feedback select --selection-id <id> --approve owner/repo#n`.
-4. Only approved PRs run the `pr_feedback` worker (collect → triage → fix).
+5. Only approved PRs run the `pr_feedback` worker (collect → triage → fix).
+   Multi-round drain re-dispatches while triage items or unresolved threads
+   remain; the work item closes when both are empty (or submit completes).
 
 `profile: unattended` requires explicit `policy.pr_feedback.allow` list.
 
@@ -142,14 +152,39 @@ Default `policy.pr_feedback.profile` is **`interactive`**:
 | `AGENTSD_WORKSPACE`          | Host repo path for `gh` and selection state                                      |
 | `publish.*`                  | Keep **`off`** until playbook gates are configured                               |
 | `policy.pr_feedback.profile` | `interactive` for operator-approved PRs                                          |
-| `feeds[].max_concurrent`     | Cap per-feed parallelism (see `WORKFLOW.example.md`)                             |
+| `feeds[].max_concurrent`     | Cap per work-item kind (`github_issue`, `github_pr_feedback`, …) — see example   |
 | Notifications                | `notify-send` (Linux) or Slack via `SLACK_WEBHOOK_URL` + `slack_webhook` channel |
 
-Golden-path smoke: `bun test tests/agentsd-followup.test.ts`. Example issue
-feed:
+### JSONL event catalog
+
+Structured logs are one JSON object per line on stdout:
+
+| Event                            | When                                                 |
+| -------------------------------- | ---------------------------------------------------- |
+| `agentsd_started`                | Process boot                                         |
+| `workflow_reloaded`              | `WORKFLOW.md` changed on disk                        |
+| `agentsd_stopping`               | SIGINT/SIGTERM drain started                         |
+| `pr_feedback_selection_required` | Interactive selection pending                        |
+| `pr_feedback_selection_email`    | Email channel configured (`AGENTSD_NOTIFY_EMAIL_TO`) |
+| `pr_feedback_collected`          | `pr_feedback` worker finished a pass                 |
+| `publish_decision`               | Publish gate evaluated (workers)                     |
+| `implementation_stalled`         | Stall timeout fired                                  |
+
+Golden-path smoke: `bun test tests/agentsd-followup.test.ts`,
+`tests/agentsd-publish-integration.test.ts`,
+`tests/agentsd-reload-shutdown.test.ts`. Example issue feed:
 [`docs/examples/WORKFLOW.github-issues.example.md`](examples/WORKFLOW.github-issues.example.md).
 Notify receiver example:
 [`docs/examples/notify-receiver/`](examples/notify-receiver/).
+
+### Code review worker options
+
+```yaml
+policy:
+  code_review:
+    use_worktree: true # detached PR worktree (CLI parity)
+    publish_with_findings: true # allow pending post when triage items exist
+```
 
 ## One-shot CLI
 
