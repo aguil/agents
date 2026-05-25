@@ -20,6 +20,12 @@ export {
 } from "./feeds/github-pr-review";
 export { McpTrackerFeed, type McpTrackerFeedConfig } from "./feeds/mcp-tracker";
 export {
+  emptyIngestDocument,
+  ingestReasonForPull,
+  prFeedbackOfferAfterIngest,
+  threadActivityFingerprint,
+} from "./feeds/pr-feedback-ingest-state";
+export {
   type BlockerRef,
   type WorkItem,
   type WorkItemKind,

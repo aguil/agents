@@ -22,6 +22,12 @@ policy:
         - kind: jsonl
         - kind: system
       cooldown_ms: 300000
+      monitor:
+        workspace: ~/agentsd-control
+        context_path: .agentsd/monitor-context.json
+  code_review:
+    use_worktree: false
+    publish_with_findings: false
 feeds:
   - kind: github_issues
     max_concurrent: 2

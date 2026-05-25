@@ -2,6 +2,7 @@ export {
   type CodeReviewPolicyConfig,
   parseCodeReviewPolicy,
 } from "./code-review-policy";
+export { workItemKindForFeedKind } from "./feed-work-item-kind";
 export {
   applyCodexAlias,
   parseImplementationExecution,
