@@ -72,7 +72,7 @@ export function ingestReasonForPull(input: {
   if (prev.threadFingerprint !== input.fingerprint) {
     return { enqueue: true, reason: "new_review_activity" };
   }
-  return { enqueue: true, reason: "unresolved_threads" };
+  return { enqueue: false, reason: "unchanged_threads" };
 }
 
 function isIngestDocument(value: unknown): value is PrFeedbackIngestDocument {

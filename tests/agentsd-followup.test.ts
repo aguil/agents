@@ -69,8 +69,8 @@ test("ingestReasonForPull flags fingerprint delta as new_review_activity", async
       fingerprint: fp1,
       threadCount: 1,
       prior: doc,
-    }).reason,
-  ).toBe("unresolved_threads");
+    }),
+  ).toEqual({ enqueue: false, reason: "unchanged_threads" });
 });
 
 test("parsePrFeedbackPolicy defaults to interactive", () => {
