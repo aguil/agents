@@ -241,10 +241,12 @@ Work
     throw new Error("missing definition");
   }
 
+  let now = 0;
   const orchestrator = new WorkQueueOrchestrator({
     definition,
     feeds: [feed],
     renderPrompt: () => ({ ok: true, prompt: "p" }),
+    now: () => now,
     worker: async () => {
       runs += 1;
       return { status: "succeeded", closeWorkItem: input.closeWorkItem };
@@ -253,6 +255,7 @@ Work
 
   await orchestrator.tick();
   await orchestrator.flush();
+  now += definition.pollingIntervalMs + 1;
   await orchestrator.tick();
   await orchestrator.flush();
 

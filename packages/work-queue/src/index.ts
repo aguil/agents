@@ -464,15 +464,17 @@ export class WorkQueueOrchestrator {
         }
         if (markCompleted) {
           this.completed.add(item.id);
+          this.claimed.delete(item.id);
         } else if (result.closeWorkItem === false) {
           this.scheduleRetry(
             item,
             (attempt ?? 0) + 1,
             null,
-            Math.min(this.definition.pollingIntervalMs, 10_000),
+            this.definition.pollingIntervalMs,
           );
+        } else {
+          this.claimed.delete(item.id);
         }
-        this.claimed.delete(item.id);
       } else {
         this.scheduleRetry(item, (attempt ?? 0) + 1, result.error ?? "failed");
       }
