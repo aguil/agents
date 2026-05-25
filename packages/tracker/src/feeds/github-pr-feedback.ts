@@ -85,11 +85,18 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
         pendingPrIds,
         approvedPrIds,
       });
-      nextPulls[identifier] = {
-        threadFingerprint: fingerprint,
-        threadCount: threads.length,
-        updatedAt: now,
-      };
+      const prior = ingestDoc.pulls[identifier];
+      const ingestChanged =
+        prior === undefined ||
+        prior.threadFingerprint !== fingerprint ||
+        prior.threadCount !== threads.length;
+      if (ingestChanged) {
+        nextPulls[identifier] = {
+          threadFingerprint: fingerprint,
+          threadCount: threads.length,
+          updatedAt: now,
+        };
+      }
       if (!offer) {
         continue;
       }
@@ -115,10 +122,14 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
         },
       });
     }
-    await writeIngestDocument(workspacePath, {
-      schemaId: ingestDoc.schemaId,
-      pulls: nextPulls,
-    });
+    const ingestDirty =
+      JSON.stringify(nextPulls) !== JSON.stringify(ingestDoc.pulls);
+    if (ingestDirty) {
+      await writeIngestDocument(workspacePath, {
+        schemaId: ingestDoc.schemaId,
+        pulls: nextPulls,
+      });
+    }
     return items;
   }
 
