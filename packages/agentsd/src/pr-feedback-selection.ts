@@ -14,6 +14,7 @@ import {
   upsertPendingFromWorkItems,
   writeSelectionDocument,
 } from "@aguil/agents-workflow";
+import { writeMonitorContext } from "./monitor-context";
 
 export async function syncPrFeedbackSelection(input: {
   readonly definition: WorkflowDefinition;
@@ -50,7 +51,7 @@ export async function syncPrFeedbackSelection(input: {
           item.metadata.unresolved_thread_count ?? "0",
           10,
         ),
-        reason: "unresolved_threads",
+        reason: item.metadata.ingest_reason ?? "unresolved_threads",
       };
     })
     .filter((entry): entry is PrFeedbackPendingEntry => entry !== null);
@@ -99,6 +100,19 @@ export async function syncPrFeedbackSelection(input: {
 
   if (JSON.stringify(doc) !== JSON.stringify(initialDoc)) {
     await writeSelectionDocument(input.hostWorkspacePath, doc);
+  }
+
+  if (
+    policy.monitorWorkspace !== null &&
+    policy.monitorContextPath !== null &&
+    doc.pending.length > 0
+  ) {
+    await writeMonitorContext({
+      monitorWorkspace: policy.monitorWorkspace,
+      contextPath: policy.monitorContextPath,
+      hostWorkspacePath: input.hostWorkspacePath,
+      doc,
+    });
   }
 
   const approved = new Set(doc.approved);
