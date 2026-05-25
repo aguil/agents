@@ -102,11 +102,7 @@ export async function syncPrFeedbackSelection(input: {
     await writeSelectionDocument(input.hostWorkspacePath, doc);
   }
 
-  if (
-    policy.monitorWorkspace !== null &&
-    policy.monitorContextPath !== null &&
-    doc.pending.length > 0
-  ) {
+  if (policy.monitorWorkspace !== null && policy.monitorContextPath !== null) {
     await writeMonitorContext({
       monitorWorkspace: policy.monitorWorkspace,
       contextPath: policy.monitorContextPath,
