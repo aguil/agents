@@ -1,7 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { buildSelectCommand } from "@aguil/agents-publish";
-import type { PrFeedbackSelectionDocument } from "@aguil/agents-workflow";
+import {
+  expandPathValue,
+  type PrFeedbackSelectionDocument,
+} from "@aguil/agents-workflow";
 import { assertWorkspaceInsideRoot } from "@aguil/agents-workspace";
 
 export const AGENTSD_MONITOR_SCHEMA_ID = "agentsd-monitor/v1";
@@ -12,7 +15,9 @@ export async function writeMonitorContext(input: {
   readonly hostWorkspacePath: string;
   readonly doc: PrFeedbackSelectionDocument;
 }): Promise<void> {
-  const root = resolve(input.monitorWorkspace);
+  const root = expandPathValue(input.monitorWorkspace, {
+    workflowDir: input.hostWorkspacePath,
+  });
   const relative = input.contextPath.trim();
   if (
     relative.length === 0 ||
