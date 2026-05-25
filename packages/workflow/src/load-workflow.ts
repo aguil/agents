@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { parseCodeReviewPolicy } from "./code-review-policy";
+import { workItemKindForFeedKind } from "./feed-work-item-kind";
 import {
   parseImplementationExecution,
   validateImplementationRuntime,
@@ -145,8 +146,11 @@ function parsePerFeedMaxConcurrent(
   for (const feed of feeds) {
     const max = feed.raw.max_concurrent;
     if (typeof max === "number" && Number.isFinite(max) && max > 0) {
-      // Orchestrator keys caps by work-item kind; duplicate feed kinds share one limit.
-      out[feed.kind] = Math.floor(max);
+      const workItemKind = workItemKindForFeedKind(feed.kind);
+      const cap = Math.floor(max);
+      const existing = out[workItemKind];
+      out[workItemKind] =
+        existing === undefined ? cap : Math.min(existing, cap);
     }
   }
   return out;
