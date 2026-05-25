@@ -27,9 +27,13 @@ export async function runAgentsd(
   argv: readonly string[],
   options: AgentsdOptions = {},
 ): Promise<number> {
-  const workflowPath = resolve(argv[0] ?? joinCwd("WORKFLOW.md"));
+  const workflowPath = resolve(
+    options.workflowPath ?? argv[0] ?? joinCwd("WORKFLOW.md"),
+  );
   const hostWorkspace = resolve(
-    process.env.AGENTSD_WORKSPACE?.trim() || process.cwd(),
+    options.workspacePath?.trim() ||
+      process.env.AGENTSD_WORKSPACE?.trim() ||
+      process.cwd(),
   );
 
   const loaded = await loadWorkflowFile(workflowPath);
