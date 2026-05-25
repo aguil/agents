@@ -454,9 +454,14 @@ export class WorkQueueOrchestrator {
         return;
       }
       if (result.status === "succeeded") {
-        const markCompleted =
-          result.closeWorkItem === true ||
-          (await this.shouldMarkCompleted(item));
+        let markCompleted: boolean;
+        if (result.closeWorkItem === true) {
+          markCompleted = true;
+        } else if (result.closeWorkItem === false) {
+          markCompleted = false;
+        } else {
+          markCompleted = await this.shouldMarkCompleted(item);
+        }
         if (markCompleted) {
           this.completed.add(item.id);
         }
