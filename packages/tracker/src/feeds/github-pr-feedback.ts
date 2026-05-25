@@ -8,6 +8,12 @@ import {
 } from "@aguil/agents-workspace";
 import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
+import {
+  ingestReasonForPull,
+  readIngestDocument,
+  threadActivityFingerprint,
+  writeIngestDocument,
+} from "./pr-feedback-ingest-state";
 
 export interface GitHubPrFeedbackFeedOptions {
   readonly workspacePath: string;
@@ -51,14 +57,30 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       }),
     );
 
+    const ingestDoc = await readIngestDocument(workspacePath);
+    const nextPulls = { ...ingestDoc.pulls };
     const items: WorkItem[] = [];
+    const now = new Date().toISOString();
     for (const { pull, threads } of withThreads) {
-      if (threads.length === 0) {
+      const identifier = `${pull.repository}#${pull.pullNumber}-feedback`;
+      const fingerprint = threadActivityFingerprint(threads);
+      const { enqueue, reason } = ingestReasonForPull({
+        identifier,
+        fingerprint,
+        threadCount: threads.length,
+        prior: ingestDoc,
+      });
+      nextPulls[identifier] = {
+        threadFingerprint: fingerprint,
+        threadCount: threads.length,
+        updatedAt: now,
+      };
+      if (!enqueue) {
         continue;
       }
       items.push({
         id: `${pull.repository}/pull/${pull.pullNumber}/feedback`,
-        identifier: `${pull.repository}#${pull.pullNumber}-feedback`,
+        identifier,
         title: pull.title,
         description: `${threads.length} unresolved review thread(s)`,
         state: "feedback_pending",
@@ -74,9 +96,14 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
           repository: pull.repository,
           pull_number: String(pull.pullNumber),
           unresolved_thread_count: String(threads.length),
+          ingest_reason: reason,
         },
       });
     }
+    await writeIngestDocument(workspacePath, {
+      schemaId: ingestDoc.schemaId,
+      pulls: nextPulls,
+    });
     return items;
   }
 

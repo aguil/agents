@@ -158,7 +158,9 @@ export async function runPrFeedbackWorker(input: {
   if (submitResult.error !== undefined) {
     return { status: "failed", error: submitResult.error };
   }
-  const blocksRequeue =
-    submitResult.decision.skipReason === "approval_required";
-  return { status: "succeeded", closeWorkItem: !blocksRequeue };
+  const closeWorkItem =
+    submitResult.decision.skipReason !== "approval_required" &&
+    triageItemCount === 0 &&
+    document.items.length === 0;
+  return { status: "succeeded", closeWorkItem };
 }
