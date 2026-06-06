@@ -10,6 +10,7 @@ import {
   watchWorkflowFile,
 } from "@aguil/agents-workflow";
 import type { WorkspaceHooks } from "@aguil/agents-workspace";
+import { resolveMcpInvoke } from "./mcp-invoke";
 import { syncPrFeedbackSelection } from "./pr-feedback-selection";
 
 export interface AgentsdOptions {
@@ -22,10 +23,17 @@ export interface AgentsdOptions {
   ) => Promise<unknown>;
 }
 
-export async function runAgentsd(argv: readonly string[]): Promise<number> {
-  const workflowPath = resolve(argv[0] ?? joinCwd("WORKFLOW.md"));
+export async function runAgentsd(
+  argv: readonly string[],
+  options: AgentsdOptions = {},
+): Promise<number> {
+  const workflowPath = resolve(
+    options.workflowPath ?? argv[0] ?? joinCwd("WORKFLOW.md"),
+  );
   const hostWorkspace = resolve(
-    process.env.AGENTSD_WORKSPACE?.trim() || process.cwd(),
+    options.workspacePath?.trim() ||
+      process.env.AGENTSD_WORKSPACE?.trim() ||
+      process.cwd(),
   );
 
   const loaded = await loadWorkflowFile(workflowPath);
@@ -46,12 +54,16 @@ export async function runAgentsd(argv: readonly string[]): Promise<number> {
   }
 
   let activeDefinition = definition;
+  const mcpInvoke = await resolveMcpInvoke({
+    argv,
+    explicit: options.mcpInvoke,
+  });
   const feeds = () =>
     createWorkFeeds({
       workflowDir: activeDefinition.workflowDir,
       workspacePath: hostWorkspace,
       feeds: activeDefinition.feeds,
-      mcpInvoke: argv.includes("--with-mcp") ? defaultMcpInvoke : undefined,
+      mcpInvoke,
     });
 
   if (feeds().length === 0) {
@@ -182,18 +194,6 @@ function workflowHooks(
 
 function joinCwd(file: string): string {
   return resolve(process.cwd(), file);
-}
-
-async function defaultMcpInvoke(
-  server: string,
-  tool: string,
-  input: Record<string, unknown>,
-): Promise<unknown> {
-  console.warn(
-    `[agentsd] MCP invoke not configured (server=${server}, tool=${tool})`,
-    input,
-  );
-  return { issues: [] };
 }
 
 export async function main(

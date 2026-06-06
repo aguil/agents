@@ -18,6 +18,7 @@ export type RunAttemptStatus =
 export interface RetryEntry {
   readonly issueId: string;
   readonly identifier: string;
+  readonly item: WorkItem;
   readonly attempt: number;
   readonly dueAtMs: number;
   readonly error: string | null;
@@ -36,6 +37,7 @@ export interface WorkQueueSnapshot {
   readonly running: readonly RunningEntry[];
   readonly retryQueue: readonly RetryEntry[];
   readonly claimedCount: number;
+  readonly pollingIntervalMs: number;
 }
 
 export type WorkQueueWorker = (input: {
@@ -171,6 +173,7 @@ export class WorkQueueOrchestrator {
       running: [...this.running.values()],
       retryQueue: [...this.retryAttempts.values()],
       claimedCount: this.claimed.size,
+      pollingIntervalMs: this.definition.pollingIntervalMs,
     };
   }
 
@@ -454,13 +457,27 @@ export class WorkQueueOrchestrator {
         return;
       }
       if (result.status === "succeeded") {
-        const markCompleted =
-          result.closeWorkItem === true ||
-          (await this.shouldMarkCompleted(item));
+        let markCompleted: boolean;
+        if (result.closeWorkItem === true) {
+          markCompleted = true;
+        } else if (result.closeWorkItem === false) {
+          markCompleted = false;
+        } else {
+          markCompleted = await this.shouldMarkCompleted(item);
+        }
         if (markCompleted) {
           this.completed.add(item.id);
+          this.claimed.delete(item.id);
+        } else if (result.closeWorkItem === false) {
+          this.scheduleRetry(
+            item,
+            (attempt ?? 0) + 1,
+            null,
+            this.definition.pollingIntervalMs,
+          );
+        } else {
+          this.claimed.delete(item.id);
         }
-        this.claimed.delete(item.id);
       } else {
         this.scheduleRetry(item, (attempt ?? 0) + 1, result.error ?? "failed");
       }
@@ -515,6 +532,7 @@ export class WorkQueueOrchestrator {
     this.retryAttempts.set(item.id, {
       issueId: item.id,
       identifier: item.identifier,
+      item,
       attempt,
       dueAtMs: now + delay,
       error,
@@ -530,16 +548,10 @@ export class WorkQueueOrchestrator {
         due.push({ id, entry });
       }
     }
-    const resolved = await Promise.all(
-      due.map(async ({ id, entry }) => ({
-        id,
-        entry,
-        item: await this.findCandidateById(id),
-      })),
-    );
     const dispatchPromises: Promise<void>[] = [];
     let slots = this.availableAgentSlots();
-    for (const { id, entry, item } of resolved) {
+    for (const { id, entry } of due) {
+      const item = entry.item;
       if (
         this.completed.has(id) ||
         this.stallAwaitingSettlement.has(id) ||
@@ -547,19 +559,14 @@ export class WorkQueueOrchestrator {
       ) {
         continue;
       }
-      const feedCap = this.perFeedMaxConcurrent?.[item?.kind ?? ""];
+      const feedCap = this.perFeedMaxConcurrent?.[item.kind];
       if (
-        item !== undefined &&
         feedCap !== undefined &&
         this.countInFlightForKind(item.kind) >= feedCap
       ) {
         continue;
       }
       this.retryAttempts.delete(id);
-      if (item === undefined) {
-        this.release(id, entry.identifier);
-        continue;
-      }
       const rendered = this.options.renderPrompt(item, entry.attempt);
       if (!rendered.ok) {
         this.release(id, entry.identifier);
@@ -582,17 +589,6 @@ export class WorkQueueOrchestrator {
         );
       });
     }
-  }
-
-  private async findCandidateById(id: string): Promise<WorkItem | undefined> {
-    for (const feed of this.feeds) {
-      const states = await feed.fetchStates([id]);
-      if (states.length > 0) {
-        return states[0];
-      }
-    }
-    const all = await this.fetchAllCandidates();
-    return all.find((i) => i.id === id);
   }
 
   private async shouldMarkCompleted(item: WorkItem): Promise<boolean> {

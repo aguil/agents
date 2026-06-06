@@ -3,6 +3,7 @@ import type { WorkItem } from "../work-item";
 
 export class FakeWorkFeed implements WorkFeedClient {
   readonly feedKind: string;
+  fetchStatesCalls = 0;
 
   constructor(
     private items: WorkItem[],
@@ -17,6 +18,7 @@ export class FakeWorkFeed implements WorkFeedClient {
   }
 
   async fetchStates(ids: readonly string[]): Promise<readonly WorkItem[]> {
+    this.fetchStatesCalls += 1;
     const wanted = new Set(ids);
     return this.items.filter((i) => wanted.has(i.id));
   }

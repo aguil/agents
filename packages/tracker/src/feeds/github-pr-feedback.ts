@@ -2,12 +2,20 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { GitHubReviewInboxSource } from "@aguil/agents-code-review-inbox";
 import { collectUnresolvedReviewThreads } from "@aguil/agents-pr-feedback";
+import { readSelectionDocument } from "@aguil/agents-workflow";
 import {
   WORK_ITEM_MARKER_FILENAME,
   type WorkItemMarker,
 } from "@aguil/agents-workspace";
 import type { WorkFeedClient, WorkFeedTerminalContext } from "../feed-client";
 import type { WorkItem } from "../work-item";
+import {
+  ingestReasonForPull,
+  prFeedbackOfferAfterIngest,
+  readIngestDocument,
+  threadActivityFingerprint,
+  writeIngestDocument,
+} from "./pr-feedback-ingest-state";
 
 export interface GitHubPrFeedbackFeedOptions {
   readonly workspacePath: string;
@@ -51,14 +59,50 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       }),
     );
 
+    const ingestDoc = await readIngestDocument(workspacePath);
+    const selection = await readSelectionDocument(workspacePath);
+    const pendingPrIds = new Set(
+      selection.pending.map((entry) => entry.identifier),
+    );
+    const approvedPrIds = new Set(selection.approved);
+    const nextPulls = { ...ingestDoc.pulls };
     const items: WorkItem[] = [];
+    const now = new Date().toISOString();
     for (const { pull, threads } of withThreads) {
-      if (threads.length === 0) {
+      const prId = `${pull.repository}#${pull.pullNumber}`;
+      const identifier = `${prId}-feedback`;
+      const fingerprint = threadActivityFingerprint(threads);
+      const { enqueue, reason } = ingestReasonForPull({
+        identifier,
+        fingerprint,
+        threadCount: threads.length,
+        prior: ingestDoc,
+      });
+      const { offer, reason: offerReason } = prFeedbackOfferAfterIngest({
+        ingest: { enqueue, reason },
+        threadCount: threads.length,
+        prId,
+        pendingPrIds,
+        approvedPrIds,
+      });
+      const prior = ingestDoc.pulls[identifier];
+      const ingestChanged =
+        prior === undefined ||
+        prior.threadFingerprint !== fingerprint ||
+        prior.threadCount !== threads.length;
+      if (ingestChanged) {
+        nextPulls[identifier] = {
+          threadFingerprint: fingerprint,
+          threadCount: threads.length,
+          updatedAt: now,
+        };
+      }
+      if (!offer) {
         continue;
       }
       items.push({
         id: `${pull.repository}/pull/${pull.pullNumber}/feedback`,
-        identifier: `${pull.repository}#${pull.pullNumber}-feedback`,
+        identifier,
         title: pull.title,
         description: `${threads.length} unresolved review thread(s)`,
         state: "feedback_pending",
@@ -74,7 +118,16 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
           repository: pull.repository,
           pull_number: String(pull.pullNumber),
           unresolved_thread_count: String(threads.length),
+          ingest_reason: offerReason,
         },
+      });
+    }
+    const ingestDirty =
+      JSON.stringify(nextPulls) !== JSON.stringify(ingestDoc.pulls);
+    if (ingestDirty) {
+      await writeIngestDocument(workspacePath, {
+        schemaId: ingestDoc.schemaId,
+        pulls: nextPulls,
       });
     }
     return items;
