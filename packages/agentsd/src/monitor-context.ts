@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { buildSelectCommand } from "@aguil/agents-publish";
 import {
@@ -55,6 +55,27 @@ export async function writeMonitorContext(input: {
       },
     ],
   };
+  const payloadFingerprint = JSON.stringify({
+    schemaId: body.schemaId,
+    selections: body.selections,
+  });
+  try {
+    const existing = await readFile(path, "utf8");
+    const parsed = JSON.parse(existing) as {
+      readonly schemaId?: string;
+      readonly selections?: unknown;
+    };
+    if (
+      JSON.stringify({
+        schemaId: parsed.schemaId,
+        selections: parsed.selections,
+      }) === payloadFingerprint
+    ) {
+      return;
+    }
+  } catch {
+    // missing or invalid file — write fresh payload
+  }
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(body, null, 2)}\n`, "utf8");
 }
