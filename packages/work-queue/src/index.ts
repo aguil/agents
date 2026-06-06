@@ -37,6 +37,7 @@ export interface WorkQueueSnapshot {
   readonly running: readonly RunningEntry[];
   readonly retryQueue: readonly RetryEntry[];
   readonly claimedCount: number;
+  readonly pollingIntervalMs: number;
 }
 
 export type WorkQueueWorker = (input: {
@@ -172,6 +173,7 @@ export class WorkQueueOrchestrator {
       running: [...this.running.values()],
       retryQueue: [...this.retryAttempts.values()],
       claimedCount: this.claimed.size,
+      pollingIntervalMs: this.definition.pollingIntervalMs,
     };
   }
 
