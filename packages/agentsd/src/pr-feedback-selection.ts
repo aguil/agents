@@ -111,6 +111,7 @@ export async function syncPrFeedbackSelection(input: {
       monitorWorkspace: policy.monitorWorkspace,
       contextPath: policy.monitorContextPath,
       hostWorkspacePath: input.hostWorkspacePath,
+      workflowDir: input.definition.workflowDir,
       doc,
     });
   }

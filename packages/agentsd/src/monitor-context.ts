@@ -13,10 +13,11 @@ export async function writeMonitorContext(input: {
   readonly monitorWorkspace: string;
   readonly contextPath: string;
   readonly hostWorkspacePath: string;
+  readonly workflowDir: string;
   readonly doc: PrFeedbackSelectionDocument;
 }): Promise<void> {
   const root = expandPathValue(input.monitorWorkspace, {
-    workflowDir: input.hostWorkspacePath,
+    workflowDir: input.workflowDir,
   });
   const relative = input.contextPath.trim();
   if (
