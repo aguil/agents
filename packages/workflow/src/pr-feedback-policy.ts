@@ -8,6 +8,7 @@ export interface PrFeedbackNotifyChannel {
 export interface PrFeedbackPolicyConfig {
   readonly profile: PrFeedbackProfile;
   readonly allow: readonly string[];
+  readonly deny: readonly string[];
   readonly notifyCooldownMs: number;
   readonly notifyChannels: readonly PrFeedbackNotifyChannel[];
   readonly webhookUrl: string | null;
@@ -19,6 +20,7 @@ export interface PrFeedbackPolicyConfig {
 export const defaultPrFeedbackPolicy: PrFeedbackPolicyConfig = {
   profile: "interactive",
   allow: [],
+  deny: [],
   notifyCooldownMs: 300_000,
   notifyChannels: [
     { kind: "jsonl", raw: {} },
@@ -39,6 +41,7 @@ export function parsePrFeedbackPolicy(
 
   const profile = parseProfile(prFeedback.profile);
   const allow = parseStringList(prFeedback.allow);
+  const deny = parseStringList(prFeedback.deny);
 
   const channels = parseNotifyChannels(notify.channels);
   const notifyChannels =
@@ -68,6 +71,7 @@ export function parsePrFeedbackPolicy(
   return {
     profile,
     allow,
+    deny,
     notifyCooldownMs: positiveInt(notify.cooldown_ms, 300_000),
     notifyChannels,
     webhookUrl,
@@ -96,11 +100,25 @@ export function prIdentifierFromWorkItemMetadata(metadata: {
   return `${repo}#${pr}`;
 }
 
+export function isPrDeniedForWork(
+  policy: PrFeedbackPolicyConfig,
+  metadata: { readonly repository?: string; readonly pull_number?: string },
+): boolean {
+  const id = prIdentifierFromWorkItemMetadata(metadata);
+  if (id === null) {
+    return false;
+  }
+  return policy.deny.includes(id);
+}
+
 export function isPrApprovedForWork(
   policy: PrFeedbackPolicyConfig,
   approved: ReadonlySet<string>,
   metadata: { readonly repository?: string; readonly pull_number?: string },
 ): boolean {
+  if (isPrDeniedForWork(policy, metadata)) {
+    return false;
+  }
   if (policy.profile === "discover_only") {
     return false;
   }

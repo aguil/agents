@@ -16,6 +16,7 @@ export {
 export {
   defaultPrFeedbackPolicy,
   isPrApprovedForWork,
+  isPrDeniedForWork,
   type PrFeedbackPolicyConfig,
   type PrFeedbackProfile,
   parsePrFeedbackPolicy,
@@ -59,3 +60,4 @@ export type {
   WorkflowPublishConfig,
 } from "./types";
 export { type WorkflowWatchHandle, watchWorkflowFile } from "./watch-workflow";
+export { workflowReloadChangedFields } from "./workflow-reload-diff";

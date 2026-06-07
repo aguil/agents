@@ -1,9 +1,12 @@
 export { type CreateFeedsOptions, createWorkFeeds } from "./create-feeds";
 export type {
+  PrFeedbackTickCache,
   WorkFeedClient,
   WorkFeedClientFactory,
   WorkFeedTerminalContext,
+  WorkFeedTickContext,
 } from "./feed-client";
+export { createPrFeedbackTickCache } from "./feed-client";
 export { FakeWorkFeed } from "./feeds/fake";
 export {
   GitHubIssuesFeed,

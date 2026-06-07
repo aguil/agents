@@ -18,6 +18,15 @@ export interface WorkerRouterOptions {
 }
 
 export { readTriageQueueFile, runPrFeedbackFixes } from "./pr-feedback-fix";
+export {
+  resolveHeadSha,
+  verifyOneCommitForTriageItem,
+} from "./pr-feedback-git-verify";
+export {
+  PR_FEEDBACK_WORK_REPORT_SCHEMA_ID,
+  resolvePrFeedbackDisposition,
+  writePrFeedbackWorkReport,
+} from "./pr-feedback-work-report";
 export { createWorkflowAgentAdapter } from "./workflow-adapter";
 
 export function createWorkerRouter(

@@ -3,10 +3,11 @@ import {
   createSelectionNotifyChannels,
   dispatchSelectionNotifications,
 } from "@aguil/agents-publish";
-import type { WorkItem } from "@aguil/agents-tracker";
+import type { WorkFeedTickContext, WorkItem } from "@aguil/agents-tracker";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
 import {
   isPrApprovedForWork,
+  isPrDeniedForWork,
   type PrFeedbackPendingEntry,
   pendingFingerprint,
   prIdentifierFromWorkItemMetadata,
@@ -20,10 +21,13 @@ export async function syncPrFeedbackSelection(input: {
   readonly definition: WorkflowDefinition;
   readonly hostWorkspacePath: string;
   readonly candidates: readonly WorkItem[];
+  readonly tick?: WorkFeedTickContext;
 }): Promise<readonly WorkItem[]> {
   const policy = input.definition.prFeedbackPolicy;
   const prFeedbackItems = input.candidates.filter(
-    (item) => item.kind === "github_pr_feedback",
+    (item) =>
+      item.kind === "github_pr_feedback" &&
+      !isPrDeniedForWork(policy, item.metadata),
   );
   const otherItems = input.candidates.filter(
     (item) => item.kind !== "github_pr_feedback",
@@ -56,7 +60,10 @@ export async function syncPrFeedbackSelection(input: {
     })
     .filter((entry): entry is PrFeedbackPendingEntry => entry !== null);
 
-  const initialDoc = await readSelectionDocument(input.hostWorkspacePath);
+  const cache = input.tick?.prFeedbackCache;
+  const initialDoc = cache
+    ? await cache.readSelection(input.hostWorkspacePath)
+    : await readSelectionDocument(input.hostWorkspacePath);
   let doc = initialDoc;
   const pendingFingerprintBefore = pendingFingerprint(doc.pending);
   doc = upsertPendingFromWorkItems({ existing: doc, entries: pendingEntries });
@@ -100,6 +107,7 @@ export async function syncPrFeedbackSelection(input: {
 
   if (JSON.stringify(doc) !== JSON.stringify(initialDoc)) {
     await writeSelectionDocument(input.hostWorkspacePath, doc);
+    cache?.noteSelectionWrite(input.hostWorkspacePath, doc);
   }
 
   if (

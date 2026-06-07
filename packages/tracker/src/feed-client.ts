@@ -1,4 +1,11 @@
+import type { WorkFeedTickContext } from "./feeds/pr-feedback-tick-cache";
 import type { WorkItem } from "./work-item";
+
+export type {
+  PrFeedbackTickCache,
+  WorkFeedTickContext,
+} from "./feeds/pr-feedback-tick-cache";
+export { createPrFeedbackTickCache } from "./feeds/pr-feedback-tick-cache";
 
 export interface WorkFeedTerminalContext {
   /** When set, feeds may scope terminal discovery to existing work-item workspaces. */
@@ -9,6 +16,7 @@ export interface WorkFeedTerminalContext {
 
 export interface WorkFeedClient {
   readonly feedKind: string;
+  bindTickContext?(context: WorkFeedTickContext): void;
   fetchCandidates(): Promise<readonly WorkItem[]>;
   fetchStates(ids: readonly string[]): Promise<readonly WorkItem[]>;
   fetchTerminal(

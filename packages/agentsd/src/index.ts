@@ -8,8 +8,10 @@ import {
   renderStrictTemplate,
   validateWorkflowDefinition,
   watchWorkflowFile,
+  workflowReloadChangedFields,
 } from "@aguil/agents-workflow";
 import type { WorkspaceHooks } from "@aguil/agents-workspace";
+import { installAgentsdLogSink } from "./log-sink";
 import { resolveMcpInvoke } from "./mcp-invoke";
 import { syncPrFeedbackSelection } from "./pr-feedback-selection";
 
@@ -63,6 +65,7 @@ export async function runAgentsd(
       workflowDir: activeDefinition.workflowDir,
       workspacePath: hostWorkspace,
       feeds: activeDefinition.feeds,
+      prFeedbackDeny: activeDefinition.prFeedbackPolicy.deny,
       mcpInvoke,
     });
 
@@ -99,13 +102,16 @@ export async function runAgentsd(
           : "You are working on a tracked work item.";
       return { ok: true, prompt: body };
     },
-    filterCandidates: async (items) =>
+    filterCandidates: async (items, tick) =>
       syncPrFeedbackSelection({
         definition: activeDefinition,
         hostWorkspacePath: hostWorkspace,
         candidates: items,
+        tick,
       }),
   });
+
+  const restoreLogSink = installAgentsdLogSink();
 
   const watcher = watchWorkflowFile(workflowPath, (next, error) => {
     if (error !== undefined) {
@@ -113,6 +119,7 @@ export async function runAgentsd(
       return;
     }
     if (next !== undefined) {
+      const changedFields = workflowReloadChangedFields(activeDefinition, next);
       activeDefinition = next;
       orchestrator.updateDefinition(next, {
         feeds: feeds(),
@@ -123,6 +130,7 @@ export async function runAgentsd(
         JSON.stringify({
           event: "workflow_reloaded",
           path: workflowPath,
+          changed_fields: changedFields,
           polling_interval_ms: next.pollingIntervalMs,
           publish_code_review: next.publish.codeReview.mode,
           publish_pr_feedback: next.publish.prFeedback.mode,
@@ -163,6 +171,7 @@ export async function runAgentsd(
     const onSignal = () => {
       void orchestrator.stopAndDrain({ timeoutMs: 60_000 }).finally(() => {
         watcher.close();
+        restoreLogSink();
         resolvePromise();
       });
     };

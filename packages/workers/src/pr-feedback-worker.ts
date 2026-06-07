@@ -8,9 +8,18 @@ import type { WorkItem } from "@aguil/agents-tracker";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
 import {
   isPrApprovedForWork,
+  isPrDeniedForWork,
   readSelectionDocument,
 } from "@aguil/agents-workflow";
 import { runPrFeedbackFixes } from "./pr-feedback-fix";
+import {
+  logPrFeedbackWorkReport,
+  PR_FEEDBACK_WORK_REPORT_SCHEMA_ID,
+  type PrFeedbackItemCommitRecord,
+  type PrFeedbackWorkReport,
+  resolvePrFeedbackDisposition,
+  writePrFeedbackWorkReport,
+} from "./pr-feedback-work-report";
 
 export async function runPrFeedbackWorker(input: {
   readonly item: WorkItem;
@@ -39,6 +48,17 @@ export async function runPrFeedbackWorker(input: {
   }
 
   const policy = input.definition.prFeedbackPolicy;
+  if (isPrDeniedForWork(policy, input.item.metadata)) {
+    console.warn(
+      JSON.stringify({
+        event: "pr_feedback_fix_skipped_denied",
+        work_item_id: input.item.id,
+        identifier: input.item.identifier,
+      }),
+    );
+    return { status: "succeeded" };
+  }
+
   const selection = await readSelectionDocument(input.hostWorkspacePath);
   const approved = new Set(selection.approved);
   const prApprovedForSubmit = isPrApprovedForWork(
@@ -86,7 +106,19 @@ export async function runPrFeedbackWorker(input: {
     );
   }
 
-  let fixStats = { attempted: 0, succeeded: 0, failed: 0 };
+  let fixStats: {
+    attempted: number;
+    succeeded: number;
+    failed: number;
+    commitVerified: number;
+    itemCommits: Readonly<Record<string, PrFeedbackItemCommitRecord>>;
+  } = {
+    attempted: 0,
+    succeeded: 0,
+    failed: 0,
+    commitVerified: 0,
+    itemCommits: {},
+  };
   if (triageDir !== undefined && triageItemCount > 0) {
     fixStats = await runPrFeedbackFixes({
       item: input.item,
@@ -135,6 +167,40 @@ export async function runPrFeedbackWorker(input: {
     prApprovedForSubmit,
   });
 
+  const disposition = resolvePrFeedbackDisposition({
+    triageItemCount,
+    feedbackItemCount: document.items.length,
+    fixFailed: fixStats.failed,
+    publishSkipReason: submitResult.decision.skipReason,
+  });
+  const triagePath =
+    triageDir !== undefined ? join(triageDir, "triage-queue.json") : null;
+  const report: PrFeedbackWorkReport = {
+    schemaId: PR_FEEDBACK_WORK_REPORT_SCHEMA_ID,
+    workItemId: input.item.id,
+    identifier: input.item.identifier,
+    repository: repo,
+    pullNumber: prNumber,
+    feedbackPath,
+    triagePath,
+    feedbackItemCount: document.items.length,
+    triageItemCount,
+    disposition,
+    itemCommits: fixStats.itemCommits,
+    fixStats: {
+      attempted: fixStats.attempted,
+      succeeded: fixStats.succeeded,
+      failed: fixStats.failed,
+      commitVerified: fixStats.commitVerified,
+    },
+    generatedAt: new Date().toISOString(),
+  };
+  const reportPath = await writePrFeedbackWorkReport({
+    hostWorkspacePath: input.hostWorkspacePath,
+    report,
+  });
+  logPrFeedbackWorkReport(report, reportPath);
+
   console.log(
     JSON.stringify({
       event: "pr_feedback_collected",
@@ -148,10 +214,13 @@ export async function runPrFeedbackWorker(input: {
       fix_attempted: fixStats.attempted,
       fix_succeeded: fixStats.succeeded,
       fix_failed: fixStats.failed,
+      commit_verified: fixStats.commitVerified,
       publish_executed: submitResult.executed,
       posted_count: submitResult.postedCount,
       publish_skipped_reason: submitResult.decision.skipReason,
       operator_hint: submitResult.decision.operatorHint,
+      work_report_path: reportPath,
+      disposition,
     }),
   );
 
