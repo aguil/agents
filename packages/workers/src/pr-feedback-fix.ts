@@ -7,6 +7,11 @@ import type { TriageEnvelopeV1, TriageItemV1 } from "@aguil/agents-triage";
 import { TRIAGE_ENVELOPE_SCHEMA_ID } from "@aguil/agents-triage";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
 import { createSubprocessAdapter } from "./implementation-runtime";
+import {
+  resolveHeadSha,
+  verifyOneCommitForTriageItem,
+} from "./pr-feedback-git-verify";
+import type { PrFeedbackItemCommitRecord } from "./pr-feedback-work-report";
 
 const TRIAGE_QUEUE_JSON = "triage-queue.json";
 
@@ -72,10 +77,18 @@ export async function runPrFeedbackFixes(input: {
   readonly attempted: number;
   readonly succeeded: number;
   readonly failed: number;
+  readonly commitVerified: number;
+  readonly itemCommits: Readonly<Record<string, PrFeedbackItemCommitRecord>>;
 }> {
   const envelope = await readTriageQueueFile(input.triageDir);
   if (envelope === null || envelope.items.length === 0) {
-    return { attempted: 0, succeeded: 0, failed: 0 };
+    return {
+      attempted: 0,
+      succeeded: 0,
+      failed: 0,
+      commitVerified: 0,
+      itemCommits: {},
+    };
   }
 
   const repository =
@@ -94,7 +107,13 @@ export async function runPrFeedbackFixes(input: {
         reason: "missing_repository_or_pull_number",
       }),
     );
-    return { attempted: 0, succeeded: 0, failed: 0 };
+    return {
+      attempted: 0,
+      succeeded: 0,
+      failed: 0,
+      commitVerified: 0,
+      itemCommits: {},
+    };
   }
 
   const impl = input.definition.implementation;
@@ -105,6 +124,8 @@ export async function runPrFeedbackFixes(input: {
 
   let succeeded = 0;
   let failed = 0;
+  let commitVerified = 0;
+  const itemCommits: Record<string, PrFeedbackItemCommitRecord> = {};
   for (const triageItem of items) {
     const runId = createRunId("pr-feedback-fix");
     const scratchpadPath = join(input.scratchpadRoot, runId);
@@ -115,6 +136,7 @@ export async function runPrFeedbackFixes(input: {
       pullNumber,
       workItemId: input.item.id,
     });
+    const baseHeadSha = await resolveHeadSha(input.hostWorkspacePath);
 
     console.log(
       JSON.stringify({
@@ -146,6 +168,12 @@ export async function runPrFeedbackFixes(input: {
     const runStatus = result.result.status;
     if (runStatus === "failed" || runStatus === "timed_out") {
       failed += 1;
+      itemCommits[triageItem.id] = {
+        sha: null,
+        verified: false,
+        replyOnly: false,
+        reason: runStatus,
+      };
       console.log(
         JSON.stringify({
           event: "pr_feedback_fix_failed",
@@ -155,18 +183,55 @@ export async function runPrFeedbackFixes(input: {
           status: runStatus,
         }),
       );
-    } else {
+      continue;
+    }
+
+    const verification = await verifyOneCommitForTriageItem({
+      workspacePath: input.hostWorkspacePath,
+      baseHeadSha,
+      triageItemId: triageItem.id,
+    });
+    itemCommits[triageItem.id] = {
+      sha: verification.sha,
+      verified: verification.verified,
+      replyOnly: verification.replyOnly,
+      reason: verification.reason,
+    };
+    if (verification.verified) {
       succeeded += 1;
+      if (!verification.replyOnly) {
+        commitVerified += 1;
+      }
       console.log(
         JSON.stringify({
           event: "pr_feedback_fix_succeeded",
           work_item_id: input.item.id,
           triage_item_id: triageItem.id,
           run_id: runId,
+          commit_verified: !verification.replyOnly,
+          commit_sha: verification.sha,
+          verification_reason: verification.reason,
+        }),
+      );
+    } else {
+      failed += 1;
+      console.log(
+        JSON.stringify({
+          event: "pr_feedback_fix_commit_unverified",
+          work_item_id: input.item.id,
+          triage_item_id: triageItem.id,
+          run_id: runId,
+          verification_reason: verification.reason,
         }),
       );
     }
   }
 
-  return { attempted: items.length, succeeded, failed };
+  return {
+    attempted: items.length,
+    succeeded,
+    failed,
+    commitVerified,
+    itemCommits,
+  };
 }
