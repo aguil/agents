@@ -78,6 +78,7 @@ export async function runCodeReviewWorker(input: {
     });
 
     const resultPath = join(scratchpadRoot, result.runId, "result.json");
+    const reportPath = join(scratchpadRoot, result.runId, "report.md");
     let triageItemCount = 0;
     try {
       triageItemCount = await countCodeReviewTriageItems({
@@ -108,10 +109,28 @@ export async function runCodeReviewWorker(input: {
 
     logPublishOutcome(input.item, publishResult.decision, {
       triage_item_count: triageItemCount,
+      findings_count: result.findings.length,
       publish_executed: publishResult.executed,
       review_url: publishResult.reviewUrl,
       publish_error: publishResult.postError,
+      result_path: resultPath,
+      report_path: reportPath,
     });
+
+    if (input.definition.publish.codeReview.mode === "notify") {
+      console.log(
+        JSON.stringify({
+          event: "code_review_artifacts_ready",
+          work_item_id: input.item.id,
+          identifier: input.item.identifier,
+          result_path: resultPath,
+          report_path: reportPath,
+          findings_count: result.findings.length,
+          triage_item_count: triageItemCount,
+          operator_hint: publishResult.decision.operatorHint,
+        }),
+      );
+    }
 
     if (result.status === "error") {
       return { status: "failed", error: "code review harness error" };
