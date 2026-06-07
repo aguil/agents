@@ -1,4 +1,9 @@
-import type { WorkFeedClient, WorkItem } from "@aguil/agents-tracker";
+import type {
+  WorkFeedClient,
+  WorkFeedTickContext,
+  WorkItem,
+} from "@aguil/agents-tracker";
+import { createPrFeedbackTickCache } from "@aguil/agents-tracker";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
 import {
   ensureIssueWorkspace,
@@ -74,6 +79,7 @@ export interface WorkQueueOrchestratorOptions {
   readonly perFeedMaxConcurrent?: Readonly<Record<string, number>>;
   readonly filterCandidates?: (
     items: readonly WorkItem[],
+    tick: WorkFeedTickContext,
   ) => Promise<readonly WorkItem[]>;
 }
 
@@ -289,6 +295,12 @@ export class WorkQueueOrchestrator {
   }
 
   private async fetchAllCandidates(): Promise<WorkItem[]> {
+    const tick: WorkFeedTickContext = {
+      prFeedbackCache: createPrFeedbackTickCache(),
+    };
+    for (const feed of this.feeds) {
+      feed.bindTickContext?.(tick);
+    }
     const batches = await Promise.all(
       this.feeds.map(async (feed) => {
         try {
@@ -303,7 +315,7 @@ export class WorkQueueOrchestrator {
     );
     const flat = batches.flat();
     if (this.options.filterCandidates !== undefined) {
-      return [...(await this.options.filterCandidates(flat))];
+      return [...(await this.options.filterCandidates(flat, tick))];
     }
     return flat;
   }

@@ -16,10 +16,12 @@ import {
   threadActivityFingerprint,
   writeIngestDocument,
 } from "./pr-feedback-ingest-state";
+import type { WorkFeedTickContext } from "./pr-feedback-tick-cache";
 
 export interface GitHubPrFeedbackFeedOptions {
   readonly workspacePath: string;
   readonly repository?: string;
+  readonly denyPrIds?: readonly string[];
   /** Cap authored open PRs scanned per poll (default 20). */
   readonly maxOpen?: number;
   /** Max concurrent `collectUnresolvedReviewThreads` calls (default 3). */
@@ -29,8 +31,13 @@ export interface GitHubPrFeedbackFeedOptions {
 export class GitHubPrFeedbackFeed implements WorkFeedClient {
   readonly feedKind = "github_pr_feedback";
   private readonly inbox = new GitHubReviewInboxSource();
+  private tickContext: WorkFeedTickContext | null = null;
 
   constructor(private readonly options: GitHubPrFeedbackFeedOptions) {}
+
+  bindTickContext(context: WorkFeedTickContext): void {
+    this.tickContext = context;
+  }
 
   async fetchCandidates(): Promise<readonly WorkItem[]> {
     const workspacePath = this.options.workspacePath;
@@ -59,8 +66,14 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
       }),
     );
 
-    const ingestDoc = await readIngestDocument(workspacePath);
-    const selection = await readSelectionDocument(workspacePath);
+    const cache = this.tickContext?.prFeedbackCache;
+    const ingestDoc = cache
+      ? await cache.readIngest(workspacePath)
+      : await readIngestDocument(workspacePath);
+    const selection = cache
+      ? await cache.readSelection(workspacePath)
+      : await readSelectionDocument(workspacePath);
+    const deny = new Set(this.options.denyPrIds ?? []);
     const pendingPrIds = new Set(
       selection.pending.map((entry) => entry.identifier),
     );
@@ -68,8 +81,12 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
     const nextPulls = { ...ingestDoc.pulls };
     const items: WorkItem[] = [];
     const now = new Date().toISOString();
+    let ingestDirty = false;
     for (const { pull, threads } of withThreads) {
       const prId = `${pull.repository}#${pull.pullNumber}`;
+      if (deny.has(prId)) {
+        continue;
+      }
       const identifier = `${prId}-feedback`;
       const fingerprint = threadActivityFingerprint(threads);
       const { enqueue, reason } = ingestReasonForPull({
@@ -91,6 +108,7 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
         prior.threadFingerprint !== fingerprint ||
         prior.threadCount !== threads.length;
       if (ingestChanged) {
+        ingestDirty = true;
         nextPulls[identifier] = {
           threadFingerprint: fingerprint,
           threadCount: threads.length,
@@ -122,13 +140,13 @@ export class GitHubPrFeedbackFeed implements WorkFeedClient {
         },
       });
     }
-    const ingestDirty =
-      JSON.stringify(nextPulls) !== JSON.stringify(ingestDoc.pulls);
     if (ingestDirty) {
-      await writeIngestDocument(workspacePath, {
+      const nextDoc = {
         schemaId: ingestDoc.schemaId,
         pulls: nextPulls,
-      });
+      };
+      await writeIngestDocument(workspacePath, nextDoc);
+      cache?.noteIngestWrite(workspacePath, nextDoc);
     }
     return items;
   }

@@ -11,6 +11,7 @@ export interface CreateFeedsOptions {
   readonly workflowDir: string;
   readonly workspacePath: string;
   readonly feeds: readonly WorkflowFeedConfig[];
+  readonly prFeedbackDeny?: readonly string[];
   readonly env?: NodeJS.ProcessEnv;
   readonly mcpInvoke?: (
     server: string,
@@ -79,6 +80,7 @@ function createFeedClient(
         workspacePath: options.workspacePath,
         repository:
           typeof raw.repository === "string" ? raw.repository : undefined,
+        denyPrIds: options.prFeedbackDeny,
         maxOpen:
           typeof raw.max_open === "number"
             ? Math.floor(raw.max_open)
