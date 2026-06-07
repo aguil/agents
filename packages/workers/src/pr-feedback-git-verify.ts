@@ -81,24 +81,21 @@ export async function verifyOneCommitForTriageItem(input: {
       reason: "no_new_commit",
     };
   }
-  const log = await runGit(input.workspacePath, [
-    "log",
-    "--format=%H %s",
+  const revList = await runGit(input.workspacePath, [
+    "rev-list",
+    "--count",
     `${input.baseHeadSha}..HEAD`,
   ]);
-  if (!log.ok) {
+  if (!revList.ok) {
     return {
       verified: false,
       replyOnly: false,
       sha: null,
-      reason: "git_log_failed",
+      reason: "git_rev_list_failed",
     };
   }
-  const lines = log.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (lines.length === 0) {
+  const commitCount = Number.parseInt(revList.stdout, 10);
+  if (!Number.isFinite(commitCount) || commitCount === 0) {
     return {
       verified: true,
       replyOnly: true,
@@ -106,16 +103,44 @@ export async function verifyOneCommitForTriageItem(input: {
       reason: "no_new_commit",
     };
   }
-  if (lines.length !== 1) {
+  if (commitCount !== 1) {
     return {
       verified: false,
       replyOnly: false,
       sha: null,
-      reason: `expected_one_commit_got_${lines.length}`,
+      reason: `expected_one_commit_got_${commitCount}`,
     };
   }
-  const [sha, ...messageParts] = lines[0].split(" ");
-  const message = messageParts.join(" ");
+  const shaLog = await runGit(input.workspacePath, [
+    "log",
+    "-1",
+    "--format=%H",
+    "HEAD",
+  ]);
+  if (!shaLog.ok || shaLog.stdout.length === 0) {
+    return {
+      verified: false,
+      replyOnly: false,
+      sha: null,
+      reason: "git_log_failed",
+    };
+  }
+  const sha = shaLog.stdout;
+  const messageLog = await runGit(input.workspacePath, [
+    "log",
+    "-1",
+    "--format=%s%n%b",
+    "HEAD",
+  ]);
+  if (!messageLog.ok) {
+    return {
+      verified: false,
+      replyOnly: false,
+      sha: null,
+      reason: "git_log_failed",
+    };
+  }
+  const message = messageLog.stdout.trim();
   if (!message.includes(input.triageItemId)) {
     return {
       verified: false,
