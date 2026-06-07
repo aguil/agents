@@ -8,6 +8,18 @@ export function resolveAgentsdLogSinkPath(
   return raw !== undefined && raw.length > 0 ? raw : null;
 }
 
+const dirReadyByPath = new Map<string, Promise<void>>();
+
+function ensureLogDir(path: string): Promise<void> {
+  const existing = dirReadyByPath.get(path);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const ready = mkdir(dirname(path), { recursive: true }).then(() => {});
+  dirReadyByPath.set(path, ready);
+  return ready;
+}
+
 export async function appendAgentsdLogLine(
   line: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -16,7 +28,7 @@ export async function appendAgentsdLogLine(
   if (path === null) {
     return;
   }
-  await mkdir(dirname(path), { recursive: true });
+  await ensureLogDir(path);
   await appendFile(path, `${line}\n`, "utf8");
 }
 
@@ -28,21 +40,24 @@ export function installAgentsdLogSink(
     return () => {};
   }
   const originalLog = console.log.bind(console);
+  let appendChain: Promise<void> = Promise.resolve();
   console.log = (...args: unknown[]) => {
     originalLog(...args);
     const line = args
       .map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg)))
       .join(" ");
-    void appendAgentsdLogLine(line, env).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      originalLog(
-        JSON.stringify({
-          event: "agentsd_log_sink_failed",
-          path,
-          error: message,
-        }),
-      );
-    });
+    appendChain = appendChain
+      .then(() => appendAgentsdLogLine(line, env))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        originalLog(
+          JSON.stringify({
+            event: "agentsd_log_sink_failed",
+            path,
+            error: message,
+          }),
+        );
+      });
   };
   return () => {
     console.log = originalLog;
