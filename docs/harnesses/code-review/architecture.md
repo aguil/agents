@@ -1,49 +1,190 @@
-### Code Review Harness Architecture
+# Code Review Harness — Architecture
 
-The first implementation uses a high-throughput multi-agent orchestration model
-implemented directly in Bun/TypeScript.
+## Design principles
 
-CrewAI is intentionally out of scope. Native orchestration owns role fan-out,
-JSONL logging, scratchpad persistence, timeout boundaries, and report synthesis.
-The orchestration contract remains internal so a TypeScript framework such as
-Mastra can be introduced later if workflow memory, graph tooling, or eval
-integrations justify it.
+- Native Bun/TypeScript orchestration owns role fan-out, JSONL logging,
+  scratchpad persistence, timeout boundaries, and report synthesis.
+- Execution is agent-agnostic. The adapter contract is the only coupling point
+  between orchestration and the underlying agent CLI.
+- CrewAI is intentionally out of scope. A TypeScript framework such as Mastra
+  can be introduced later behind the same `HarnessOrchestrator` contract if
+  workflow memory, graph tooling, or eval integrations justify it.
 
-Execution is agent-agnostic. OpenCode can become the first production adapter,
-while Claude Code, Cursor CLI, pi.dev, or other coding agents can be swapped in
-through the same adapter contract.
+## Package layers
 
-Current real adapters include:
+```
+packages/core          Shared run, event, finding, scratchpad, and JSON contracts.
+                       Also: resolveGitAwarePath() for jj ↔ git workspace mapping.
 
-- `OpenCodeAdapter`, which wraps `opencode run --format json` as a subprocess.
-- `ClaudeCodeAdapter`, which wraps the Claude Code CLI as a subprocess with
-  configurable argument templates.
+packages/execution     AgentAdapter interface + AdapterCapabilities + AgentRunRequest.
+                       Fake, opencode, claude, and cursor subprocess adapters
+                       (SubprocessAgentAdapter base).
+                       SessionAgentAdapter for app_server (json_rpc_session_v1).
 
-Both adapters use the same `SubprocessAgentAdapter` base to write per-role
-request artifacts, enforce role timeouts, and normalize finding JSONL into
-harness events. The same base is intended to support Cursor CLI, pi.dev, and
-other CLIs later.
+packages/orchestration HarnessOrchestrator contract + NativeBunOrchestrator
+                       (fan-out roles, collect results, enforce timeouts).
 
-Context retrieval includes PR-aware signals. The harness attempts to
-auto-discover the active PR, ingest title and body, then parse and fetch
-referenced docs when links match the configured tracking-remote org scope.
+packages/context       Diff collection, AGENTS.md ingestion, PR metadata/body
+                       parsing, referenced-doc fetching, context bundle assembly.
+                       Also: classifyDiff() — triage tier classification from diff.
 
-Primary layers:
+packages/reporting     Validation filtering, deduplication (canonical fingerprint),
+                       severity status, Markdown report rendering.
 
-- `packages/core`: shared run, event, finding, scratchpad, and JSON contracts.
-- `packages/execution`: adapter interface plus fake and subprocess-backed
-  adapters.
-- `packages/orchestration`: native Bun role orchestration behind an
-  `Orchestrator` contract.
-- `packages/context`: diff, `AGENTS.md`, and future MCP context bundle
-  generation.
-- `packages/reporting`: validation filtering, dedupe, severity status, and
-  Markdown rendering.
-- `harnesses/code-review`: code-review roles, prompts, triage flow, and final
-  harness assembly.
+packages/telemetry     Structured event sinks for JSONL logs and future
+                       observability integrations.
 
-Triage behavior:
+harnesses/code-review  Review roles, prompts, harness assembly.
+                       Exports review-contract.ts for CLI and agentsd consumers.
+                       Published as @aguil/agents-code-review.
+```
 
-- `trivial`: run quality review only.
-- `lite`: run security, quality, and compliance review.
-- `full`: run every configured role.
+Allowed dependency direction: `harnesses/code-review` → `packages/*`. Packages
+may depend on each other following the order listed above (core is the base;
+harnesses are the leaves).
+
+## Adapter contract
+
+`AgentAdapter` is the single extension point for adding a new agent CLI
+(`packages/execution`):
+
+```typescript
+interface AgentAdapter {
+  readonly name: string;
+  capabilities(): AdapterCapabilities;
+  run(request: AgentRunRequest): AsyncIterable<AgentEvent>;
+}
+```
+
+`run()` is a streaming async iterable, not a promise — events are yielded as the
+agent produces them. The orchestrator collects them until the iterable exhausts
+or the role timeout fires.
+
+### `AdapterCapabilities`
+
+```typescript
+interface AdapterCapabilities {
+  streaming: boolean;
+  structuredOutput: boolean;
+  readOnlyMode: boolean;
+  mcp: boolean;
+  cancellation: boolean;
+}
+```
+
+The harness queries capabilities before dispatching so it can adjust behavior
+(for example, whether to expect structured JSON output or to parse prose).
+
+### `AgentRunRequest` fields
+
+| Field               | Type                      | Description                                            |
+| ------------------- | ------------------------- | ------------------------------------------------------ |
+| `runId`             | `string`                  | Harness run ID                                         |
+| `roleId`            | `string`                  | Reviewer role being executed                           |
+| `prompt`            | `string`                  | Full role prompt text                                  |
+| `workspacePath`     | `string`                  | Resolved workspace root (git/jj)                       |
+| `contextBundlePath` | `string`                  | Path to `context/bundle.json`                          |
+| `scratchpadPath`    | `string`                  | Per-role artifact directory                            |
+| `timeoutMs`         | `number`                  | Role timeout; exceeded → `timed_out` result            |
+| `allowedCommands`   | `readonly string[]`       | Security boundary hint for sandboxed adapters          |
+| `metadata`          | `Record<string, string>?` | Adapter-specific pass-through metadata                 |
+| `signal`            | `AbortSignal?`            | When aborted, subprocess adapters SIGTERM then SIGKILL |
+
+`SubprocessAgentAdapter` provides the base implementation for CLI-backed
+adapters:
+
+- Writes per-role request artifacts to the scratchpad.
+- Spawns the agent CLI subprocess with a constructed argv.
+- Enforces role timeouts via `AbortSignal`.
+- Reads stdout as newline-delimited JSONL and normalizes finding events.
+- Captures stderr to `roles/<role>/stderr.log` for debugging.
+
+Current real adapters and their subprocess entry points:
+
+| Adapter               | Subprocess                                                 |
+| --------------------- | ---------------------------------------------------------- |
+| `OpenCodeAdapter`     | `opencode run --format json`                               |
+| `ClaudeCodeAdapter`   | `claude` (configurable argv template)                      |
+| `CursorAdapter`       | `agent --print --output-format stream-json` (configurable) |
+| `SessionAgentAdapter` | Cursor app_server via `json_rpc_session_v1` protocol       |
+| `FakeAgentAdapter`    | In-process deterministic output (no subprocess)            |
+
+`SessionAgentAdapter` communicates over a JSON-RPC session with a running Cursor
+agent server. The underlying transport is `JsonRpcAgentSessionClient` (wraps
+`SessionAgentAdapterClient`). This is distinct from the subprocess-based
+adapters above.
+
+## Orchestration flow
+
+```
+1. Context collection
+   └─ packages/context: diff, AGENTS.md, PR metadata, referenced docs → bundle.json
+
+2. Triage
+   └─ packages/context: classifyDiff() scores PR signals → tier (trivial | lite | full)
+      harnesses/code-review: expectedRolesForTriageTier(tier)
+      └─ write triage.json
+
+3. Role fan-out (NativeBunOrchestrator)
+   └─ For each role in expectedRolesForTriageTier(tier):
+      ├─ Construct AdapterRequest (context bundle + role prompt)
+      ├─ Write <role>.request.json to scratchpad
+      ├─ adapter.run(request) with timeout
+      └─ Collect AdapterResult (findings JSONL)
+
+4. Report synthesis
+   └─ packages/reporting:
+      ├─ Filter to verified, substantive findings
+      ├─ Deduplicate by canonical fingerprint
+      ├─ Assign overall status
+      └─ Render report.md
+
+5. Write result.json, result.raw.json, events.jsonl
+```
+
+## Context retrieval
+
+- Auto-discovers the active PR via `gh pr view`.
+- When `--pr <number>` is set, checks out a detached git worktree at the PR head
+  under `.agents-code-review/worktrees/` (workspace tree stays untouched).
+- Reads PR title and body into context.
+- Extracts and fetches docs linked in the PR body, scoped to the tracked remote
+  org (non-fatal on failure).
+- Context warnings are non-fatal; review continues with partial context.
+
+## Scratchpad layout
+
+See
+[spec/review-contract.md](spec/review-contract.md#scratchpad-artifact-layout).
+
+## Pending-review posting
+
+Posting is a separate step from review execution and is never automatic:
+
+1. `--pending-review` (or `agents code-review post`) calls GitHub API to create
+   an unsubmitted review.
+2. Staleness check: compares `pr_reviewed_head_sha` (captured at context
+   collection) against the current PR head. Stale = warn or abort unless
+   `--no-confirm`.
+3. Anchorable findings (those with `file` + `line`) are posted as inline
+   comments. Non-anchorable findings appear only in the review body.
+4. When at least one hunk is mappable, the summary is the first inline thread
+   (review `body` left empty to avoid blank GitHub submission).
+
+## jj workspace support
+
+`resolveGitAwarePath()` in `packages/core` maps a jj workspace path (`.jj/repo`
+present, no `.git`) to its canonical colocated repo so git/gh commands work
+correctly. The CLI passes the resolved path to all subprocess and API calls.
+
+## Related
+
+- [prd.md](prd.md) — requirements and acceptance criteria
+- [spec/result-schema.md](spec/result-schema.md) — `result.json` field spec
+- [spec/events-catalog.md](spec/events-catalog.md) — JSONL event catalog
+- [spec/review-contract.md](spec/review-contract.md) — roles, triage tiers, wire
+  keys
+- [ADR 0003](../../adr/0003-agentsd-dual-runtime.md) — HarnessOrchestrator vs
+  WorkQueueOrchestrator
+- [ADR 0004](../../adr/0004-implementation-runtime-providers.md) — app_server
+  runtime
