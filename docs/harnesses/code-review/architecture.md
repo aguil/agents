@@ -16,15 +16,17 @@
 packages/core          Shared run, event, finding, scratchpad, and JSON contracts.
                        Also: resolveGitAwarePath() for jj ↔ git workspace mapping.
 
-packages/execution     AgentAdapter interface + fake, opencode, claude, and cursor
-                       subprocess adapters (SubprocessAgentAdapter base).
-                       AgentSessionClient for app_server (json_rpc_session_v1).
+packages/execution     AgentAdapter interface + AdapterCapabilities + AgentRunRequest.
+                       Fake, opencode, claude, and cursor subprocess adapters
+                       (SubprocessAgentAdapter base).
+                       SessionAgentAdapter for app_server (json_rpc_session_v1).
 
 packages/orchestration HarnessOrchestrator contract + NativeBunOrchestrator
                        (fan-out roles, collect results, enforce timeouts).
 
 packages/context       Diff collection, AGENTS.md ingestion, PR metadata/body
                        parsing, referenced-doc fetching, context bundle assembly.
+                       Also: classifyDiff() — triage tier classification from diff.
 
 packages/reporting     Validation filtering, deduplication (canonical fingerprint),
                        severity status, Markdown report rendering.
@@ -32,8 +34,9 @@ packages/reporting     Validation filtering, deduplication (canonical fingerprin
 packages/telemetry     Structured event sinks for JSONL logs and future
                        observability integrations.
 
-harnesses/code-review  Review roles, prompts, triage flow, and harness assembly.
+harnesses/code-review  Review roles, prompts, harness assembly.
                        Exports review-contract.ts for CLI and agentsd consumers.
+                       Published as @aguil/agents-code-review.
 ```
 
 Allowed dependency direction: `harnesses/code-review` → `packages/*`. Packages
@@ -42,15 +45,53 @@ harnesses are the leaves).
 
 ## Adapter contract
 
-`AgentAdapter` is the single extension point for adding a new agent CLI:
+`AgentAdapter` is the single extension point for adding a new agent CLI
+(`packages/execution`):
 
 ```typescript
 interface AgentAdapter {
-  run(request: AdapterRequest): Promise<AdapterResult>;
+  readonly name: string;
+  capabilities(): AdapterCapabilities;
+  run(request: AgentRunRequest): AsyncIterable<AgentEvent>;
 }
 ```
 
-`SubprocessAgentAdapter` provides the base implementation:
+`run()` is a streaming async iterable, not a promise — events are yielded as the
+agent produces them. The orchestrator collects them until the iterable exhausts
+or the role timeout fires.
+
+### `AdapterCapabilities`
+
+```typescript
+interface AdapterCapabilities {
+  streaming: boolean;
+  structuredOutput: boolean;
+  readOnlyMode: boolean;
+  mcp: boolean;
+  cancellation: boolean;
+}
+```
+
+The harness queries capabilities before dispatching so it can adjust behavior
+(for example, whether to expect structured JSON output or to parse prose).
+
+### `AgentRunRequest` fields
+
+| Field               | Type                      | Description                                            |
+| ------------------- | ------------------------- | ------------------------------------------------------ |
+| `runId`             | `string`                  | Harness run ID                                         |
+| `roleId`            | `string`                  | Reviewer role being executed                           |
+| `prompt`            | `string`                  | Full role prompt text                                  |
+| `workspacePath`     | `string`                  | Resolved workspace root (git/jj)                       |
+| `contextBundlePath` | `string`                  | Path to `context/bundle.json`                          |
+| `scratchpadPath`    | `string`                  | Per-role artifact directory                            |
+| `timeoutMs`         | `number`                  | Role timeout; exceeded → `timed_out` result            |
+| `allowedCommands`   | `readonly string[]`       | Security boundary hint for sandboxed adapters          |
+| `metadata`          | `Record<string, string>?` | Adapter-specific pass-through metadata                 |
+| `signal`            | `AbortSignal?`            | When aborted, subprocess adapters SIGTERM then SIGKILL |
+
+`SubprocessAgentAdapter` provides the base implementation for CLI-backed
+adapters:
 
 - Writes per-role request artifacts to the scratchpad.
 - Spawns the agent CLI subprocess with a constructed argv.
@@ -60,12 +101,18 @@ interface AgentAdapter {
 
 Current real adapters and their subprocess entry points:
 
-| Adapter             | Subprocess                                                 |
-| ------------------- | ---------------------------------------------------------- |
-| `OpenCodeAdapter`   | `opencode run --format json`                               |
-| `ClaudeCodeAdapter` | `claude` (configurable argv template)                      |
-| `CursorAdapter`     | `agent --print --output-format stream-json` (configurable) |
-| `FakeAgentAdapter`  | In-process deterministic output (no subprocess)            |
+| Adapter               | Subprocess                                                 |
+| --------------------- | ---------------------------------------------------------- |
+| `OpenCodeAdapter`     | `opencode run --format json`                               |
+| `ClaudeCodeAdapter`   | `claude` (configurable argv template)                      |
+| `CursorAdapter`       | `agent --print --output-format stream-json` (configurable) |
+| `SessionAgentAdapter` | Cursor app_server via `json_rpc_session_v1` protocol       |
+| `FakeAgentAdapter`    | In-process deterministic output (no subprocess)            |
+
+`SessionAgentAdapter` communicates over a JSON-RPC session with a running Cursor
+agent server. The underlying transport is `JsonRpcAgentSessionClient` (wraps
+`SessionAgentAdapterClient`). This is distinct from the subprocess-based
+adapters above.
 
 ## Orchestration flow
 
@@ -74,7 +121,8 @@ Current real adapters and their subprocess entry points:
    └─ packages/context: diff, AGENTS.md, PR metadata, referenced docs → bundle.json
 
 2. Triage
-   └─ harnesses/code-review: score PR signals → select tier (trivial | lite | full)
+   └─ packages/context: classifyDiff() scores PR signals → tier (trivial | lite | full)
+      harnesses/code-review: expectedRolesForTriageTier(tier)
       └─ write triage.json
 
 3. Role fan-out (NativeBunOrchestrator)

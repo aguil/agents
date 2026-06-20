@@ -59,10 +59,46 @@ setting.
 
 ## `app_server` runtime (`json_rpc_session_v1`)
 
-Multi-turn loop via `AgentSessionClient`. The driver is line-delimited JSON-RPC.
-`agent.protocol` must be set to `json_rpc_session_v1` explicitly; the `codex:`
-alias maps `command` and timeouts only and does not set `agent.protocol` (see
+Multi-turn loop via `SessionAgentAdapter` (`packages/execution`). The transport
+is `JsonRpcAgentSessionClient` (wraps `SessionAgentAdapterClient`) using
+line-delimited JSON-RPC. `agent.protocol` must be set to `json_rpc_session_v1`
+explicitly in WORKFLOW.md; the `codex:` alias maps `command` and timeouts only
+and does not set `agent.protocol` (see
 [ADR 0004](../adr/0004-implementation-runtime-providers.md)).
+
+## `WorkspaceHooks` lifecycle
+
+Each `agentsd` work item can run shell commands at lifecycle points, configured
+per feed in WORKFLOW.md under `workspace.hooks`:
+
+| Hook           | When it runs                                                    |
+| -------------- | --------------------------------------------------------------- |
+| `afterCreate`  | After the per-item workspace directory is created (first visit) |
+| `beforeRun`    | Before the worker dispatches the agent adapter                  |
+| `afterRun`     | After the worker completes (success or failure)                 |
+| `beforeRemove` | Before the workspace directory is removed on cleanup            |
+
+All hooks inherit `timeoutMs` from the `workspace` section. Hooks are optional;
+omit any field to skip that lifecycle phase. See
+[docs/guide/agentsd/README.md](../../guide/agentsd/README.md) for WORKFLOW.md
+syntax examples.
+
+## `createWorkflowAgentAdapter` bridge
+
+`createWorkflowAgentAdapter(impl: ImplementationExecutionConfig): AgentAdapter`
+is exported from `packages/workers`. It translates a WORKFLOW.md
+`implementation` block into a concrete `AgentAdapter` for harness workers:
+
+```
+WORKFLOW.md agent.adapter: "cursor" | "claude" | "opencode" | "fake"
+    │
+    └─ createWorkflowAgentAdapter(impl)
+         └─ createCodeReviewAdapter(name)   (from @aguil/agents-code-review)
+              └─ returns SubprocessAgentAdapter subclass
+```
+
+This is the bridge between WORKFLOW.md configuration and the execution layer.
+Workers receive an `AgentAdapter` and are decoupled from adapter selection.
 
 ## Package layout
 
@@ -74,4 +110,4 @@ alias maps `command` and timeouts only and does not set `agent.protocol` (see
 | `@aguil/agents-work-queue` | `WorkQueueOrchestrator` (poll loop, claim, retry)                 |
 | `@aguil/agents-publish`    | Publish gate evaluation and GitHub write                          |
 | `@aguil/agents-workers`    | Worker implementations (implementation, code_review, pr_feedback) |
-| `@aguil/agents-agentsd`    | Host binary entry point, signal handling, `stopAndDrain`          |
+| `@aguil/agentsd`           | Host binary entry point, signal handling, `stopAndDrain`          |

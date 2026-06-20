@@ -213,3 +213,21 @@ The CLI does not implement automatic rate-limit retries or backoff.
 | ---- | ---------------------------------------------------------------------- |
 | `0`  | Status is `passed`, `warnings`, or `failed`                            |
 | `1`  | Status is `error` (adapter spawn failure or fatal orchestration error) |
+
+## Removed commands
+
+### `agents run code-review` (removed)
+
+The `agents run code-review` subcommand was removed. Use `agents code-review`
+directly:
+
+```bash
+# Before (removed)
+agents run code-review --adapter cursor
+
+# After
+agents code-review --adapter cursor
+```
+
+All flags and options are identical. Update any scripts or CI steps that used
+the old form.

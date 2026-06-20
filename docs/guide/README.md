@@ -27,6 +27,19 @@ Practical documentation for running and configuring `agents` workflows.
 | [agentsd/environment.md](agentsd/environment.md) | `AGENTSD_*` env vars                                 |
 | [agentsd/production.md](agentsd/production.md)   | Production profile, notifications, log sink          |
 
+## Triage and PR feedback
+
+| Doc                              | Contents                                                   |
+| -------------------------------- | ---------------------------------------------------------- |
+| [triage.md](triage.md)           | `agents triage` — convert producer output to triage queues |
+| [pr-feedback.md](pr-feedback.md) | `agents pr-feedback collect/submit/select`                 |
+
+## Utilities
+
+| Doc                          | Contents                                                                |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| [utilities.md](utilities.md) | `agents doctor` (version check) and `agents skills` (install playbooks) |
+
 ## Agent playbooks (skills)
 
 Portable skill playbooks for `agents code-review`, `agents triage`, and related

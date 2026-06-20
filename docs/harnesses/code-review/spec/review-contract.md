@@ -75,3 +75,33 @@ Review coverage is computed from `completed_roles` relative to the roles
 expected for the selected triage tier (`expectedRolesForTriageTier`). Timed-out
 or failed roles reduce coverage and produce partial-coverage warnings rather
 than fatal errors (unless `--strict` is set).
+
+## `AdapterCapabilities` flags
+
+Returned by `AgentAdapter.capabilities()`. The harness may adjust behavior based
+on these flags.
+
+| Flag               | Type      | Description                                          |
+| ------------------ | --------- | ---------------------------------------------------- |
+| `streaming`        | `boolean` | Adapter yields events incrementally (vs. one shot)   |
+| `structuredOutput` | `boolean` | Adapter can emit structured JSON findings natively   |
+| `readOnlyMode`     | `boolean` | Adapter runs in a read-only sandbox (no writes)      |
+| `mcp`              | `boolean` | Adapter supports MCP tool integration                |
+| `cancellation`     | `boolean` | Adapter respects `AbortSignal` for early termination |
+
+## `AgentRunRequest` field reference
+
+These fields are passed to every `AgentAdapter.run()` call.
+
+| Field               | Required | Description                                                      |
+| ------------------- | -------- | ---------------------------------------------------------------- |
+| `runId`             | yes      | Harness run ID                                                   |
+| `roleId`            | yes      | Reviewer role (`security`, `performance`, etc.)                  |
+| `prompt`            | yes      | Full role prompt text                                            |
+| `workspacePath`     | yes      | Resolved workspace root                                          |
+| `contextBundlePath` | yes      | Absolute path to `context/bundle.json`                           |
+| `scratchpadPath`    | yes      | Per-role artifact directory                                      |
+| `timeoutMs`         | yes      | Milliseconds before role is cancelled                            |
+| `allowedCommands`   | yes      | Allowlist hint for sandboxed adapters                            |
+| `metadata`          | no       | Adapter-specific pass-through key/value pairs                    |
+| `signal`            | no       | Abort signal; on abort, subprocess adapters SIGTERM then SIGKILL |
