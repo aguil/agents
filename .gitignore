@@ -9,6 +9,8 @@ coverage/
 .agents-triage/
 .agents-pr-feedback/
 
+docs/exploration/
+
 .env
 .env.*
 !.env.example
