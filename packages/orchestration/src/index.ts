@@ -2,10 +2,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   Finding,
+  HarnessOutcome,
   HarnessRunRequest,
   HarnessRunResult,
 } from "@aguil/agents-core";
-import { ensureDirectory, writeJsonFile } from "@aguil/agents-core";
+import {
+  ensureDirectory,
+  findingToHarnessOutcome,
+  writeJsonFile,
+} from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
 import { isFinding } from "@aguil/agents-execution";
 import type { EventSink } from "@aguil/agents-telemetry";
@@ -20,10 +25,64 @@ export interface RoleDefinition {
   readonly allowedCommands?: readonly string[];
 }
 
+export interface ParallelExecution {
+  readonly mode: "parallel";
+}
+
+export interface ChainExecution {
+  readonly mode: "chain";
+  /** Step order; defaults to definition role order. */
+  readonly order?: readonly string[];
+  /** v1 supports abort only (see exploration doc §8.1 thin defaults). */
+  readonly onStepFailure?: "abort";
+}
+
+export interface ValidationLoopExecution {
+  readonly mode: "validation-loop";
+  readonly implementationRoles: readonly string[];
+  readonly validationRoles: readonly string[];
+  readonly maxRounds: number;
+  /**
+   * Pass condition over the round's validation outcomes. Defaults to
+   * "validation roles produced zero outcomes". CEL expressions arrive in a
+   * later phase; this stays a build-time predicate until then.
+   */
+  readonly passWhen?: (
+    validationOutcomes: readonly HarnessOutcome[],
+  ) => boolean;
+}
+
+export type ExecutionConfig =
+  | ParallelExecution
+  | ChainExecution
+  | ValidationLoopExecution;
+
 export interface HarnessDefinition {
   readonly id: string;
   readonly roles: readonly RoleDefinition[];
   readonly defaultAllowedCommands?: readonly string[];
+  /** Absent means parallel fan-out (existing behavior). */
+  readonly execution?: ExecutionConfig;
+}
+
+/** Pi-derived output truncation defaults (exploration doc §8.1). */
+export const ROLE_OUTPUT_MAX_BYTES = 50_000;
+export const ROLE_OUTPUT_MAX_LINES = 2000;
+
+export function truncateRoleOutput(
+  output: string,
+  maxBytes: number = ROLE_OUTPUT_MAX_BYTES,
+  maxLines: number = ROLE_OUTPUT_MAX_LINES,
+): string {
+  let truncated = output;
+  const lines = truncated.split("\n");
+  if (lines.length > maxLines) {
+    truncated = `${lines.slice(0, maxLines).join("\n")}\n[truncated: ${lines.length - maxLines} more lines]`;
+  }
+  if (Buffer.byteLength(truncated, "utf8") > maxBytes) {
+    truncated = `${Buffer.from(truncated, "utf8").subarray(0, maxBytes).toString("utf8")}\n[truncated at ${maxBytes} bytes]`;
+  }
+  return truncated;
 }
 
 /** Fan-out harness roles for a single run (see ADR 0003). */
@@ -42,6 +101,19 @@ export interface NativeBunOrchestratorOptions {
   readonly embeddedPrompts?: Readonly<Record<string, string>>;
 }
 
+interface RoleRunOutcome {
+  readonly roleId: string;
+  readonly findings: readonly Finding[];
+  readonly artifacts: readonly string[];
+  readonly outcome: "completed" | "timed_out" | "failed";
+}
+
+interface PromptInterpolationContext {
+  readonly previous?: string;
+  readonly outputs?: Readonly<Record<string, string>>;
+  readonly validation?: string;
+}
+
 export class NativeBunOrchestrator implements HarnessOrchestrator {
   constructor(private readonly options: NativeBunOrchestratorOptions) {}
 
@@ -49,9 +121,134 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     await ensureDirectory(request.scratchpadPath);
     assertAdapterCapabilities(this.options.adapter, this.options.definition);
 
-    const outcomes = await Promise.all(
+    const execution = this.options.definition.execution ?? {
+      mode: "parallel" as const,
+    };
+    let roleOutcomes: readonly RoleRunOutcome[];
+    const extraMetadata: Record<string, string> = {
+      execution_mode: execution.mode,
+    };
+
+    switch (execution.mode) {
+      case "parallel":
+        roleOutcomes = await this.runParallel(request);
+        break;
+      case "chain":
+        roleOutcomes = await this.runChain(request, execution);
+        break;
+      case "validation-loop": {
+        const loop = await this.runValidationLoop(request, execution);
+        roleOutcomes = loop.roleOutcomes;
+        extraMetadata.validation_rounds = String(loop.rounds);
+        extraMetadata.validation_passed = String(loop.passed);
+        break;
+      }
+    }
+
+    return this.assembleResult(request, roleOutcomes, extraMetadata);
+  }
+
+  private async runParallel(
+    request: HarnessRunRequest,
+  ): Promise<readonly RoleRunOutcome[]> {
+    return Promise.all(
       this.options.definition.roles.map((role) => this.runRole(request, role)),
     );
+  }
+
+  private async runChain(
+    request: HarnessRunRequest,
+    execution: ChainExecution,
+  ): Promise<readonly RoleRunOutcome[]> {
+    const roles = resolveRoleOrder(this.options.definition, execution.order);
+    const outcomes: RoleRunOutcome[] = [];
+    const outputs: Record<string, string> = {};
+    let previous = "";
+
+    for (const role of roles) {
+      const outcome = await this.runRole(request, role, {
+        previous,
+        outputs,
+      });
+      outcomes.push(outcome);
+      if (outcome.outcome !== "completed") {
+        // v1 thin default: abort at first failed/timed-out step.
+        break;
+      }
+      previous = truncateRoleOutput(serializeRoleOutput(outcome));
+      outputs[role.id] = previous;
+    }
+    return outcomes;
+  }
+
+  private async runValidationLoop(
+    request: HarnessRunRequest,
+    execution: ValidationLoopExecution,
+  ): Promise<{
+    readonly roleOutcomes: readonly RoleRunOutcome[];
+    readonly rounds: number;
+    readonly passed: boolean;
+  }> {
+    const implementationRoles = resolveRoleOrder(
+      this.options.definition,
+      execution.implementationRoles,
+    );
+    const validationRoles = resolveRoleOrder(
+      this.options.definition,
+      execution.validationRoles,
+    );
+    const passWhen =
+      execution.passWhen ?? ((outcomes) => outcomes.length === 0);
+    const maxRounds = Math.max(1, execution.maxRounds);
+
+    let lastRound: RoleRunOutcome[] = [];
+    let validationFeedback = "";
+    let passed = false;
+    let rounds = 0;
+
+    for (let round = 1; round <= maxRounds; round += 1) {
+      rounds = round;
+      const implementationOutcomes = await Promise.all(
+        implementationRoles.map((role) =>
+          this.runRole(request, role, { validation: validationFeedback }),
+        ),
+      );
+      const implementationOutput = truncateRoleOutput(
+        implementationOutcomes.map(serializeRoleOutput).join("\n"),
+      );
+      const validationOutcomes = await Promise.all(
+        validationRoles.map((role) =>
+          this.runRole(request, role, { previous: implementationOutput }),
+        ),
+      );
+      lastRound = [...implementationOutcomes, ...validationOutcomes];
+
+      const anyFailure = lastRound.some(
+        (outcome) => outcome.outcome !== "completed",
+      );
+      if (anyFailure) {
+        break;
+      }
+      const validationHarnessOutcomes = validationOutcomes.flatMap((outcome) =>
+        outcome.findings.map(findingToHarnessOutcome),
+      );
+      if (passWhen(validationHarnessOutcomes)) {
+        passed = true;
+        break;
+      }
+      validationFeedback = truncateRoleOutput(
+        validationOutcomes.map(serializeRoleOutput).join("\n"),
+      );
+    }
+
+    return { roleOutcomes: lastRound, rounds, passed };
+  }
+
+  private async assembleResult(
+    request: HarnessRunRequest,
+    outcomes: readonly RoleRunOutcome[],
+    extraMetadata: Readonly<Record<string, string>>,
+  ): Promise<HarnessRunResult> {
     const findings = outcomes.flatMap((outcome) => outcome.findings);
     const artifacts = outcomes.flatMap((outcome) => outcome.artifacts);
     const timedOutRoles = outcomes
@@ -70,6 +267,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       timed_out_roles: timedOutRoles.join(","),
       failed_roles: failedRoles.join(","),
       completed_roles: completedRoles.join(","),
+      ...extraMetadata,
     };
 
     const result: HarnessRunResult = {
@@ -80,6 +278,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
         failedRoles,
       }),
       findings,
+      outcomes: findings.map(findingToHarnessOutcome),
       artifacts,
       metadata,
     };
@@ -94,15 +293,14 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
   private async runRole(
     request: HarnessRunRequest,
     role: RoleDefinition,
-  ): Promise<{
-    readonly roleId: string;
-    readonly findings: readonly Finding[];
-    readonly artifacts: readonly string[];
-    readonly outcome: "completed" | "timed_out" | "failed";
-  }> {
+    interpolation?: PromptInterpolationContext,
+  ): Promise<RoleRunOutcome> {
     const roleScratchpadPath = join(request.scratchpadPath, "roles", role.id);
     await ensureDirectory(roleScratchpadPath);
-    const prompt = await readPrompt(role, this.options.embeddedPrompts);
+    const prompt = interpolatePrompt(
+      await readPrompt(role, this.options.embeddedPrompts),
+      interpolation,
+    );
     const findings: Finding[] = [];
     let outcome: "completed" | "timed_out" | "failed" = "completed";
 
@@ -139,6 +337,50 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       outcome,
     };
   }
+}
+
+function resolveRoleOrder(
+  definition: HarnessDefinition,
+  order: readonly string[] | undefined,
+): readonly RoleDefinition[] {
+  if (order === undefined) {
+    return definition.roles;
+  }
+  return order.map((roleId) => {
+    const role = definition.roles.find((candidate) => candidate.id === roleId);
+    if (role === undefined) {
+      throw new Error(
+        `execution config references unknown role "${roleId}" in harness ${definition.id}`,
+      );
+    }
+    return role;
+  });
+}
+
+function serializeRoleOutput(outcome: RoleRunOutcome): string {
+  return JSON.stringify(outcome.findings.map(findingToHarnessOutcome), null, 2);
+}
+
+function interpolatePrompt(
+  prompt: string,
+  context: PromptInterpolationContext | undefined,
+): string {
+  if (context === undefined) {
+    return prompt;
+  }
+  let interpolated = prompt;
+  if (context.previous !== undefined) {
+    interpolated = interpolated.replaceAll("{previous}", context.previous);
+  }
+  if (context.validation !== undefined) {
+    interpolated = interpolated.replaceAll("{validation}", context.validation);
+  }
+  if (context.outputs !== undefined) {
+    for (const [roleId, output] of Object.entries(context.outputs)) {
+      interpolated = interpolated.replaceAll(`{outputs.${roleId}}`, output);
+    }
+  }
+  return interpolated;
 }
 
 async function readPrompt(
