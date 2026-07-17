@@ -52,10 +52,71 @@ export interface Finding {
   readonly line?: number;
 }
 
+/**
+ * Generic per-role outcome. Harnesses define their own `kind` values and
+ * carry domain fields in `data`, validated against the harness spec's
+ * outcome schema. `Finding` is the code-review specialization; use
+ * `findingToHarnessOutcome` / `harnessOutcomeToFinding` at the boundary.
+ */
+export interface HarnessOutcome {
+  readonly id: string;
+  readonly kind: string;
+  readonly sourceRole: string;
+  readonly title: string;
+  readonly data: JsonRecord;
+}
+
+/** `kind` used for code-review findings represented as generic outcomes. */
+export const FINDING_OUTCOME_KIND = "finding";
+
+export function findingToHarnessOutcome(finding: Finding): HarnessOutcome {
+  const { id, title, sourceRole, ...rest } = finding;
+  return {
+    id,
+    kind: FINDING_OUTCOME_KIND,
+    sourceRole,
+    title,
+    data: rest as unknown as JsonRecord,
+  };
+}
+
+export function isFindingOutcome(outcome: HarnessOutcome): boolean {
+  return (
+    outcome.kind === FINDING_OUTCOME_KIND &&
+    typeof outcome.data.severity === "string" &&
+    typeof outcome.data.description === "string" &&
+    typeof outcome.data.evidence === "string" &&
+    typeof outcome.data.validation === "object" &&
+    outcome.data.validation !== null
+  );
+}
+
+export function harnessOutcomeToFinding(
+  outcome: HarnessOutcome,
+): Finding | undefined {
+  if (!isFindingOutcome(outcome)) {
+    return undefined;
+  }
+  return {
+    id: outcome.id,
+    title: outcome.title,
+    sourceRole: outcome.sourceRole,
+    ...(outcome.data as unknown as Omit<
+      Finding,
+      "id" | "title" | "sourceRole"
+    >),
+  };
+}
+
 export interface HarnessRunResult {
   readonly runId: string;
   readonly status: HarnessStatus;
   readonly findings: readonly Finding[];
+  /**
+   * Generic outcomes for non-code-review harnesses. Optional during the
+   * migration window; code-review continues to populate `findings`.
+   */
+  readonly outcomes?: readonly HarnessOutcome[];
   readonly artifacts: readonly string[];
   readonly metadata?: Readonly<Record<string, string>>;
 }
