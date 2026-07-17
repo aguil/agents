@@ -1,10 +1,14 @@
 name: Release
 
+# Runs on pushed v*.*.* tags. Tags created by release-please use GITHUB_TOKEN
+# and do not trigger push events (GitHub anti-recursion guard), so
+# release-please.yml dispatches this workflow explicitly with --ref <tag>.
 on:
   push:
     tags:
       # Glob patterns (not regex). Match SemVer release tags like v0.1.0, v10.2.3, v1.0.0-alpha.1.
       - "v*.*.*"
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -42,29 +46,32 @@ jobs:
 
       - run: bun run build
 
+      # Publishing is tag-gated: refuse branch refs (workflow_dispatch can
+      # select any ref) and non-SemVer tag names before deriving the version.
       - id: semver
         name: Derive semver from tag
         run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "Refusing to publish from ref type '${GITHUB_REF_TYPE}' (${GITHUB_REF_NAME}); dispatch this workflow with a v*.*.* tag ref." >&2
+            exit 1
+          fi
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Refusing tag '${GITHUB_REF_NAME}': not a SemVer release tag (vX.Y.Z)." >&2
+            exit 1
+          fi
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - run: bun run scripts/prepare-npm-publish.ts -- --version "${{ steps.semver.outputs.version }}"
 
-      - run: npm publish ./.npm-publish-pack --access public
-
-  github-release:
-    needs: publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/create-github-release-from-tag.sh
+      # Skip when already published so workflow_dispatch retries stay green.
+      - name: Publish to npm
+        run: |
+          set -euo pipefail
+          version="${{ steps.semver.outputs.version }}"
+          if npm view "@aguil/agents@${version}" version >/dev/null 2>&1; then
+            echo "@aguil/agents@${version} is already on npm; skipping publish."
+            exit 0
+          fi
+          npm publish ./.npm-publish-pack --access public
