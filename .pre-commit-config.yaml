@@ -5,9 +5,11 @@ repos:
     hooks:
       - id: end-of-file-fixer
         files: \.md$
+        exclude: ^CHANGELOG\.md$
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
         files: \.md$
+        exclude: ^CHANGELOG\.md$
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v3.1.0
