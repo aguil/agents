@@ -209,6 +209,11 @@ explicitly unless you use **`release:tag --push`**.
 
 ### Where release notes appear
 
+On the default release-please path, committed release notes live in
+[`CHANGELOG.md`](../CHANGELOG.md) (updated by the release PR) and the GitHub
+Release body is generated from the same changelog entry. The table below
+describes the **manual tag** fallback:
+
 | Surface               | What users see                                                                                                                                                                                                                          |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Git annotated tag** | Text from `release-tag-message.local` at tag time (`bun run release:tag`).                                                                                                                                                              |
@@ -216,8 +221,10 @@ explicitly unless you use **`release:tag --push`**.
 | **npm**               | `README.npm.md` + `package.json` `description` from the publish pack — not the tag message.                                                                                                                                             |
 
 Put everything you want on the GitHub Release **above the generated PR section**
-in `release-tag-message.local` (gitignored). Do not commit per-version release
-notes to this repository.
+in `release-tag-message.local` (gitignored). On this manual path, do not commit
+per-version release notes outside `CHANGELOG.md` (e.g. no ad-hoc notes files);
+the release-please-maintained changelog is the only committed source of release
+notes.
 
 If CI did not create a Release (e.g. publish ran before this automation
 existed), run `bash scripts/create-github-release-from-tag.sh` locally with
