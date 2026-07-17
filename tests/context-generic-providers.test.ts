@@ -168,6 +168,48 @@ test("FileGlobProvider collects matching files up to maxFiles in sorted order", 
   });
 });
 
+test("FileGlobProvider bounded selection matches sort-then-slice semantics", async () => {
+  await withWorkspace(async (workspacePath) => {
+    await mkdir(join(workspacePath, "many"), { recursive: true });
+    // Write files in non-sorted creation order.
+    const names = ["m.txt", "a.txt", "z.txt", "c.txt", "b.txt", "q.txt"];
+    for (const name of names) {
+      await writeFile(join(workspacePath, "many", name), name);
+    }
+    const provider = new FileGlobProvider({
+      pattern: "many/*.txt",
+      maxFiles: 3,
+    });
+    const artifacts = await provider.collect(makeRequest(workspacePath));
+    expect(artifacts.map((a) => a.title)).toEqual([
+      "many/a.txt",
+      "many/b.txt",
+      "many/c.txt",
+    ]);
+  });
+});
+
+test("FileGlobProvider surfaces scan truncation as a warning artifact", async () => {
+  await withWorkspace(async (workspacePath) => {
+    await mkdir(join(workspacePath, "many"), { recursive: true });
+    for (let i = 0; i < 8; i += 1) {
+      await writeFile(join(workspacePath, "many", `f${i}.txt`), String(i));
+    }
+    const provider = new FileGlobProvider({
+      pattern: "many/*.txt",
+      maxFiles: 2,
+      maxScannedMatches: 4,
+    });
+    const artifacts = await provider.collect(makeRequest(workspacePath));
+    const warning = artifacts.find((a) => a.id.endsWith(":scan-truncated"));
+    expect(warning).toBeDefined();
+    expect(warning?.content).toContain("matched more than 4 paths");
+    expect(
+      artifacts.filter((a) => !a.id.endsWith(":scan-truncated")),
+    ).toHaveLength(2);
+  });
+});
+
 test("contextRequestParam prefers legacy fields, falls back to params", async () => {
   await withWorkspace(async (workspacePath) => {
     const legacy: ContextRequest = {

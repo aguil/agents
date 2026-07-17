@@ -295,7 +295,15 @@ export interface FileGlobProviderOptions {
   readonly pattern: string;
   readonly maxFiles?: number;
   readonly maxBytesPerFile?: number;
+  /**
+   * Stop scanning after this many matches (default 10000). Bounds scan time
+   * for overly broad patterns; when hit, a warning artifact records that the
+   * selection may be incomplete.
+   */
+  readonly maxScannedMatches?: number;
 }
+
+const DEFAULT_GLOB_MAX_SCANNED_MATCHES = 10_000;
 
 /** Generic provider: collect files matching a glob under the workspace. */
 export class FileGlobProvider implements ContextProvider {
@@ -305,15 +313,32 @@ export class FileGlobProvider implements ContextProvider {
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
     const glob = new Bun.Glob(this.options.pattern);
-    const matches: string[] = [];
+    const maxFiles = this.options.maxFiles ?? 5;
+    const maxScanned =
+      this.options.maxScannedMatches ?? DEFAULT_GLOB_MAX_SCANNED_MATCHES;
+    // Bounded selection: keep only the lexicographically-first maxFiles
+    // matches while scanning, so memory is O(maxFiles) instead of O(total
+    // matches). Result is identical to sorting all matches and slicing.
+    const limited: string[] = [];
+    let scanned = 0;
+    let scanTruncated = false;
     for await (const match of glob.scan({
       cwd: request.workspacePath,
       dot: false,
     })) {
-      matches.push(match);
+      scanned += 1;
+      if (scanned > maxScanned) {
+        scanTruncated = true;
+        break;
+      }
+      if (limited.length < maxFiles) {
+        limited.push(match);
+        limited.sort();
+      } else if (match < limited[limited.length - 1]) {
+        limited[limited.length - 1] = match;
+        limited.sort();
+      }
     }
-    matches.sort();
-    const limited = matches.slice(0, this.options.maxFiles ?? 5);
     const idPrefix = this.options.id ?? "file-glob";
 
     const artifacts: ContextArtifact[] = [];
@@ -341,6 +366,13 @@ export class FileGlobProvider implements ContextProvider {
       } catch {
         // Unreadable match (permissions, race); skip rather than abort.
       }
+    }
+    if (scanTruncated) {
+      artifacts.push({
+        id: `${idPrefix}:scan-truncated`,
+        title: `Glob scan truncated: ${this.options.pattern}`,
+        content: `Pattern "${this.options.pattern}" matched more than ${maxScanned} paths; selection may be incomplete. Narrow the pattern or raise maxScannedMatches.`,
+      });
     }
     return artifacts;
   }
