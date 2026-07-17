@@ -68,6 +68,53 @@ test("StaticFileProvider omits missing optional files and throws for required on
   });
 });
 
+test("StaticFileProvider refuses traversal and absolute escapes unless opted in", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const outside = join(workspacePath, "..", "escape-marker.txt");
+    await writeFile(outside, "host secret");
+    try {
+      const traversal = new StaticFileProvider({
+        id: "escape",
+        path: "../escape-marker.txt",
+      });
+      await expect(
+        traversal.collect(makeRequest(workspacePath)),
+      ).rejects.toThrow("refuses path outside the workspace");
+
+      const absolute = new StaticFileProvider({ id: "abs", path: outside });
+      await expect(
+        absolute.collect(makeRequest(workspacePath)),
+      ).rejects.toThrow("refuses path outside the workspace");
+
+      const optedIn = new StaticFileProvider({
+        id: "fixture",
+        path: outside,
+        allowOutsideWorkspace: true,
+      });
+      const artifacts = await optedIn.collect(makeRequest(workspacePath));
+      expect(artifacts[0]?.content).toBe("host secret");
+    } finally {
+      await rm(outside, { force: true });
+    }
+  });
+});
+
+test("FileGlobProvider skips matches that resolve outside the workspace", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const outside = join(workspacePath, "..", "glob-escape-marker.txt");
+    await writeFile(outside, "host secret");
+    try {
+      const provider = new FileGlobProvider({
+        pattern: "../glob-escape-marker.txt",
+      });
+      const artifacts = await provider.collect(makeRequest(workspacePath));
+      expect(artifacts).toHaveLength(0);
+    } finally {
+      await rm(outside, { force: true });
+    }
+  });
+});
+
 test("StaticFileProvider truncates oversized content", async () => {
   await withWorkspace(async (workspacePath) => {
     await writeFile(join(workspacePath, "big.log"), "y".repeat(60_000));

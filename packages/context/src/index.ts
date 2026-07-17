@@ -1,5 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import type { ReviewTriageTier } from "@aguil/agents-core";
 import {
   ensureDirectory,
@@ -177,6 +177,35 @@ export interface StaticFileProviderOptions {
   /** Fail the run when the file is missing (default: emit nothing). */
   readonly required?: boolean;
   readonly maxBytes?: number;
+  /**
+   * Permit paths that resolve outside the workspace root (absolute paths or
+   * `..` traversal). Off by default: reading host files into LLM-bound
+   * context artifacts is a disclosure vector, so escaping the workspace is
+   * an explicit opt-in for e.g. fixture logs staged outside the repo.
+   */
+  readonly allowOutsideWorkspace?: boolean;
+}
+
+/**
+ * Resolve a candidate path and enforce workspace containment. Returns
+ * undefined when the resolved path escapes the workspace root and escaping
+ * was not explicitly allowed.
+ */
+function resolveWorkspacePath(
+  workspacePath: string,
+  candidate: string,
+  allowOutsideWorkspace: boolean,
+): string | undefined {
+  const resolved = isAbsolute(candidate)
+    ? resolve(candidate)
+    : resolve(workspacePath, candidate);
+  if (allowOutsideWorkspace) {
+    return resolved;
+  }
+  const root = resolve(workspacePath);
+  return resolved === root || resolved.startsWith(root + sep)
+    ? resolved
+    : undefined;
 }
 
 /** Generic provider: read one file (relative to workspace or absolute). */
@@ -186,9 +215,16 @@ export class StaticFileProvider implements ContextProvider {
   constructor(private readonly options: StaticFileProviderOptions) {}
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const path = isAbsolute(this.options.path)
-      ? this.options.path
-      : join(request.workspacePath, this.options.path);
+    const path = resolveWorkspacePath(
+      request.workspacePath,
+      this.options.path,
+      this.options.allowOutsideWorkspace === true,
+    );
+    if (path === undefined) {
+      throw new Error(
+        `static-file provider "${this.options.id}" refuses path outside the workspace: ${this.options.path} (set allowOutsideWorkspace to permit)`,
+      );
+    }
     let content: string;
     try {
       content = await readFile(path, "utf8");
@@ -282,7 +318,16 @@ export class FileGlobProvider implements ContextProvider {
 
     const artifacts: ContextArtifact[] = [];
     for (const relativePath of limited) {
-      const path = join(request.workspacePath, relativePath);
+      // Glob matches must stay inside the workspace; a pattern containing
+      // `..` could otherwise surface host files into LLM-bound context.
+      const path = resolveWorkspacePath(
+        request.workspacePath,
+        relativePath,
+        false,
+      );
+      if (path === undefined) {
+        continue;
+      }
       try {
         artifacts.push({
           id: `${idPrefix}:${relativePath}`,
