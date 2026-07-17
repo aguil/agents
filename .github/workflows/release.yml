@@ -1,10 +1,14 @@
 name: Release
 
+# Runs on pushed v*.*.* tags. Tags created by release-please use GITHUB_TOKEN
+# and do not trigger push events (GitHub anti-recursion guard), so
+# release-please.yml dispatches this workflow explicitly with --ref <tag>.
 on:
   push:
     tags:
       # Glob patterns (not regex). Match SemVer release tags like v0.1.0, v10.2.3, v1.0.0-alpha.1.
       - "v*.*.*"
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -50,7 +54,16 @@ jobs:
 
       - run: bun run scripts/prepare-npm-publish.ts -- --version "${{ steps.semver.outputs.version }}"
 
-      - run: npm publish ./.npm-publish-pack --access public
+      # Skip when already published so workflow_dispatch retries stay green.
+      - name: Publish to npm
+        run: |
+          set -euo pipefail
+          version="${{ steps.semver.outputs.version }}"
+          if npm view "@aguil/agents@${version}" version >/dev/null 2>&1; then
+            echo "@aguil/agents@${version} is already on npm; skipping publish."
+            exit 0
+          fi
+          npm publish ./.npm-publish-pack --access public
 
   github-release:
     needs: publish

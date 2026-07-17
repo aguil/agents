@@ -6,6 +6,20 @@ Developer install and local build steps are in
 This file covers the npm publishing pipeline, annotated release tags, and
 Jujutsu-specific git interop.
 
+## Automated releases (release-please)
+
+The default release path is automated by
+[release-please](https://github.com/googleapis/release-please):
+[`.github/workflows/release-please.yml`](.github/workflows/release-please.yml)
+maintains a release PR from Conventional Commits on `main` (version bump +
+[`CHANGELOG.md`](CHANGELOG.md), configured in
+[`release-please-config.json`](release-please-config.json)). Merging that PR
+creates the `vX.Y.Z` tag and GitHub Release, then dispatches
+[`release.yml`](.github/workflows/release.yml) to publish to npm (tags created
+with `GITHUB_TOKEN` do not trigger workflows on their own, so the dispatch is
+explicit). The sections below describe the underlying tarball/publish mechanics
+and the manual-tag fallback.
+
 ## npm tarball
 
 The workspace root `package.json` is **private**. A thin publishable tarball
@@ -79,12 +93,13 @@ You do not need a `NPM_TOKEN` secret for CI publishes once this is wired. Local
 or manual `npm publish` from your laptop still uses `npm login` or a granular
 token.
 
-## Annotated release tags
+## Annotated release tags (manual fallback)
 
-Publishing on tag runs GitHub Actions: npm publish, then a **GitHub Release**
-whose body starts with the annotated tag message and appends auto-generated PR
-notes since the previous `v*.*.*` tag (idempotent if the Release already
-exists). Annotation text is **not** stored in git.
+Use this path only when bypassing release-please (e.g. re-cutting a release by
+hand). Publishing on tag runs GitHub Actions: npm publish, then a **GitHub
+Release** whose body starts with the annotated tag message and appends
+auto-generated PR notes since the previous `v*.*.*` tag (idempotent if the
+Release already exists). Annotation text is **not** stored in git.
 
 Copy the committed
 [`distribution/npm/release-tag-message.template.example`](distribution/npm/release-tag-message.template.example)

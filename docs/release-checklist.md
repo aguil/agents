@@ -4,13 +4,29 @@ Use this when cutting a new **`@aguil/agents`** release. Tag-driven publishing,
 trusted publishing setup, and tarball details live in [`BUILD.md`](../BUILD.md)
 (npm tarball + **Annotated release tags**).
 
-A pushed **`v*.*.*`** tag triggers
-[`.github/workflows/release.yml`](../.github/workflows/release.yml). That
-workflow runs the same quality gates as below, builds, publishes to npm, then
-creates a **GitHub Release** from the tag annotation plus generated PR notes
-(see [Where release notes appear](#where-release-notes-appear)).
+## Automated releases (release-please) — default path
 
-## Before you tag
+Releases are automated with
+[release-please](https://github.com/googleapis/release-please):
+
+1. Land [Conventional Commits](https://www.conventionalcommits.org/) on
+   **`main`** (`feat:` → minor, `fix:`/`perf:` → patch while pre-1.0 per
+   [`release-please-config.json`](../release-please-config.json)).
+2. [`.github/workflows/release-please.yml`](../.github/workflows/release-please.yml)
+   maintains a **release PR** that bumps the root `package.json` version,
+   updates [`CHANGELOG.md`](../CHANGELOG.md), and updates
+   [`.release-please-manifest.json`](../.release-please-manifest.json).
+3. Merging the release PR creates the **`vX.Y.Z`** tag and GitHub Release, then
+   dispatches [`release.yml`](../.github/workflows/release.yml) (tags created
+   with `GITHUB_TOKEN` do not trigger workflows on their own), which runs the
+   quality gates, builds, and publishes to npm via Trusted Publishing.
+
+Day to day there is nothing to do beyond writing conventional commit messages
+and merging the release PR when you want to ship. The checklist below remains
+for the **manual tag** fallback (e.g. re-publishing an existing tag or cutting a
+release without release-please).
+
+## Manual fallback: before you tag
 
 ### 1. Ship the right revision
 
