@@ -337,7 +337,30 @@ test("default parallel behavior is unchanged and reports execution_mode", async 
     expect([...invocationOrder].sort()).toEqual(["a", "b"]);
     expect(result.metadata?.execution_mode).toBe("parallel");
     expect(result.findings).toHaveLength(2);
-    expect(result.outcomes).toHaveLength(2);
+    // Legacy definitions (no execution config) keep the pre-generalization
+    // result shape: no duplicated outcomes payload.
+    expect(result.outcomes).toBeUndefined();
+  });
+});
+
+test("explicit execution config opts in to generic outcomes", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const { adapter } = createScriptedAdapter({
+      a: { findings: [makeFinding("a", "a-1")] },
+    });
+    const definition: HarnessDefinition = {
+      id: "opt-in",
+      roles: [makeRole("a", "A.")],
+      execution: { mode: "parallel" },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+    });
+    const result = await orchestrator.run(makeRequest(scratchpadPath));
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes?.[0].kind).toBe("finding");
   });
 });
 

@@ -270,6 +270,10 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       ...extraMetadata,
     };
 
+    // Generic outcomes are the opt-in surface for execution-configured
+    // harnesses; legacy definitions keep the pre-generalization result
+    // shape (and its serialized size) untouched.
+    const includeOutcomes = this.options.definition.execution !== undefined;
     const result: HarnessRunResult = {
       runId: request.runId,
       status: statusFromOutcomes(findings, {
@@ -278,7 +282,9 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
         failedRoles,
       }),
       findings,
-      outcomes: findings.map(findingToHarnessOutcome),
+      ...(includeOutcomes
+        ? { outcomes: findings.map(findingToHarnessOutcome) }
+        : {}),
       artifacts,
       metadata,
     };
