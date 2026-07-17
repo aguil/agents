@@ -45,7 +45,7 @@ Documentation is split by audience.
 
 ### Maintainer operations
 
-- [release-checklist.md](release-checklist.md) — pre-tag gates, annotated tags,
-  jj push order, post-publish verification
+- [release-checklist.md](release-checklist.md) — release-please flow, release PR
+  checklist, post-publish verification and retries
 - [`BUILD.md`](../BUILD.md) — npm tarball pipeline, OIDC trusted publishing,
-  annotated release tags
+  release automation

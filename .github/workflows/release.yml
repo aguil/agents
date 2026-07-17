@@ -75,20 +75,3 @@ jobs:
             exit 0
           fi
           npm publish ./.npm-publish-pack --access public
-
-  github-release:
-    needs: publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/create-github-release-from-tag.sh
