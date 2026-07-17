@@ -40,6 +40,24 @@ export function contextRequestParam(
   return request.params?.[key];
 }
 
+function numberRequestParam(
+  request: ContextRequest,
+  key: string,
+): number | undefined {
+  const value = contextRequestParam(request, key);
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function stringRequestParam(
+  request: ContextRequest,
+  key: string,
+): string | undefined {
+  const value = contextRequestParam(request, key);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 export interface ContextArtifact {
   readonly id: string;
   readonly title: string;
@@ -308,7 +326,7 @@ export class PullRequestMetadataProvider implements ContextProvider {
     const pullRequest = await discoverPullRequest(
       request.workspacePath,
       this.commandRunner,
-      request.pullRequestNumber,
+      numberRequestParam(request, "pullRequestNumber"),
     );
     if (pullRequest === undefined) {
       return [
@@ -349,7 +367,7 @@ export class PullRequestReferencedDocsProvider implements ContextProvider {
     const pullRequest = await discoverPullRequest(
       request.workspacePath,
       this.commandRunner,
-      request.pullRequestNumber,
+      numberRequestParam(request, "pullRequestNumber"),
     );
     if (pullRequest === undefined) {
       return [
@@ -452,9 +470,10 @@ export class RepositoryDiffProvider implements ContextProvider {
   constructor(private readonly commandRunner: CommandRunner = runCommand) {}
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const { diff, baseRef, strategy, reviewPr } = request.diffPath
+    const diffPath = stringRequestParam(request, "diffPath");
+    const { diff, baseRef, strategy, reviewPr } = diffPath
       ? {
-          diff: await readFile(request.diffPath, "utf8"),
+          diff: await readFile(diffPath, "utf8"),
           baseRef: undefined,
           strategy: "explicit_diff_path",
           reviewPr: undefined,
@@ -462,7 +481,7 @@ export class RepositoryDiffProvider implements ContextProvider {
       : await collectReviewDiff(
           request.workspacePath,
           this.commandRunner,
-          request.pullRequestNumber,
+          numberRequestParam(request, "pullRequestNumber"),
         );
 
     if (strategy === "pr_diff_unavailable") {

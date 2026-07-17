@@ -6,6 +6,7 @@ import type { ContextRequest } from "@aguil/agents-context";
 import {
   contextRequestParam,
   FileGlobProvider,
+  RepositoryDiffProvider,
   ShellCommandProvider,
   StaticFileProvider,
 } from "@aguil/agents-context";
@@ -134,5 +135,32 @@ test("contextRequestParam prefers legacy fields, falls back to params", async ()
 
     const paramsOnly = makeRequest(workspacePath, { pullRequestNumber: 7 });
     expect(contextRequestParam(paramsOnly, "pullRequestNumber")).toBe(7);
+  });
+});
+
+test("RepositoryDiffProvider honors params-only diffPath", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const diffPath = join(workspacePath, "explicit.diff");
+    await writeFile(
+      diffPath,
+      [
+        "diff --git a/src/x.ts b/src/x.ts",
+        "--- a/src/x.ts",
+        "+++ b/src/x.ts",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+        "",
+      ].join("\n"),
+    );
+    // No deprecated top-level diffPath; params only.
+    const provider = new RepositoryDiffProvider(async () => undefined);
+    const artifacts = await provider.collect(
+      makeRequest(workspacePath, { diffPath }),
+    );
+    const strategy = artifacts.find((a) => a.id === "diff-strategy");
+    expect(strategy?.content).toContain("explicit_diff_path");
+    const diff = artifacts.find((a) => a.id === "workspace-diff");
+    expect(diff?.content).toContain("+new");
   });
 });
