@@ -10,9 +10,34 @@ import {
 
 export interface ContextRequest {
   readonly workspacePath: string;
-  readonly diffPath?: string;
-  readonly pullRequestNumber?: number;
   readonly scratchpadPath: string;
+  /**
+   * Harness-specific parameters. Generic providers read from here; the
+   * legacy top-level fields below are the code-review specialization and
+   * take precedence when both are set (migration window).
+   */
+  readonly params?: Readonly<Record<string, unknown>>;
+  /** @deprecated Use `params.diffPath`. */
+  readonly diffPath?: string;
+  /** @deprecated Use `params.pullRequestNumber`. */
+  readonly pullRequestNumber?: number;
+}
+
+/**
+ * Read a request parameter, preferring the legacy top-level field for the
+ * two code-review keys during the migration window.
+ */
+export function contextRequestParam(
+  request: ContextRequest,
+  key: string,
+): unknown {
+  if (key === "diffPath" && request.diffPath !== undefined) {
+    return request.diffPath;
+  }
+  if (key === "pullRequestNumber" && request.pullRequestNumber !== undefined) {
+    return request.pullRequestNumber;
+  }
+  return request.params?.[key];
 }
 
 export interface ContextArtifact {
@@ -125,6 +150,149 @@ export class AgentsInstructionsProvider implements ContextProvider {
       return [];
     }
   }
+}
+
+export interface StaticFileProviderOptions {
+  readonly id: string;
+  readonly path: string;
+  readonly title?: string;
+  /** Fail the run when the file is missing (default: emit nothing). */
+  readonly required?: boolean;
+  readonly maxBytes?: number;
+}
+
+/** Generic provider: read one file (relative to workspace or absolute). */
+export class StaticFileProvider implements ContextProvider {
+  readonly name = "static-file";
+
+  constructor(private readonly options: StaticFileProviderOptions) {}
+
+  async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
+    const path = isAbsolute(this.options.path)
+      ? this.options.path
+      : join(request.workspacePath, this.options.path);
+    let content: string;
+    try {
+      content = await readFile(path, "utf8");
+    } catch (error) {
+      if (this.options.required === true) {
+        throw new Error(
+          `static-file provider "${this.options.id}" could not read required file ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return [];
+    }
+    return [
+      {
+        id: this.options.id,
+        title: this.options.title ?? this.options.path,
+        path,
+        content: truncateArtifactContent(content, this.options.maxBytes),
+      },
+    ];
+  }
+}
+
+export interface ShellCommandProviderOptions {
+  readonly id: string;
+  readonly cmd: readonly string[];
+  readonly title?: string;
+  readonly maxBytes?: number;
+  readonly commandRunner?: CommandRunner;
+}
+
+/**
+ * Generic provider: run a command in the workspace and capture stdout.
+ * A failing command yields an artifact recording the failure rather than
+ * aborting context assembly (context is advisory, not a gate).
+ */
+export class ShellCommandProvider implements ContextProvider {
+  readonly name = "shell-command";
+
+  private readonly commandRunner: CommandRunner;
+
+  constructor(private readonly options: ShellCommandProviderOptions) {
+    this.commandRunner = options.commandRunner ?? runCommand;
+  }
+
+  async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
+    const stdout = await this.commandRunner(
+      this.options.cmd,
+      request.workspacePath,
+    );
+    const content =
+      stdout === undefined
+        ? `Command failed: ${this.options.cmd.join(" ")}`
+        : stdout.trim().length === 0
+          ? "(command produced no output)"
+          : stdout;
+    return [
+      {
+        id: this.options.id,
+        title: this.options.title ?? this.options.cmd.join(" "),
+        content: truncateArtifactContent(content, this.options.maxBytes),
+      },
+    ];
+  }
+}
+
+export interface FileGlobProviderOptions {
+  readonly id?: string;
+  readonly pattern: string;
+  readonly maxFiles?: number;
+  readonly maxBytesPerFile?: number;
+}
+
+/** Generic provider: collect files matching a glob under the workspace. */
+export class FileGlobProvider implements ContextProvider {
+  readonly name = "file-glob";
+
+  constructor(private readonly options: FileGlobProviderOptions) {}
+
+  async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
+    const glob = new Bun.Glob(this.options.pattern);
+    const matches: string[] = [];
+    for await (const match of glob.scan({
+      cwd: request.workspacePath,
+      dot: false,
+    })) {
+      matches.push(match);
+    }
+    matches.sort();
+    const limited = matches.slice(0, this.options.maxFiles ?? 5);
+    const idPrefix = this.options.id ?? "file-glob";
+
+    const artifacts: ContextArtifact[] = [];
+    for (const relativePath of limited) {
+      const path = join(request.workspacePath, relativePath);
+      try {
+        artifacts.push({
+          id: `${idPrefix}:${relativePath}`,
+          title: relativePath,
+          path,
+          content: truncateArtifactContent(
+            await readFile(path, "utf8"),
+            this.options.maxBytesPerFile,
+          ),
+        });
+      } catch {
+        // Unreadable match (permissions, race); skip rather than abort.
+      }
+    }
+    return artifacts;
+  }
+}
+
+const DEFAULT_ARTIFACT_MAX_BYTES = 50_000;
+
+function truncateArtifactContent(
+  content: string,
+  maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
+): string {
+  if (Buffer.byteLength(content, "utf8") <= maxBytes) {
+    return content;
+  }
+  return `${Buffer.from(content, "utf8").subarray(0, maxBytes).toString("utf8")}\n[truncated at ${maxBytes} bytes]`;
 }
 
 export class PullRequestMetadataProvider implements ContextProvider {
