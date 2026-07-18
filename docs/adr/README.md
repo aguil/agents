@@ -33,3 +33,7 @@ shared package boundaries.
   — ADR 0008: env-carried per-role policy enforcement — role-invariant hook
   config, `AGENTS_POLICY_ID`/`AGENTS_AGENTS_DIR` per spawn, `@none` token,
   per-role policies in all execution modes (supersedes ADR 0007 §3/§5 carrier).
+- [0009-spec-v0.2-hook-scoping-and-bridge-cost.md](0009-spec-v0.2-hook-scoping-and-bridge-cost.md)
+  — ADR 0009: spec v0.2 `applies_to` hook event-class scoping (#71), policy
+  bridge per-hook cost accepted with measurement (#70), `agents hooks test`
+  probe surface.

@@ -162,6 +162,17 @@ export async function main(
     return await runHarnessRunCli(argv.slice(2));
   }
 
+  if (argv[0] === "hooks") {
+    if (argv[1] !== "test") {
+      console.error(
+        "Usage: agents hooks test --policy <id> --agents-dir <dir> --event <name> [--tool <name>] [--input <json>] [--file <path>] [--format text|json]",
+      );
+      return 1;
+    }
+    const { runHooksTestCli } = await import("./hooks-test-main");
+    return await runHooksTestCli(argv.slice(2));
+  }
+
   if (argv[0] === "pr-feedback") {
     const { runPrFeedbackCli } = await import("./pr-feedback-main");
     return await runPrFeedbackCli(argv.slice(1));
