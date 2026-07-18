@@ -74,15 +74,30 @@ function sortKeys(keys: readonly FindingKey[]): readonly FindingKey[] {
 
 /**
  * Statuses that derive purely from findings. Recorded `error` statuses come
- * from live process failures (spawn errors, timeouts) that stdout replay
- * cannot reproduce, so status comparison is scoped to this set — findings
- * and tier still compare for every entry.
+ * from live process failures (spawn errors) that stdout replay cannot
+ * reproduce, so status comparison is scoped to this set — findings and tier
+ * still compare for every entry.
  */
 const FINDING_DERIVED_STATUSES: ReadonlySet<string> = new Set([
   "passed",
   "warnings",
   "failed",
 ]);
+
+/**
+ * Whether the recorded status is comparable under replay. Role timeouts map
+ * the overall status to `warnings` even with unchanged findings, and replay
+ * does not re-enforce live timeouts — so entries with timed-out roles would
+ * report spurious status deltas despite matching findings. Findings and
+ * tier still compare for those entries.
+ */
+function statusComparable(recorded: RecordedResult): boolean {
+  const status = recorded.status ?? "?";
+  if (!FINDING_DERIVED_STATUSES.has(status)) {
+    return false;
+  }
+  return (recorded.metadata?.timed_out_roles ?? "") === "";
+}
 
 export function computeDelta(
   recorded: RecordedResult,
@@ -116,7 +131,7 @@ export function computeDelta(
   const replayedTier = replayed.metadata?.triage ?? "?";
 
   const recordedStatus = recorded.status ?? "?";
-  const compareStatus = FINDING_DERIVED_STATUSES.has(recordedStatus);
+  const compareStatus = statusComparable(recorded);
 
   const delta: ParityDelta = {
     ...(missingFromReplay.length > 0 ? { missingFromReplay } : {}),

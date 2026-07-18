@@ -88,6 +88,27 @@ test("recorded error statuses are excluded from status comparison", () => {
   expect(delta).toBeUndefined();
 });
 
+test("timeout-derived warnings are excluded from status comparison", () => {
+  // Role timeouts map overall status to warnings even with unchanged
+  // findings; replay does not re-enforce live timeouts, so such entries
+  // would otherwise report spurious status deltas. Findings still compare.
+  const timedOut = {
+    status: "warnings",
+    findings: [],
+    metadata: { triage: "full", timed_out_roles: "performance" },
+  };
+  expect(computeDelta(timedOut, replayed([], { status: "passed" }))).toBe(
+    undefined,
+  );
+  // Finding deltas on a timed-out entry still surface.
+  const withFinding = computeDelta(
+    { ...timedOut, findings: [finding()] },
+    replayed([], { status: "passed" }),
+  );
+  expect(withFinding?.missingFromReplay).toHaveLength(1);
+  expect(withFinding?.status).toBeUndefined();
+});
+
 test("deltaHash is stable across object key order and distinct per delta", () => {
   const a = computeDelta(
     { status: "passed", findings: [], metadata: { triage: "lite" } },
