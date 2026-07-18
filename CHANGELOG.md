@@ -10,6 +10,32 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.1](https://github.com/aguil/agents/compare/v0.4.0...v0.4.1) (2026-07-18)
+
+
+### Added
+
+* **context:** generalize ContextRequest with params; add generic providers ([e2d7dee](https://github.com/aguil/agents/commit/e2d7deef308e58da270f1bf80a5a007ee570db4d))
+* **core:** introduce generic HarnessOutcome with Finding as code-review subtype ([b973b67](https://github.com/aguil/agents/commit/b973b6797e18b2b751f4ec4b4ad893a1d5a34a40))
+* **orchestration:** add chain and validation-loop execution modes ([65119d9](https://github.com/aguil/agents/commit/65119d91839d3a88d23d9397f0e5c859bf5690ba))
+* **workers:** replace hard-coded worker kind switch with a registry ([a0da836](https://github.com/aguil/agents/commit/a0da836191596313faaa4c08a467b9aa6946efd4))
+
+
+### Fixed
+
+* **context:** bound FileGlobProvider memory and scan time ([1a5ea99](https://github.com/aguil/agents/commit/1a5ea99abf984893c72661d9413b877fc0958ab5))
+* **context:** constrain file providers to the workspace root ([990613c](https://github.com/aguil/agents/commit/990613cd9fb73c7d9accc97a95546bccf06fdd9f))
+* **context:** read at most maxBytes+1 instead of whole files ([5a46c3c](https://github.com/aguil/agents/commit/5a46c3cb3b2bee7262a306736992c216b7c9096e))
+* **context:** resolve symlinks before workspace containment check ([c44df63](https://github.com/aguil/agents/commit/c44df63f8bfc43fd666a9e118a0c5aca65e2d33f))
+* **context:** route provider PR/diff inputs through contextRequestParam ([ca27f2f](https://github.com/aguil/agents/commit/ca27f2fb3ef7cb7433bf5b2eb7d048644782a58c))
+* **orchestration:** emit outcomes only for execution-configured harnesses ([95380fd](https://github.com/aguil/agents/commit/95380fd70a8c6d637b2c3f5bb81cd7c7a95a5e8e))
+* **orchestration:** make chain/truncation comments self-contained ([9f1ab3d](https://github.com/aguil/agents/commit/9f1ab3ddc56389d1419a0c42833af5635fee6c33))
+
+
+### Performance
+
+* **orchestration:** truncate role output without splitting all lines ([c932291](https://github.com/aguil/agents/commit/c93229121f076a56d67d239e13d9fbd024c1f0e6))
+
 ## [0.4.0](https://github.com/aguil/agents/compare/v0.3.0...v0.4.0) (2026-07-17)
 
 
