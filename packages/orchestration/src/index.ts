@@ -196,6 +196,10 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     const extraMetadata: Record<string, string> = {
       execution_mode: execution.mode,
     };
+    // Internal convergence gate (validation-loop only): false => the loop
+    // exhausted maxRounds without satisfying passWhen, which must fail the
+    // run independently of the external passGate.
+    let internalGatePassed: boolean | undefined;
 
     switch (execution.mode) {
       case "parallel":
@@ -209,11 +213,14 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
         roleOutcomes = loop.roleOutcomes;
         extraMetadata.validation_rounds = String(loop.rounds);
         extraMetadata.validation_passed = String(loop.passed);
+        internalGatePassed = loop.passed;
         break;
       }
     }
 
-    return this.assembleResult(request, roleOutcomes, extraMetadata);
+    return this.assembleResult(request, roleOutcomes, extraMetadata, {
+      internalGatePassed,
+    });
   }
 
   private async runParallel(
@@ -315,6 +322,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     request: HarnessRunRequest,
     outcomes: readonly RoleRunOutcome[],
     extraMetadata: Readonly<Record<string, string>>,
+    gates: { readonly internalGatePassed?: boolean } = {},
   ): Promise<HarnessRunResult> {
     const findings = outcomes.flatMap((outcome) => outcome.findings);
     const artifacts = outcomes.flatMap((outcome) => outcome.artifacts);
@@ -349,6 +357,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
           strictMode: request.strictMode === true,
           timedOutRoles,
           failedRoles,
+          internalGatePassed: gates.internalGatePassed,
         })
       : statusFromOutcomes(findings, {
           strictMode: request.strictMode === true,
@@ -382,12 +391,18 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     readonly strictMode: boolean;
     readonly timedOutRoles: readonly string[];
     readonly failedRoles: readonly string[];
+    readonly internalGatePassed?: boolean;
   }): Promise<HarnessRunResult["status"]> {
     if (input.failedRoles.length > 0) {
       return "error";
     }
     if (input.strictMode && input.timedOutRoles.length > 0) {
       return "error";
+    }
+    // Internal convergence gate (validation-loop) fails the run regardless
+    // of the external passGate.
+    if (input.internalGatePassed === false) {
+      return "failed";
     }
     if (this.options.passGate !== undefined) {
       const passed = await this.options.passGate({

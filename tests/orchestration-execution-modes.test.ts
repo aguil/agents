@@ -326,6 +326,8 @@ test("validation-loop stops at maxRounds without passing", async () => {
 
     expect(result.metadata?.validation_rounds).toBe("2");
     expect(result.metadata?.validation_passed).toBe("false");
+    // An unconverged loop must fail the run, not silently pass.
+    expect(result.status).toBe("failed");
   });
 });
 
