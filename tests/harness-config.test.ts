@@ -37,6 +37,58 @@ test("loadHarness maps harness.yaml to orchestration types", async () => {
     mode: "chain",
     order: ["scout", "diagnose"],
   });
+
+  const preToolCall = loaded.hooks.pre_tool_call ?? [];
+  expect(preToolCall).toHaveLength(1);
+  expect(preToolCall[0].matcher).toBe("Execute");
+  expect(preToolCall[0].timeoutS).toBe(10);
+  expect(preToolCall[0].command).toBe(
+    join(fixturesDir, "harnesses", "triage-demo", "hooks", "validate-shell.sh"),
+  );
+  expect(loaded.hooks.run_end?.[0].command).toBe("echo done");
+});
+
+test("loadHarness rejects unsupported hook events and handler types", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "hooked");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.1"',
+        "kind: harness",
+        "harness: { id: hooked }",
+        "roles: { a: { description: A } }",
+        "hooks:",
+        "  mystery_event:",
+        '    - command: "x"',
+      ].join("\n"),
+    );
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "hooked" }),
+    ).rejects.toThrow('hooks event "mystery_event" is not supported');
+
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.1"',
+        "kind: harness",
+        "harness: { id: hooked }",
+        "roles: { a: { description: A } }",
+        "hooks:",
+        "  pre_tool_call:",
+        '    - prompt: "judge this"',
+      ].join("\n"),
+    );
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "hooked" }),
+    ).rejects.toThrow("command handlers only");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
 });
 
 test("loadHarness resolves the referenced policy", async () => {

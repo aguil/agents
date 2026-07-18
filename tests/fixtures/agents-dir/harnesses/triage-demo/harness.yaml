@@ -21,3 +21,11 @@ roles:
 execution:
   mode: chain
   order: [scout, diagnose]
+
+hooks:
+  pre_tool_call:
+    - matcher: "Execute"
+      command: "$HARNESS_DIR/hooks/validate-shell.sh"
+      timeout_s: 10
+  run_end:
+    - command: "echo done"

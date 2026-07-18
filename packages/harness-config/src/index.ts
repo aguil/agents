@@ -39,6 +39,29 @@ const CONFIRMATION_CATEGORIES: ReadonlySet<string> = new Set([
   "filesystem.write",
 ]);
 
+export const HOOK_EVENTS = [
+  "pre_tool_call",
+  "post_tool_call",
+  "role_start",
+  "role_stop",
+  "run_start",
+  "run_end",
+] as const;
+
+export type HookEvent = (typeof HOOK_EVENTS)[number];
+
+/** Command handler — the only handler type in spec v0.1. */
+export interface HookHandlerSpec {
+  readonly command: string;
+  /** Regex over tool names (e.g. "Execute", "Create|Edit"). */
+  readonly matcher?: string;
+  readonly timeoutS?: number;
+}
+
+export type HooksSpec = Readonly<
+  Partial<Record<HookEvent, readonly HookHandlerSpec[]>>
+>;
+
 export interface HarnessManifest {
   readonly specVersion?: string;
   readonly enabledHarnesses: readonly string[];
@@ -47,6 +70,7 @@ export interface HarnessManifest {
 export interface LoadedHarness {
   readonly definition: HarnessDefinition;
   readonly policy?: PolicySpec;
+  readonly hooks: HooksSpec;
   /** Directory containing harness.yaml (prompt paths resolve against it). */
   readonly harnessDir: string;
 }
@@ -354,6 +378,60 @@ function parseExecution(
   }
 }
 
+function parseHooks(value: unknown, harnessDir: string): HooksSpec {
+  if (value === undefined) {
+    return {};
+  }
+  const record = asRecord(value, "hooks");
+  const events = new Set<string>(HOOK_EVENTS);
+  const hooks: Partial<Record<HookEvent, readonly HookHandlerSpec[]>> = {};
+  for (const [event, handlersValue] of Object.entries(record)) {
+    if (!events.has(event)) {
+      fail(
+        `hooks event "${event}" is not supported (${HOOK_EVENTS.join(", ")})`,
+      );
+    }
+    if (!Array.isArray(handlersValue)) {
+      fail(`hooks.${event} must be a list of handlers`);
+    }
+    hooks[event as HookEvent] = handlersValue.map((handlerValue, index) => {
+      const handler = asRecord(handlerValue, `hooks.${event}[${index}]`);
+      const unknownKeys = Object.keys(handler).filter(
+        (key) => !["command", "matcher", "timeout_s"].includes(key),
+      );
+      if (unknownKeys.length > 0) {
+        fail(
+          `hooks.${event}[${index}] has unsupported fields: ${unknownKeys.join(", ")} (spec v0.1 supports command handlers only)`,
+        );
+      }
+      const commandRaw = requiredString(
+        handler.command,
+        `hooks.${event}[${index}].command`,
+      );
+      return {
+        command: commandRaw.replaceAll("$HARNESS_DIR", harnessDir),
+        ...(handler.matcher === undefined
+          ? {}
+          : {
+              matcher: requiredString(
+                handler.matcher,
+                `hooks.${event}[${index}].matcher`,
+              ),
+            }),
+        ...(handler.timeout_s === undefined
+          ? {}
+          : {
+              timeoutS: optionalPositiveInt(
+                handler.timeout_s,
+                `hooks.${event}[${index}].timeout_s`,
+              ),
+            }),
+      };
+    });
+  }
+  return hooks;
+}
+
 /**
  * Load one harness definition from `.agents/harnesses/<id>/harness.yaml`,
  * resolving a `policy: <id>` reference against `.agents/policies/<id>.yaml`.
@@ -398,6 +476,7 @@ export async function loadHarness(
   const roleIds = new Set(roles.map((role) => role.id));
 
   const execution = parseExecution(parsed.execution, roleIds);
+  const hooks = parseHooks(parsed.hooks, harnessDir);
 
   const policyId = optionalString(parsed.policy, "policy");
   const policy =
@@ -428,6 +507,7 @@ export async function loadHarness(
   return {
     definition,
     ...(policy === undefined ? {} : { policy }),
+    hooks,
     harnessDir,
   };
 }
