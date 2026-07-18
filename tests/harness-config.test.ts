@@ -777,3 +777,76 @@ test("loadHarness rejects malformed output schemas and finding pipelines", async
     await rm(scratch, { recursive: true, force: true });
   }
 });
+
+test("loadHarness carries a supported reporting template", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "reported");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: reported }",
+        "roles: { a: { description: A } }",
+        "reporting:",
+        "  template: builtin:outcomes-markdown",
+      ].join("\n"),
+    );
+
+    const loaded = await loadHarness({
+      agentsDir: scratch,
+      harnessId: "reported",
+    });
+    expect(loaded.reportingTemplate).toBe("builtin:outcomes-markdown");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("loadHarness rejects malformed reporting sections", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "reported");
+    await mkdir(dir, { recursive: true });
+    const writeReporting = (lines: readonly string[]) =>
+      writeFile(
+        join(dir, "harness.yaml"),
+        [
+          'spec_version: "0.2"',
+          "kind: harness",
+          "harness: { id: reported }",
+          "roles: { a: { description: A } }",
+          ...lines,
+        ].join("\n"),
+      );
+
+    await writeReporting(["reporting:", "  template: builtin:unknown"]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "reported" }),
+    ).rejects.toThrow(
+      'reporting.template has unknown template "builtin:unknown" (supported: builtin:code-review-markdown, builtin:outcomes-markdown)',
+    );
+
+    await writeReporting([
+      "reporting:",
+      "  template: builtin:outcomes-markdown",
+      "  format: markdown",
+    ]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "reported" }),
+    ).rejects.toThrow("reporting has unsupported fields: format");
+
+    await writeReporting(["reporting: []"]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "reported" }),
+    ).rejects.toThrow("reporting must be a mapping");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
