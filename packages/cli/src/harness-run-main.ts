@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createRunId, writeJsonFile } from "@aguil/agents-core";
 import type { AgentAdapter } from "@aguil/agents-execution";
@@ -15,6 +15,9 @@ import {
   renderCursorHooksConfig,
 } from "@aguil/agents-hooks";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
+import { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
+
+export { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
 
 const SUPPORTED_ADAPTERS = ["cursor", "claude", "opencode", "fake"] as const;
 type AdapterName = (typeof SUPPORTED_ADAPTERS)[number];
@@ -94,51 +97,67 @@ function constructAdapter(name: AdapterName): AgentAdapter {
   }
 }
 
+type EnforcementArgs = Pick<
+  HarnessRunArgs,
+  "adapter" | "agentsDir" | "workspace" | "agentsCli" | "allowUnenforcedPolicy"
+>;
+
 /**
- * Write `.cursor/hooks.json` for a single role's effective policy. Because
- * Cursor reads one workspace-level hook config, per-role enforcement is
- * achieved by regenerating this file immediately before each role runs (via
- * the orchestrator's onRoleStart). Cursor adapter only in v1.
+ * Write the role-invariant `.cursor/hooks.json`. Policy identity is NOT in
+ * this file — it travels via per-spawn env (ADR 0008) — so the bytes are
+ * identical for every role and run of this harness. The write is atomic
+ * (temp + rename) so a hook process or concurrent run reading mid-write
+ * never observes partial JSON, which could silently drop enforcement.
  */
-async function writeRoleHooks(
+async function writeCanonicalHooks(
   loaded: LoadedHarness,
-  args: HarnessRunArgs,
-  policyId: string | undefined,
+  args: EnforcementArgs,
 ): Promise<void> {
   const { config } = generateCursorHooksConfig({
     hooks: loaded.hooks,
-    policyId,
-    agentsDir: resolve(args.agentsDir),
+    policyBridge: harnessDeclaresPolicy(loaded),
     agentsCli: args.agentsCli,
   });
   const cursorDir = join(resolve(args.workspace), ".cursor");
   await mkdir(cursorDir, { recursive: true });
-  await writeFile(
-    join(cursorDir, "hooks.json"),
-    renderCursorHooksConfig(config),
+  const finalPath = join(cursorDir, "hooks.json");
+  // pid+timestamp is not unique under same-process concurrency (interleaved
+  // onRoleStart callbacks share both), so a random component is required for
+  // the rename source to survive until its own rename.
+  const tempPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
+  await writeFile(tempPath, renderCursorHooksConfig(config));
+  await rename(tempPath, finalPath);
+}
+
+function harnessDeclaresPolicy(loaded: LoadedHarness): boolean {
+  return (
+    loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0
   );
 }
 
 /**
- * Decide how hook config is materialized for this run.
+ * Set up policy enforcement for this run (ADR 0008).
  *
- * Per-role regeneration rewrites the single workspace `.cursor/hooks.json`
- * before each role, which is only race-free when roles run sequentially
- * (chain mode). For parallel and validation-loop modes we generate once
- * from the harness-level policy and warn about any role whose stricter
- * own-policy is therefore not enforced. Returns the onRoleStart callback
- * (chain) or undefined after doing one-shot generation (other modes).
+ * The hook config file only registers the env-reading policy bridge; the
+ * per-role policy id travels in each role's subprocess environment via
+ * roleEnv, so enforcement works identically in chain, parallel, and
+ * validation-loop modes and cannot cross-contaminate concurrent runs.
+ * onRoleStart still regenerates the (constant) file before every role as
+ * tamper repair — safe to interleave because all writers produce the same
+ * bytes and the write is atomic.
  */
-async function setUpHookEnforcement(
+export async function setUpHookEnforcement(
   loaded: LoadedHarness,
-  args: HarnessRunArgs,
+  args: EnforcementArgs,
 ): Promise<
-  | { readonly onRoleStart?: (roleId: string) => Promise<void> }
+  | {
+      readonly onRoleStart?: (roleId: string) => Promise<void>;
+      readonly roleEnv?: (roleId: string) => Readonly<Record<string, string>>;
+    }
   | { readonly error: string }
 > {
   const hasHooks = Object.keys(loaded.hooks).length > 0;
-  const hasAnyPolicy =
-    loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0;
+  const hasAnyPolicy = harnessDeclaresPolicy(loaded);
   if (!hasHooks && !hasAnyPolicy) {
     return {};
   }
@@ -160,36 +179,25 @@ async function setUpHookEnforcement(
     return {};
   }
 
-  const mode = loaded.definition.execution?.mode ?? "parallel";
-  if (mode === "chain") {
-    return {
-      // Regenerate unconditionally at every role start. Skipping the rewrite
-      // when the policy id is unchanged would let a role tamper with
-      // .cursor/hooks.json and have the next same-policy role reuse it; a
-      // governance surface must re-establish canonical enforcement per role.
-      // The idempotent JSON write is negligible next to that bypass window.
-      onRoleStart: async (roleId: string) => {
-        const policyId = roleEffectivePolicyId(loaded, roleId);
-        await writeRoleHooks(loaded, args, policyId);
-        console.warn(
-          `harness run: role "${roleId}" enforced under policy "${policyId ?? "(none)"}"`,
-        );
-      },
-    };
-  }
-
-  // Non-sequential: one-shot generation from the harness-level policy;
-  // per-role regeneration would race on the shared hooks file.
-  await writeRoleHooks(loaded, args, loaded.policy?.id);
-  const coarsened = Object.keys(loaded.rolePolicies).filter(
-    (roleId) => loaded.rolePolicies[roleId]?.id !== loaded.policy?.id,
-  );
-  if (coarsened.length > 0) {
-    console.warn(
-      `harness run: ${mode} mode enforces the harness-level policy "${loaded.policy?.id ?? "(none)"}" for all roles; per-role policies for [${coarsened.join(", ")}] require chain mode`,
-    );
-  }
-  return {};
+  await writeCanonicalHooks(loaded, args);
+  const agentsDir = resolve(args.agentsDir);
+  return {
+    onRoleStart: async (roleId: string) => {
+      await writeCanonicalHooks(loaded, args);
+      console.warn(
+        `harness run: role "${roleId}" enforced under policy "${roleEffectivePolicyId(loaded, roleId) ?? "(none)"}"`,
+      );
+    },
+    ...(hasAnyPolicy
+      ? {
+          roleEnv: (roleId: string) => ({
+            AGENTS_POLICY_ID:
+              roleEffectivePolicyId(loaded, roleId) ?? POLICY_NONE_TOKEN,
+            AGENTS_AGENTS_DIR: agentsDir,
+          }),
+        }
+      : {}),
+  };
 }
 
 /**
@@ -264,6 +272,7 @@ export async function runHarnessRunCli(
     return 1;
   }
   const onRoleStart = enforcement.onRoleStart;
+  const roleEnv = enforcement.roleEnv;
 
   const workspacePath = resolve(parsed.workspace);
   const runId = createRunId(`harness-${parsed.harnessId}`);
@@ -288,6 +297,7 @@ export async function runHarnessRunCli(
     adapter: constructAdapter(parsed.adapter),
     contextBundlePath,
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
+    ...(roleEnv === undefined ? {} : { roleEnv }),
     ...(passGate === undefined ? {} : { passGate }),
   });
 

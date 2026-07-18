@@ -117,21 +117,132 @@ test("a policy-declaring harness fails closed on a non-cursor adapter", async ()
   }
 });
 
-test("parallel mode does not attach per-role regeneration (no race)", async () => {
+test("enforcement provides per-role env in every mode; hooks file is role-invariant (ADR 0008)", async () => {
   const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement, POLICY_NONE_TOKEN } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
   const loaded = await loadHarness({
     agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
     harnessId: "incident-triage",
   });
-  // The example is chain mode; assert the guard keys off execution mode by
-  // confirming the chain path reports per-role enforcement (covered above)
-  // and that a parallel definition would warn about coarsening instead.
-  // Here we assert the mode gate directly through the exported helper.
-  const { roleEffectivePolicyId } = await import(
+  const workspace = await mkdtemp(join(tmpdir(), "harness-env-"));
+  try {
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "cursor",
+      agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+      workspace,
+      allowUnenforcedPolicy: false,
+    });
+    if ("error" in enforcement) {
+      throw new Error(enforcement.error);
+    }
+    // Per-role policy identity travels via env, not the hooks file.
+    expect(enforcement.roleEnv?.("fix")?.AGENTS_POLICY_ID).toBe("triage-fix");
+    expect(enforcement.roleEnv?.("scout")?.AGENTS_POLICY_ID).toBe(
+      "triage-readonly",
+    );
+    expect(enforcement.roleEnv?.("scout")?.AGENTS_AGENTS_DIR).toContain(
+      ".agents",
+    );
+    // incident-triage declares a harness-level default, so a role absent
+    // from rolePolicies inherits it rather than the @none token.
+    expect(enforcement.roleEnv?.("not-a-role")?.AGENTS_POLICY_ID).toBe(
+      "triage-readonly",
+    );
+    expect(POLICY_NONE_TOKEN).toBe("@none");
+
+    // The generated hooks file embeds no policy id and is byte-identical
+    // regardless of which role runs next (onRoleStart rewrites are
+    // idempotent tamper repair).
+    const hooksPath = join(workspace, ".cursor", "hooks.json");
+    const before = await Bun.file(hooksPath).text();
+    expect(before).toContain("policy-eval");
+    expect(before).not.toContain("triage-fix");
+    expect(before).not.toContain("triage-readonly");
+    expect(before).not.toContain("--policy");
+    await enforcement.onRoleStart?.("fix");
+    const afterFix = await Bun.file(hooksPath).text();
+    expect(afterFix).toBe(before);
+    await enforcement.onRoleStart?.("scout");
+    expect(await Bun.file(hooksPath).text()).toBe(before);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("a role tampering with hooks.json cannot weaken the next role's enforcement", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
     "../packages/cli/src/harness-run-main"
   );
-  expect(loaded.definition.execution?.mode).toBe("chain");
-  expect(roleEffectivePolicyId(loaded, "fix")).toBe("triage-fix");
+  const loaded = await loadHarness({
+    agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+    harnessId: "incident-triage",
+  });
+  const workspace = await mkdtemp(join(tmpdir(), "harness-tamper-"));
+  try {
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "cursor",
+      agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+      workspace,
+      allowUnenforcedPolicy: false,
+    });
+    if ("error" in enforcement) {
+      throw new Error(enforcement.error);
+    }
+    const hooksPath = join(workspace, ".cursor", "hooks.json");
+    const canonical = await Bun.file(hooksPath).text();
+    // Simulate a role stripping the policy bridge mid-run.
+    await Bun.write(hooksPath, '{"version":1,"hooks":{}}\n');
+    // The next role start must restore canonical enforcement.
+    await enforcement.onRoleStart?.("verify");
+    expect(await Bun.file(hooksPath).text()).toBe(canonical);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("concurrent runs sharing a workspace converge on identical enforcement bytes", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const loaded = await loadHarness({
+    agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+    harnessId: "incident-triage",
+  });
+  const workspace = await mkdtemp(join(tmpdir(), "harness-concurrent-"));
+  try {
+    const args = {
+      adapter: "cursor" as const,
+      agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+      workspace,
+      allowUnenforcedPolicy: false,
+    };
+    const [a, b] = await Promise.all([
+      setUpHookEnforcement(loaded, args),
+      setUpHookEnforcement(loaded, args),
+    ]);
+    if ("error" in a || "error" in b) {
+      throw new Error("enforcement setup failed");
+    }
+    const hooksPath = join(workspace, ".cursor", "hooks.json");
+    const settled = await Bun.file(hooksPath).text();
+    // Interleave role starts from both "runs" — every write is the same
+    // bytes, so ordering is irrelevant and no run can weaken the other.
+    await Promise.all([
+      a.onRoleStart?.("fix"),
+      b.onRoleStart?.("scout"),
+      a.onRoleStart?.("verify"),
+    ]);
+    expect(await Bun.file(hooksPath).text()).toBe(settled);
+    // Policy divergence between the runs lives in env, never in the file.
+    expect(a.roleEnv?.("fix")?.AGENTS_POLICY_ID).toBe("triage-fix");
+    expect(b.roleEnv?.("scout")?.AGENTS_POLICY_ID).toBe("triage-readonly");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("roleEffectivePolicyId resolves role override over harness default", async () => {
