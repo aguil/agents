@@ -416,6 +416,87 @@ test("generic outcome events are collected and flow through {previous}", async (
   });
 });
 
+test("generalized-harness status ignores finding severity (diagnostic findings do not fail the run)", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    // A role emits a critical finding describing the problem it worked on;
+    // for a generalized harness that must NOT fail the run.
+    const critical: Finding = {
+      ...makeFinding("scout", "scout-crit"),
+      severity: "critical",
+    };
+    const { adapter } = createScriptedAdapter({
+      scout: { findings: [critical] },
+      fix: {},
+    });
+    const definition: HarnessDefinition = {
+      id: "triage",
+      roles: [makeRole("scout", "Investigate."), makeRole("fix", "Fix.")],
+      execution: { mode: "chain" },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+    });
+    const result = await orchestrator.run(makeRequest(scratchpadPath));
+    expect(result.status).toBe("passed");
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].severity).toBe("critical");
+  });
+});
+
+test("passGate false fails a generalized run; true passes it", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const definition: HarnessDefinition = {
+      id: "triage",
+      roles: [makeRole("fix", "Fix.")],
+      execution: { mode: "chain" },
+    };
+    const { adapter } = createScriptedAdapter({ fix: {} });
+    const failing = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+      passGate: () => false,
+    });
+    expect((await failing.run(makeRequest(scratchpadPath))).status).toBe(
+      "failed",
+    );
+    const passing = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+      passGate: () => true,
+    });
+    expect((await passing.run(makeRequest(scratchpadPath))).status).toBe(
+      "passed",
+    );
+  });
+});
+
+test("legacy harness (no execution) keeps finding-severity status", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const critical: Finding = {
+      ...makeFinding("a", "a-crit"),
+      severity: "critical",
+    };
+    const { adapter } = createScriptedAdapter({ a: { findings: [critical] } });
+    const definition: HarnessDefinition = {
+      id: "legacy",
+      roles: [makeRole("a", "A.")],
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+    });
+    // No execution config → code-review semantics: critical finding fails.
+    expect((await orchestrator.run(makeRequest(scratchpadPath))).status).toBe(
+      "failed",
+    );
+  });
+});
+
 test("onRoleStart fires before each role in chain order", async () => {
   await withScratchpad(async (scratchpadPath) => {
     const { adapter } = createScriptedAdapter({ a: {}, b: {}, c: {} });

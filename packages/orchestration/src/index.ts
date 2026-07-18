@@ -141,6 +141,23 @@ export interface NativeBunOrchestratorOptions {
    * setup.
    */
   readonly onRoleStart?: (roleId: string) => Promise<void> | void;
+  /**
+   * Authoritative pass gate for execution-configured (generalized)
+   * harnesses. Evaluated after all roles complete without failing/timing
+   * out; `false` makes the run `failed`, `true`/absent makes it `passed`.
+   *
+   * Deliberately runtime-evaluated rather than inferred from role output:
+   * findings/outcomes emitted by a real agent are diagnostic narrative and
+   * must not drive status (a healed incident whose scout described the bug
+   * as "critical" must still pass). Callers wire this to a deterministic
+   * check — e.g. running the harness's `pass_check` command in the
+   * workspace. Ignored for legacy harnesses (no `execution` config), which
+   * keep finding-severity status.
+   */
+  readonly passGate?: (result: {
+    readonly findings: readonly Finding[];
+    readonly outcomes: readonly HarnessOutcome[];
+  }) => Promise<boolean> | boolean;
 }
 
 interface RoleRunOutcome {
@@ -315,18 +332,26 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     // Generic outcomes are the opt-in surface for execution-configured
     // harnesses; legacy definitions keep the pre-generalization result
     // shape (and its serialized size) untouched.
-    const includeOutcomes = this.options.definition.execution !== undefined;
+    const isGeneralized = this.options.definition.execution !== undefined;
+    const harnessOutcomes = outcomes.flatMap(roleHarnessOutcomes);
+    const status = isGeneralized
+      ? await this.generalizedStatus({
+          findings,
+          outcomes: harnessOutcomes,
+          strictMode: request.strictMode === true,
+          timedOutRoles,
+          failedRoles,
+        })
+      : statusFromOutcomes(findings, {
+          strictMode: request.strictMode === true,
+          timedOutRoles,
+          failedRoles,
+        });
     const result: HarnessRunResult = {
       runId: request.runId,
-      status: statusFromOutcomes(findings, {
-        strictMode: request.strictMode === true,
-        timedOutRoles,
-        failedRoles,
-      }),
+      status,
       findings,
-      ...(includeOutcomes
-        ? { outcomes: outcomes.flatMap(roleHarnessOutcomes) }
-        : {}),
+      ...(isGeneralized ? { outcomes: harnessOutcomes } : {}),
       artifacts,
       metadata,
     };
@@ -336,6 +361,39 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       result,
     );
     return result;
+  }
+
+  /**
+   * Run status for execution-configured harnesses. Findings and outcomes are
+   * diagnostic payload and never drive status; role-execution problems and an
+   * optional runtime pass gate do.
+   */
+  private async generalizedStatus(input: {
+    readonly findings: readonly Finding[];
+    readonly outcomes: readonly HarnessOutcome[];
+    readonly strictMode: boolean;
+    readonly timedOutRoles: readonly string[];
+    readonly failedRoles: readonly string[];
+  }): Promise<HarnessRunResult["status"]> {
+    if (input.failedRoles.length > 0) {
+      return "error";
+    }
+    if (input.strictMode && input.timedOutRoles.length > 0) {
+      return "error";
+    }
+    if (this.options.passGate !== undefined) {
+      const passed = await this.options.passGate({
+        findings: input.findings,
+        outcomes: input.outcomes,
+      });
+      if (!passed) {
+        return "failed";
+      }
+    }
+    if (input.timedOutRoles.length > 0) {
+      return "warnings";
+    }
+    return "passed";
   }
 
   private async runRole(
