@@ -127,6 +127,30 @@ test("deltaHash is stable across object key order and distinct per delta", () =>
   expect(deltaHash(a)).toMatch(/^[0-9a-f]{64}$/);
 });
 
+test("a severity-only change is a finding delta even when status is unchanged", () => {
+  const criticalA = finding({ id: "quality-a", severity: "critical" });
+  const criticalB = finding({
+    id: "quality-b",
+    severity: "critical",
+    title: "Second finding",
+  });
+  const demotedA = finding({ id: "quality-a", severity: "warning" });
+  // Two criticals recorded; one demoted on replay — aggregate status stays
+  // failed, so only the identity key can catch the regression.
+  const delta = computeDelta(
+    {
+      status: "failed",
+      findings: [criticalA, criticalB],
+      metadata: { triage: "full" },
+    },
+    replayed([demotedA, criticalB], { status: "failed" }),
+  );
+  expect(delta?.missingFromReplay?.map((key) => key.severity)).toEqual([
+    "critical",
+  ]);
+  expect(delta?.extraInReplay?.map((key) => key.severity)).toEqual(["warning"]);
+});
+
 test("corpus entry names cannot escape the runs directory", () => {
   expect(resolveEntryDir("/corpus", "agents--code-review-abc")).toBe(
     "/corpus/runs/agents--code-review-abc",

@@ -103,16 +103,21 @@ export function computeDelta(
   recorded: RecordedResult,
   replayed: HarnessRunResult,
 ): ParityDelta | undefined {
+  // The map key must cover every identity field findingKey exposes —
+  // severity included — or a per-finding severity regression that leaves
+  // the aggregate status unchanged would replay as a full match.
+  const identity = (key: FindingKey) =>
+    `${key.fingerprint}:${key.id}:${key.severity}:${key.file ?? ""}`;
   const recordedKeys = new Map(
     (recorded.findings ?? []).map((finding) => {
       const key = findingKey(finding);
-      return [`${key.fingerprint}:${key.id}`, key] as const;
+      return [identity(key), key] as const;
     }),
   );
   const replayedKeys = new Map(
     replayed.findings.map((finding) => {
       const key = findingKey(finding);
-      return [`${key.fingerprint}:${key.id}`, key] as const;
+      return [identity(key), key] as const;
     }),
   );
 
