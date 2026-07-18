@@ -267,11 +267,11 @@ test("the example harness configuration resolves per-role policies", async () =>
   expect(loaded.rolePolicies.fix?.confirmations?.requiredFor).toEqual([
     "exec.unknown",
   ]);
-  // The fix policy protects the health signal and the incident record.
-  expect(loaded.rolePolicies.fix?.capabilities?.filesystem?.deny).toContain(
-    "check.ts",
-  );
-  expect(loaded.rolePolicies.fix?.capabilities?.filesystem?.deny).toContain(
-    "alert.log",
-  );
+  // The fix policy protects the health signal, the incident record, and
+  // the governance surfaces that enforce the policy itself.
+  const fixDeny = loaded.rolePolicies.fix?.capabilities?.filesystem?.deny ?? [];
+  expect(fixDeny).toContain("check.ts");
+  expect(fixDeny).toContain("alert.log");
+  expect(fixDeny).toContain(".cursor/**");
+  expect(fixDeny).toContain(".agents/**");
 });

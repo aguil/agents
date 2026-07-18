@@ -3,7 +3,16 @@ description: Remediation policy for the fix role — write allowed, exec gated
 capabilities:
   filesystem:
     allow: ["**"]
-    deny: [".env", "**/secrets/**", "alert.log", "check.ts"]
+    # Protect secrets, the incident record, the health signal, and the
+    # governance surfaces that enforce this very policy (the fix role must
+    # not be able to disable its own guardrails).
+    deny:
+      - ".env"
+      - "**/secrets/**"
+      - "alert.log"
+      - "check.ts"
+      - ".cursor/**"
+      - ".agents/**"
   exec:
     allow: ["rg", "grep", "cat", "ls", "bun run check.ts", "bun check.ts"]
     deny: ["rm", "git push", "curl", "wget"]
