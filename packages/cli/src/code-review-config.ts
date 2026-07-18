@@ -230,7 +230,7 @@ function sanitizeRepoConfigDocument(
         .sort()
         .join(
           ", ",
-        )}). Repo JSON cannot steer \`workspace\`, \`reposRoot\`, \`scratchpad\`, \`adapter\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
+        )}). Repo JSON cannot steer \`workspace\`, \`reposRoot\`, \`scratchpad\`, \`adapter\`, \`impl\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
     );
   }
 

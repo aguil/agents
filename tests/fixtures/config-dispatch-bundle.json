@@ -1,0 +1,30 @@
+{
+  "id": "config-dispatch-fixture-context",
+  "artifacts": [
+    {
+      "id": "pr-metadata",
+      "title": "Pull Request",
+      "content": "No pull request metadata (fixture)."
+    },
+    {
+      "id": "workspace-diff",
+      "title": "Workspace Diff",
+      "content": "diff --git a/src/example.ts b/src/example.ts\n+const x = 1;\n"
+    },
+    {
+      "id": "changed-files",
+      "title": "Changed Files",
+      "content": "src/example.ts"
+    },
+    {
+      "id": "triage",
+      "title": "Risk Triage",
+      "content": "trivial"
+    },
+    {
+      "id": "agents-md",
+      "title": "AGENTS.md",
+      "content": "(fixture)"
+    }
+  ]
+}
