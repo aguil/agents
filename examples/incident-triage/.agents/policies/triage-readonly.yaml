@@ -1,0 +1,24 @@
+id: triage-readonly
+description: Read-only investigation policy for scout, diagnose, and verify
+capabilities:
+  filesystem:
+    allow: ["**"]
+    # Deny secrets, the governance surfaces that enforce policy (.cursor/
+    # hook config, .agents/ definitions), and the pass_check target + the
+    # incident record. A read-only role runs immediately before the
+    # authoritative gate (bun run check.ts), so it must not be able to
+    # rewrite check.ts to fake a pass, nor edit alert.log.
+    deny:
+      - ".env"
+      - "**/secrets/**"
+      - ".cursor/**"
+      - ".agents/**"
+      - "check.ts"
+      - "alert.log"
+  exec:
+    allow: ["rg", "grep", "cat", "ls", "bun run check.ts", "bun check.ts"]
+    deny: ["rm", "git push", "curl", "wget"]
+  network:
+    deny: ["*"]
+limits:
+  timeout_ms: 300000

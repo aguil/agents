@@ -2,7 +2,11 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Finding, HarnessRunRequest } from "@aguil/agents-core";
+import type {
+  Finding,
+  HarnessOutcome,
+  HarnessRunRequest,
+} from "@aguil/agents-core";
 import { createAgentEvent } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
 import type {
@@ -28,6 +32,7 @@ function makeFinding(roleId: string, id: string): Finding {
 
 interface RoleScript {
   readonly findings?: readonly Finding[];
+  readonly outcomes?: readonly HarnessOutcome[];
   readonly fail?: boolean;
   /** Findings per invocation; overrides `findings` when set. */
   readonly perInvocation?: readonly (readonly Finding[])[];
@@ -69,6 +74,14 @@ function createScriptedAdapter(scripts: Readonly<Record<string, RoleScript>>): {
           roleId: request.roleId,
           type: "finding",
           data: finding,
+        });
+      }
+      for (const outcome of script.outcomes ?? []) {
+        yield createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "outcome",
+          data: outcome,
         });
       }
       if (script.fail === true) {
@@ -313,6 +326,8 @@ test("validation-loop stops at maxRounds without passing", async () => {
 
     expect(result.metadata?.validation_rounds).toBe("2");
     expect(result.metadata?.validation_passed).toBe("false");
+    // An unconverged loop must fail the run, not silently pass.
+    expect(result.status).toBe("failed");
   });
 });
 
@@ -361,6 +376,148 @@ test("explicit execution config opts in to generic outcomes", async () => {
     const result = await orchestrator.run(makeRequest(scratchpadPath));
     expect(result.outcomes).toHaveLength(1);
     expect(result.outcomes?.[0].kind).toBe("finding");
+  });
+});
+
+test("generic outcome events are collected and flow through {previous}", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const diagnosis: HarnessOutcome = {
+      id: "diagnosis-1",
+      kind: "diagnosis",
+      sourceRole: "diagnose",
+      title: "Root cause: off-by-one in pagination",
+      data: { rootCause: "end index drops final item" },
+    };
+    const { adapter, promptsByRole } = createScriptedAdapter({
+      diagnose: { outcomes: [diagnosis] },
+      fix: {},
+    });
+    const definition: HarnessDefinition = {
+      id: "triage",
+      roles: [
+        makeRole("diagnose", "Diagnose."),
+        makeRole("fix", "Fix using:\n{previous}"),
+      ],
+      execution: { mode: "chain" },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+    });
+
+    const result = await orchestrator.run(makeRequest(scratchpadPath));
+
+    // The generic outcome reaches the result without masquerading as a
+    // Finding, and the next chain step sees it via {previous}.
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes?.[0].kind).toBe("diagnosis");
+    expect(result.findings).toHaveLength(0);
+    const fixPrompt = promptsByRole.get("fix")?.[0] ?? "";
+    expect(fixPrompt).toContain("off-by-one in pagination");
+  });
+});
+
+test("generalized-harness status ignores finding severity (diagnostic findings do not fail the run)", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    // A role emits a critical finding describing the problem it worked on;
+    // for a generalized harness that must NOT fail the run.
+    const critical: Finding = {
+      ...makeFinding("scout", "scout-crit"),
+      severity: "critical",
+    };
+    const { adapter } = createScriptedAdapter({
+      scout: { findings: [critical] },
+      fix: {},
+    });
+    const definition: HarnessDefinition = {
+      id: "triage",
+      roles: [makeRole("scout", "Investigate."), makeRole("fix", "Fix.")],
+      execution: { mode: "chain" },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+    });
+    const result = await orchestrator.run(makeRequest(scratchpadPath));
+    expect(result.status).toBe("passed");
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].severity).toBe("critical");
+  });
+});
+
+test("passGate false fails a generalized run; true passes it", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const definition: HarnessDefinition = {
+      id: "triage",
+      roles: [makeRole("fix", "Fix.")],
+      execution: { mode: "chain" },
+    };
+    const { adapter } = createScriptedAdapter({ fix: {} });
+    const failing = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+      passGate: () => false,
+    });
+    expect((await failing.run(makeRequest(scratchpadPath))).status).toBe(
+      "failed",
+    );
+    const passing = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+      passGate: () => true,
+    });
+    expect((await passing.run(makeRequest(scratchpadPath))).status).toBe(
+      "passed",
+    );
+  });
+});
+
+test("legacy harness (no execution) keeps finding-severity status", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const critical: Finding = {
+      ...makeFinding("a", "a-crit"),
+      severity: "critical",
+    };
+    const { adapter } = createScriptedAdapter({ a: { findings: [critical] } });
+    const definition: HarnessDefinition = {
+      id: "legacy",
+      roles: [makeRole("a", "A.")],
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+    });
+    // No execution config → code-review semantics: critical finding fails.
+    expect((await orchestrator.run(makeRequest(scratchpadPath))).status).toBe(
+      "failed",
+    );
+  });
+});
+
+test("onRoleStart fires before each role in chain order", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const { adapter } = createScriptedAdapter({ a: {}, b: {}, c: {} });
+    const started: string[] = [];
+    const definition: HarnessDefinition = {
+      id: "hooked",
+      roles: [makeRole("a", "A."), makeRole("b", "B."), makeRole("c", "C.")],
+      execution: { mode: "chain", order: ["a", "b", "c"] },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+      onRoleStart: (roleId) => {
+        started.push(roleId);
+      },
+    });
+    await orchestrator.run(makeRequest(scratchpadPath));
+    expect(started).toEqual(["a", "b", "c"]);
   });
 });
 

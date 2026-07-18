@@ -127,8 +127,30 @@ export type AgentEventType =
   | "stderr"
   | "tool"
   | "finding"
+  | "outcome"
   | "completed"
   | "error";
+
+/** Structural guard for generic outcomes arriving as event data. */
+export function isHarnessOutcome(value: unknown): value is HarnessOutcome {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<HarnessOutcome>;
+  return (
+    typeof candidate.id === "string" &&
+    candidate.id.length > 0 &&
+    typeof candidate.kind === "string" &&
+    candidate.kind.length > 0 &&
+    typeof candidate.sourceRole === "string" &&
+    candidate.sourceRole.length > 0 &&
+    typeof candidate.title === "string" &&
+    candidate.title.length > 0 &&
+    typeof candidate.data === "object" &&
+    candidate.data !== null &&
+    !Array.isArray(candidate.data)
+  );
+}
 
 export interface AgentEvent {
   readonly timestamp: string;

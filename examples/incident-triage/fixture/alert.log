@@ -1,0 +1,5 @@
+2026-07-17T22:03:41Z WARN  support-desk ticket=48211 "Export shows 4 of 5 records; last row missing on every page"
+2026-07-17T22:11:02Z WARN  support-desk ticket=48214 "Pagination skips an item between page 1 and page 2"
+2026-07-17T22:15:33Z ERROR monitor synthetic-check=list-pagination status=FAILED expected_items=5 received_items=3
+2026-07-17T22:15:34Z ERROR monitor alert=PAGINATION-DATA-LOSS severity=high service=listing runbook="run `bun run check.ts` in the service root; inspect src/pagination.ts"
+2026-07-17T22:20:00Z INFO  oncall acknowledged alert=PAGINATION-DATA-LOSS assigned=incident-triage-harness

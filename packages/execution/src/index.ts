@@ -1,9 +1,10 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentEvent, Finding } from "@aguil/agents-core";
+import type { AgentEvent, Finding, HarnessOutcome } from "@aguil/agents-core";
 import {
   createAgentEvent,
   ensureDirectory,
+  isHarnessOutcome,
   writeJsonFile,
 } from "@aguil/agents-core";
 
@@ -563,6 +564,29 @@ export function normalizeAgentOutputLine(
         }),
       ];
     }
+    const outcomeEnvelope = readOutcomeEnvelope(parsed);
+    if (outcomeEnvelope !== undefined) {
+      if ("invalid" in outcomeEnvelope) {
+        return [
+          createAgentEvent({
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "error",
+            message: "invalid outcome envelope",
+            data: { raw: parsed },
+          }),
+        ];
+      }
+      return [
+        createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "outcome",
+          message: outcomeEnvelope.value.title,
+          data: outcomeEnvelope.value,
+        }),
+      ];
+    }
     if (isAgentEventEnvelope(parsed)) {
       return [
         createAgentEvent({
@@ -575,7 +599,11 @@ export function normalizeAgentOutputLine(
       ];
     }
 
-    const nestedFindings = extractFindingEnvelopes(parsed).map((envelope) => {
+    const {
+      findings: nestedFindingEnvelopes,
+      outcomes: nestedOutcomeEnvelopes,
+    } = extractNestedEnvelopes(parsed);
+    const nestedFindings = nestedFindingEnvelopes.map((envelope) => {
       if (!envelope.validation.valid) {
         return createAgentEvent({
           runId: request.runId,
@@ -593,8 +621,26 @@ export function normalizeAgentOutputLine(
         data: envelope.value,
       });
     });
-    if (nestedFindings.length > 0) {
-      return nestedFindings;
+    const nestedOutcomes = nestedOutcomeEnvelopes.map((envelope) => {
+      if ("invalid" in envelope) {
+        return createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "error",
+          message: "invalid nested outcome envelope",
+        });
+      }
+      return createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "outcome",
+        message: envelope.value.title,
+        data: envelope.value,
+      });
+    });
+    const nested = [...nestedFindings, ...nestedOutcomes];
+    if (nested.length > 0) {
+      return nested;
     }
 
     return [
@@ -638,24 +684,65 @@ function readFindingEnvelope(
   return { value: coerced as Finding, validation };
 }
 
-function extractFindingEnvelopes(
+/**
+ * Read a `{"outcome":{...}}` envelope into a validated HarnessOutcome.
+ * Returns undefined for non-outcome values; returns an invalid marker when
+ * the envelope key is present but the payload is malformed.
+ */
+function readOutcomeEnvelope(
   value: unknown,
-): readonly ParsedFindingEnvelope[] {
-  const envelopes: ParsedFindingEnvelope[] = [];
-  const texts = extractTextCandidates(value);
-  for (const text of texts) {
+): { readonly value: HarnessOutcome } | { readonly invalid: true } | undefined {
+  if (typeof value !== "object" || value === null || !("outcome" in value)) {
+    return undefined;
+  }
+  const rawOutcome = (value as { readonly outcome?: unknown }).outcome;
+  if (isHarnessOutcome(rawOutcome)) {
+    return { value: rawOutcome };
+  }
+  return { invalid: true };
+}
+
+type NestedOutcome =
+  | { readonly value: HarnessOutcome }
+  | { readonly invalid: true };
+
+interface NestedEnvelopes {
+  readonly findings: readonly ParsedFindingEnvelope[];
+  readonly outcomes: readonly NestedOutcome[];
+}
+
+/**
+ * Scan nested text candidates once for both finding and outcome envelopes.
+ * Real subprocess agents (e.g. Cursor stream-json) embed envelopes inside an
+ * assistant message's text rather than as standalone stdout lines, so the
+ * top-level checks in normalizeAgentOutputLine are not enough on their own.
+ * Both envelope types share a single tree walk + line parse to avoid
+ * scanning and JSON-parsing the same blob twice.
+ */
+function extractNestedEnvelopes(value: unknown): NestedEnvelopes {
+  const findings: ParsedFindingEnvelope[] = [];
+  const outcomes: NestedOutcome[] = [];
+  for (const text of extractTextCandidates(value)) {
     for (const line of text.split(/\r?\n/).filter(Boolean)) {
+      let parsed: unknown;
       try {
-        const envelope = readFindingEnvelope(JSON.parse(line) as unknown);
-        if (envelope !== undefined) {
-          envelopes.push(envelope);
-        }
+        parsed = JSON.parse(line) as unknown;
       } catch {
         // Non-JSON text inside an agent event is expected.
+        continue;
+      }
+      const finding = readFindingEnvelope(parsed);
+      if (finding !== undefined) {
+        findings.push(finding);
+        continue;
+      }
+      const outcome = readOutcomeEnvelope(parsed);
+      if (outcome !== undefined) {
+        outcomes.push(outcome);
       }
     }
   }
-  return envelopes;
+  return { findings, outcomes };
 }
 
 function extractTextCandidates(value: unknown): readonly string[] {
@@ -695,6 +782,7 @@ function isAgentEventEnvelope(
     event.type === "stderr" ||
     event.type === "tool" ||
     event.type === "finding" ||
+    event.type === "outcome" ||
     event.type === "completed" ||
     event.type === "error"
   );

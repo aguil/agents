@@ -9,6 +9,7 @@ import type {
 import {
   ensureDirectory,
   findingToHarnessOutcome,
+  isHarnessOutcome,
   writeJsonFile,
 } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
@@ -39,6 +40,14 @@ export interface ChainExecution {
    * needs them.
    */
   readonly onStepFailure?: "abort";
+  /**
+   * Command run in the workspace after all roles complete to determine run
+   * success (exit 0 => passed). The authoritative, deterministic pass gate —
+   * the runtime wires it to the orchestrator's passGate. Runtime-evaluated
+   * (not agent-reported) so diagnostic findings/outcomes cannot decide
+   * status. Declared in harness.yaml (build-time trusted config, like hooks).
+   */
+  readonly passCheck?: readonly string[];
 }
 
 export interface ValidationLoopExecution {
@@ -131,11 +140,38 @@ export interface NativeBunOrchestratorOptions {
   readonly eventSink?: EventSink;
   readonly contextBundlePath: string;
   readonly embeddedPrompts?: Readonly<Record<string, string>>;
+  /**
+   * Invoked immediately before each role runs. Lets the caller apply
+   * role-scoped setup — notably regenerating adapter hook config with the
+   * role's effective policy. Awaited; a throw aborts the run. Safe for
+   * sequential modes (chain, validation-loop rounds); for parallel mode
+   * callbacks may interleave, so only use it there for role-independent
+   * setup.
+   */
+  readonly onRoleStart?: (roleId: string) => Promise<void> | void;
+  /**
+   * Authoritative pass gate for execution-configured (generalized)
+   * harnesses. Evaluated after all roles complete without failing/timing
+   * out; `false` makes the run `failed`, `true`/absent makes it `passed`.
+   *
+   * Deliberately runtime-evaluated rather than inferred from role output:
+   * findings/outcomes emitted by a real agent are diagnostic narrative and
+   * must not drive status (a healed incident whose scout described the bug
+   * as "critical" must still pass). Callers wire this to a deterministic
+   * check — e.g. running the harness's `pass_check` command in the
+   * workspace. Ignored for legacy harnesses (no `execution` config), which
+   * keep finding-severity status.
+   */
+  readonly passGate?: (result: {
+    readonly findings: readonly Finding[];
+    readonly outcomes: readonly HarnessOutcome[];
+  }) => Promise<boolean> | boolean;
 }
 
 interface RoleRunOutcome {
   readonly roleId: string;
   readonly findings: readonly Finding[];
+  readonly genericOutcomes: readonly HarnessOutcome[];
   readonly artifacts: readonly string[];
   readonly outcome: "completed" | "timed_out" | "failed";
 }
@@ -160,6 +196,10 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     const extraMetadata: Record<string, string> = {
       execution_mode: execution.mode,
     };
+    // Internal convergence gate (validation-loop only): false => the loop
+    // exhausted maxRounds without satisfying passWhen, which must fail the
+    // run independently of the external passGate.
+    let internalGatePassed: boolean | undefined;
 
     switch (execution.mode) {
       case "parallel":
@@ -173,11 +213,14 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
         roleOutcomes = loop.roleOutcomes;
         extraMetadata.validation_rounds = String(loop.rounds);
         extraMetadata.validation_passed = String(loop.passed);
+        internalGatePassed = loop.passed;
         break;
       }
     }
 
-    return this.assembleResult(request, roleOutcomes, extraMetadata);
+    return this.assembleResult(request, roleOutcomes, extraMetadata, {
+      internalGatePassed,
+    });
   }
 
   private async runParallel(
@@ -261,9 +304,8 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       if (anyFailure) {
         break;
       }
-      const validationHarnessOutcomes = validationOutcomes.flatMap((outcome) =>
-        outcome.findings.map(findingToHarnessOutcome),
-      );
+      const validationHarnessOutcomes =
+        validationOutcomes.flatMap(roleHarnessOutcomes);
       if (passWhen(validationHarnessOutcomes)) {
         passed = true;
         break;
@@ -280,6 +322,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     request: HarnessRunRequest,
     outcomes: readonly RoleRunOutcome[],
     extraMetadata: Readonly<Record<string, string>>,
+    gates: { readonly internalGatePassed?: boolean } = {},
   ): Promise<HarnessRunResult> {
     const findings = outcomes.flatMap((outcome) => outcome.findings);
     const artifacts = outcomes.flatMap((outcome) => outcome.artifacts);
@@ -305,18 +348,27 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     // Generic outcomes are the opt-in surface for execution-configured
     // harnesses; legacy definitions keep the pre-generalization result
     // shape (and its serialized size) untouched.
-    const includeOutcomes = this.options.definition.execution !== undefined;
+    const isGeneralized = this.options.definition.execution !== undefined;
+    const harnessOutcomes = outcomes.flatMap(roleHarnessOutcomes);
+    const status = isGeneralized
+      ? await this.generalizedStatus({
+          findings,
+          outcomes: harnessOutcomes,
+          strictMode: request.strictMode === true,
+          timedOutRoles,
+          failedRoles,
+          internalGatePassed: gates.internalGatePassed,
+        })
+      : statusFromOutcomes(findings, {
+          strictMode: request.strictMode === true,
+          timedOutRoles,
+          failedRoles,
+        });
     const result: HarnessRunResult = {
       runId: request.runId,
-      status: statusFromOutcomes(findings, {
-        strictMode: request.strictMode === true,
-        timedOutRoles,
-        failedRoles,
-      }),
+      status,
       findings,
-      ...(includeOutcomes
-        ? { outcomes: findings.map(findingToHarnessOutcome) }
-        : {}),
+      ...(isGeneralized ? { outcomes: harnessOutcomes } : {}),
       artifacts,
       metadata,
     };
@@ -328,6 +380,45 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     return result;
   }
 
+  /**
+   * Run status for execution-configured harnesses. Findings and outcomes are
+   * diagnostic payload and never drive status; role-execution problems and an
+   * optional runtime pass gate do.
+   */
+  private async generalizedStatus(input: {
+    readonly findings: readonly Finding[];
+    readonly outcomes: readonly HarnessOutcome[];
+    readonly strictMode: boolean;
+    readonly timedOutRoles: readonly string[];
+    readonly failedRoles: readonly string[];
+    readonly internalGatePassed?: boolean;
+  }): Promise<HarnessRunResult["status"]> {
+    if (input.failedRoles.length > 0) {
+      return "error";
+    }
+    if (input.strictMode && input.timedOutRoles.length > 0) {
+      return "error";
+    }
+    // Internal convergence gate (validation-loop) fails the run regardless
+    // of the external passGate.
+    if (input.internalGatePassed === false) {
+      return "failed";
+    }
+    if (this.options.passGate !== undefined) {
+      const passed = await this.options.passGate({
+        findings: input.findings,
+        outcomes: input.outcomes,
+      });
+      if (!passed) {
+        return "failed";
+      }
+    }
+    if (input.timedOutRoles.length > 0) {
+      return "warnings";
+    }
+    return "passed";
+  }
+
   private async runRole(
     request: HarnessRunRequest,
     role: RoleDefinition,
@@ -335,6 +426,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
   ): Promise<RoleRunOutcome> {
     const roleScratchpadPath = join(request.scratchpadPath, "roles", role.id);
     await ensureDirectory(roleScratchpadPath);
+    await this.options.onRoleStart?.(role.id);
     const prompt = interpolatePrompt(
       await readPrompt(role, this.options.embeddedPrompts),
       interpolation,
@@ -358,10 +450,14 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       metadata: request.metadata,
     };
 
+    const genericOutcomes: HarnessOutcome[] = [];
     for await (const event of this.options.adapter.run(agentRequest)) {
       await this.options.eventSink?.write(event);
       if (event.type === "finding" && isFinding(event.data)) {
         findings.push(event.data);
+      }
+      if (event.type === "outcome" && isHarnessOutcome(event.data)) {
+        genericOutcomes.push(event.data);
       }
       if (event.type === "error") {
         outcome = hasTimedOut(event.data) ? "timed_out" : "failed";
@@ -371,6 +467,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     return {
       roleId: role.id,
       findings,
+      genericOutcomes,
       artifacts: [roleScratchpadPath],
       outcome,
     };
@@ -395,8 +492,15 @@ function resolveRoleOrder(
   });
 }
 
+function roleHarnessOutcomes(outcome: RoleRunOutcome): HarnessOutcome[] {
+  return [
+    ...outcome.findings.map(findingToHarnessOutcome),
+    ...outcome.genericOutcomes,
+  ];
+}
+
 function serializeRoleOutput(outcome: RoleRunOutcome): string {
-  return JSON.stringify(outcome.findings.map(findingToHarnessOutcome), null, 2);
+  return JSON.stringify(roleHarnessOutcomes(outcome), null, 2);
 }
 
 function interpolatePrompt(

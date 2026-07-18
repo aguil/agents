@@ -61,10 +61,10 @@ function policyBridgeEntry(
   if (options.policyId === undefined) {
     return undefined;
   }
-  // Defense in depth: loadPolicy/loadHarness already reject ids outside the
-  // token grammar, but this command lands in a shell-executed config file,
-  // so quote every interpolated argument regardless.
-  const cli = options.agentsCli ?? "agents";
+  // Defense in depth: this command lands in a shell-executed config file,
+  // so quote EVERY interpolated argument — including the CLI token, which
+  // may be an operator-supplied path with spaces or metacharacters.
+  const cli = JSON.stringify(options.agentsCli ?? "agents");
   const agentsDirArg =
     options.agentsDir === undefined
       ? ""

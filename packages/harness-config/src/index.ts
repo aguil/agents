@@ -69,7 +69,14 @@ export interface HarnessManifest {
 
 export interface LoadedHarness {
   readonly definition: HarnessDefinition;
+  /** Harness-level default policy (when `policy:` is declared). */
   readonly policy?: PolicySpec;
+  /**
+   * Effective policy per role id: the role's own `policy:` reference when
+   * declared, otherwise the harness-level default. Roles absent from this
+   * map have no policy at all.
+   */
+  readonly rolePolicies: Readonly<Record<string, PolicySpec>>;
   readonly hooks: HooksSpec;
   /** Directory containing harness.yaml (prompt paths resolve against it). */
   readonly harnessDir: string;
@@ -270,12 +277,39 @@ function parsePolicy(value: unknown, id: string): PolicySpec {
   };
 }
 
+const ROLE_FIELDS: ReadonlySet<string> = new Set([
+  "description",
+  "prompt",
+  "prompt_path",
+  "timeout_ms",
+  "allowed_commands",
+  "required_capabilities",
+  "policy",
+]);
+
+interface ParsedRole {
+  readonly role: RoleDefinition;
+  readonly policyId?: string;
+}
+
 function parseRole(
   roleId: string,
   value: unknown,
   harnessDir: string,
-): RoleDefinition {
+): ParsedRole {
   const record = asRecord(value, `role ${roleId}`);
+  const unknownKeys = Object.keys(record).filter(
+    (key) => !ROLE_FIELDS.has(key),
+  );
+  if (unknownKeys.length > 0) {
+    fail(
+      `role ${roleId} has unsupported fields: ${unknownKeys.join(", ")} (supported: ${[...ROLE_FIELDS].join(", ")})`,
+    );
+  }
+  const policyId = optionalString(record.policy, `role ${roleId} policy`);
+  if (policyId !== undefined) {
+    assertValidPolicyId(policyId);
+  }
   const prompt = optionalString(record.prompt, `role ${roleId} prompt`);
   const promptPathRaw = optionalString(
     record.prompt_path,
@@ -290,7 +324,7 @@ function parseRole(
       : isAbsolute(promptPathRaw)
         ? promptPathRaw
         : join(harnessDir, promptPathRaw);
-  return {
+  const role: RoleDefinition = {
     id: roleId,
     description: requiredString(
       record.description,
@@ -315,6 +349,7 @@ function parseRole(
           ),
         }),
   };
+  return { role, ...(policyId === undefined ? {} : { policyId }) };
 }
 
 function parseExecution(
@@ -348,7 +383,18 @@ function parseExecution(
       if (order !== undefined) {
         requireRoles("execution.order", order);
       }
-      return { mode: "chain", ...(order === undefined ? {} : { order }) };
+      const passCheck = optionalStringArray(
+        record.pass_check,
+        "execution.pass_check",
+      );
+      if (passCheck !== undefined && passCheck.length === 0) {
+        fail("execution.pass_check must list at least one command token");
+      }
+      return {
+        mode: "chain",
+        ...(order === undefined ? {} : { order }),
+        ...(passCheck === undefined ? {} : { passCheck }),
+      };
     }
     case "validation-loop": {
       return {
@@ -509,9 +555,10 @@ export async function loadHarness(
   if (roleEntries.length === 0) {
     fail("roles must define at least one role");
   }
-  const roles = roleEntries.map(([roleId, value]) =>
+  const parsedRoles = roleEntries.map(([roleId, value]) =>
     parseRole(roleId, value, harnessDir),
   );
+  const roles = parsedRoles.map((parsedRole) => parsedRole.role);
   const roleIds = new Set(roles.map((role) => role.id));
 
   const execution = parseExecution(parsed.execution, roleIds);
@@ -520,6 +567,26 @@ export async function loadHarness(
   const policyId = optionalString(parsed.policy, "policy");
   const policy =
     policyId === undefined ? undefined : await loadPolicy(agentsDir, policyId);
+
+  // Resolve per-role policies (role override > harness default), reading
+  // each referenced policy file once.
+  const policyCache = new Map<string, PolicySpec>();
+  if (policyId !== undefined && policy !== undefined) {
+    policyCache.set(policyId, policy);
+  }
+  const rolePolicies: Record<string, PolicySpec> = {};
+  for (const parsedRole of parsedRoles) {
+    const effectiveId = parsedRole.policyId ?? policyId;
+    if (effectiveId === undefined) {
+      continue;
+    }
+    let resolved = policyCache.get(effectiveId);
+    if (resolved === undefined) {
+      resolved = await loadPolicy(agentsDir, effectiveId);
+      policyCache.set(effectiveId, resolved);
+    }
+    rolePolicies[parsedRole.role.id] = resolved;
+  }
 
   const definition: HarnessDefinition = {
     id: declaredId,
@@ -538,6 +605,7 @@ export async function loadHarness(
   return {
     definition,
     ...(policy === undefined ? {} : { policy }),
+    rolePolicies,
     hooks,
     harnessDir,
   };
