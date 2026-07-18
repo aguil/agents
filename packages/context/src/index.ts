@@ -1,4 +1,4 @@
-import { readFile, realpath } from "node:fs/promises";
+import { open, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ReviewTriageTier } from "@aguil/agents-core";
 import {
@@ -240,7 +240,7 @@ export class StaticFileProvider implements ContextProvider {
     }
     let content: string;
     try {
-      content = await readFile(path, "utf8");
+      content = await readBoundedFile(path, this.options.maxBytes);
     } catch (error) {
       if (this.options.required === true) {
         throw new Error(
@@ -372,7 +372,7 @@ export class FileGlobProvider implements ContextProvider {
           title: relativePath,
           path,
           content: truncateArtifactContent(
-            await readFile(path, "utf8"),
+            await readBoundedFile(path, this.options.maxBytesPerFile),
             this.options.maxBytesPerFile,
           ),
         });
@@ -401,6 +401,25 @@ function truncateArtifactContent(
     return content;
   }
   return `${Buffer.from(content, "utf8").subarray(0, maxBytes).toString("utf8")}\n[truncated at ${maxBytes} bytes]`;
+}
+
+/**
+ * Read at most maxBytes+1 bytes so oversized files never load fully into
+ * memory; the extra byte lets truncateArtifactContent detect overflow and
+ * append its truncation marker.
+ */
+async function readBoundedFile(
+  path: string,
+  maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
+): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes + 1, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
 }
 
 export class PullRequestMetadataProvider implements ContextProvider {
