@@ -1,0 +1,23 @@
+spec_version: "0.1"
+kind: harness
+
+harness:
+  id: triage-demo
+  description: Chain-mode demo harness for loader tests
+
+policy: triage-readonly
+
+roles:
+  scout:
+    description: Investigate the incident signals
+    prompt: "Investigate the alert log and failing test."
+    timeout_ms: 300000
+  diagnose:
+    description: Identify the root cause
+    prompt_path: prompts/diagnose.md
+    timeout_ms: 300000
+    allowed_commands: ["bun test"]
+
+execution:
+  mode: chain
+  order: [scout, diagnose]

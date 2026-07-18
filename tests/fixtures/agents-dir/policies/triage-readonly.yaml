@@ -1,0 +1,14 @@
+id: triage-readonly
+description: Read-only policy for triage scout/diagnose roles
+capabilities:
+  filesystem:
+    allow: ["**"]
+    deny: [".env", "**/secrets/**"]
+  exec:
+    allow: ["rg", "grep", "bun test"]
+    deny: ["rm", "git push"]
+  network:
+    deny: ["*"]
+limits:
+  cost_usd: 2.5
+  timeout_ms: 600000
