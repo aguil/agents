@@ -5,6 +5,10 @@ import type {
   HarnessDefinition,
   RoleDefinition,
 } from "@aguil/agents-orchestration";
+import {
+  REPORT_TEMPLATE_NAMES,
+  type ReportTemplateName,
+} from "@aguil/agents-reporting";
 import { evaluate, parse } from "@marcbachmann/cel-js";
 
 export type {
@@ -134,6 +138,7 @@ export interface LoadedHarness {
   readonly outputSchemas?: OutputSchemas;
   readonly findingFilters?: readonly FindingFilterStrategy[];
   readonly findingDedupers?: readonly FindingDeduperStrategy[];
+  readonly reportingTemplate?: ReportTemplateName;
   /** Directory containing harness.yaml (prompt paths resolve against it). */
   readonly harnessDir: string;
 }
@@ -782,6 +787,28 @@ function parseFindingStrategies<T extends string>(
   return strategies as readonly T[];
 }
 
+function parseReporting(value: unknown): ReportTemplateName | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const reporting = asRecord(value, "reporting");
+  const unknownKeys = Object.keys(reporting).filter(
+    (key) => key !== "template",
+  );
+  if (unknownKeys.length > 0) {
+    fail(
+      `reporting has unsupported fields: ${unknownKeys.join(", ")} (supported: template)`,
+    );
+  }
+  const template = requiredString(reporting.template, "reporting.template");
+  if (!(REPORT_TEMPLATE_NAMES as readonly string[]).includes(template)) {
+    fail(
+      `reporting.template has unknown template "${template}" (supported: ${REPORT_TEMPLATE_NAMES.join(", ")})`,
+    );
+  }
+  return template as ReportTemplateName;
+}
+
 /**
  * Policy and harness ids become filesystem path segments (and, for policy
  * ids, shell command arguments), so they are restricted to a conservative
@@ -877,6 +904,7 @@ export async function loadHarness(
     "deduplication",
     ["builtin:fingerprint"] as const,
   );
+  const reportingTemplate = parseReporting(parsed.reporting);
 
   const policyId = optionalString(parsed.policy, "policy");
   const policy =
@@ -925,6 +953,7 @@ export async function loadHarness(
     ...(outputSchemas === undefined ? {} : { outputSchemas }),
     ...(findingFilters === undefined ? {} : { findingFilters }),
     ...(findingDedupers === undefined ? {} : { findingDedupers }),
+    ...(reportingTemplate === undefined ? {} : { reportingTemplate }),
     harnessDir,
   };
 }

@@ -44,3 +44,6 @@ shared package boundaries.
 - [0011-cel-role-enablement.md](0011-cel-role-enablement.md) — ADR 0011: CEL
   role enablement (spec v0.2) — load-time compile checks, fail-closed
   evaluation, structural consistency, context-derived bindings.
+- [0012-reporting-template-and-consensus-descope.md](0012-reporting-template-and-consensus-descope.md)
+  — ADR 0012: `reporting.template` builtin renderers (byte-identical code-review
+  markdown) and the consensus descope decision.

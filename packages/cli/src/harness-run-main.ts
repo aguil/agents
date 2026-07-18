@@ -31,6 +31,7 @@ import {
 } from "@aguil/agents-hooks";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 import { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
+import { resolveReportRenderer } from "@aguil/agents-reporting";
 
 export { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
 
@@ -410,28 +411,42 @@ export async function runHarnessRunCli(
     console.log(`roles failed: ${result.metadata?.failed_roles}`);
   }
   // Declared pipelines shape the reported findings the same way the
-  // code-review package does imperatively; the raw count is kept visible
-  // so filtering is observable, never silent.
-  if (
-    loaded.findingFilters !== undefined ||
-    loaded.findingDedupers !== undefined
-  ) {
-    const pipelined = applyFindingPipelines(result.findings, {
-      ...(loaded.findingFilters === undefined
-        ? {}
-        : { filters: loaded.findingFilters }),
-      ...(loaded.findingDedupers === undefined
-        ? {}
-        : { dedupers: loaded.findingDedupers }),
-    });
+  // code-review package does imperatively (it renders report.md AFTER
+  // dedup/filter); the raw count stays visible so filtering is
+  // observable, never silent. The rendered report consumes the same
+  // pipelined view — reporting raw findings would break parity.
+  const hasPipelines =
+    loaded.findingFilters !== undefined || loaded.findingDedupers !== undefined;
+  const reportedFindings = hasPipelines
+    ? applyFindingPipelines(result.findings, {
+        ...(loaded.findingFilters === undefined
+          ? {}
+          : { filters: loaded.findingFilters }),
+        ...(loaded.findingDedupers === undefined
+          ? {}
+          : { dedupers: loaded.findingDedupers }),
+      })
+    : result.findings;
+  if (hasPipelines) {
     console.log(
-      `findings: ${pipelined.length} after pipelines (${result.findings.length} raw)`,
+      `findings: ${reportedFindings.length} after pipelines (${result.findings.length} raw)`,
     );
   }
   for (const outcome of result.outcomes ?? []) {
     console.log(
       `- [${outcome.kind}] ${outcome.sourceRole}: ${outcome.title} (${outcome.id})`,
     );
+  }
+  if (loaded.reportingTemplate !== undefined) {
+    const reportPath = join(scratchpadPath, "report.md");
+    await writeFile(
+      reportPath,
+      resolveReportRenderer(loaded.reportingTemplate)({
+        ...result,
+        findings: reportedFindings,
+      }),
+    );
+    console.log(`report: ${reportPath}`);
   }
   console.log(`artifacts: ${scratchpadPath}`);
   return result.status === "passed" ? 0 : 1;

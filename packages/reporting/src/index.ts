@@ -1,5 +1,12 @@
 import type { Finding, HarnessRunResult } from "@aguil/agents-core";
 
+export const REPORT_TEMPLATE_NAMES = [
+  "builtin:code-review-markdown",
+  "builtin:outcomes-markdown",
+] as const;
+
+export type ReportTemplateName = (typeof REPORT_TEMPLATE_NAMES)[number];
+
 export interface ReportRenderer {
   render(result: HarnessRunResult): string | Promise<string>;
 }
@@ -117,6 +124,67 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
     ...sections,
     "",
   ].join("\n");
+}
+
+export function renderOutcomesMarkdownReport(result: HarnessRunResult): string {
+  const outcomes = result.outcomes ?? [];
+  const outcomesByRole = new Map<string, (typeof outcomes)[number][]>();
+  for (const outcome of outcomes) {
+    const roleOutcomes = outcomesByRole.get(outcome.sourceRole);
+    if (roleOutcomes === undefined) {
+      outcomesByRole.set(outcome.sourceRole, [outcome]);
+    } else {
+      roleOutcomes.push(outcome);
+    }
+  }
+
+  const roleSections: string[] = [];
+  for (const [sourceRole, roleOutcomes] of outcomesByRole) {
+    roleSections.push(`## ${sourceRole}`);
+    for (const outcome of roleOutcomes) {
+      roleSections.push(
+        `- **[${outcome.kind}] ${outcome.title}** (${outcome.id})`,
+      );
+      if (Object.keys(outcome.data).length > 0) {
+        const json = JSON.stringify(outcome.data, null, 2)
+          .split("\n")
+          .map((line) => `  ${line}`)
+          .join("\n");
+        roleSections.push(`  \`\`\`json\n${json}\n  \`\`\``);
+      }
+    }
+    roleSections.push("");
+  }
+
+  const summary =
+    outcomes.length === 0
+      ? "No outcomes emitted."
+      : `${outcomes.length} outcome${outcomes.length === 1 ? "" : "s"} across ${outcomesByRole.size} role${outcomesByRole.size === 1 ? "" : "s"}.`;
+
+  return [
+    "# Harness Report",
+    "",
+    `Run: ${result.runId}`,
+    `Status: ${result.status}`,
+    `Summary: ${summary}`,
+    "",
+    ...roleSections,
+  ].join("\n");
+}
+
+export function resolveReportRenderer(
+  name: string,
+): (result: HarnessRunResult) => string {
+  switch (name) {
+    case "builtin:code-review-markdown":
+      return renderMarkdownReport;
+    case "builtin:outcomes-markdown":
+      return renderOutcomesMarkdownReport;
+    default:
+      throw new Error(
+        `unknown report template "${name}" (supported: ${REPORT_TEMPLATE_NAMES.join(", ")})`,
+      );
+  }
 }
 
 function sortFindings(findings: readonly Finding[]): readonly Finding[] {
