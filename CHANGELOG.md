@@ -10,6 +10,14 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.8](https://github.com/aguil/agents/compare/v0.4.7...v0.4.8) (2026-07-18)
+
+
+### Fixed
+
+* de-exemplify code-review adapter prompts; reject template-echo finding ids ([#83](https://github.com/aguil/agents/issues/83)) ([a6a6a64](https://github.com/aguil/agents/commit/a6a6a642e37c6c7c212a6369b75b3264e3cac09c))
+* **execution:** de-exemplify code-review adapter prompts; reject template-echo ids ([#83](https://github.com/aguil/agents/issues/83)) ([0975c95](https://github.com/aguil/agents/commit/0975c954e7cf94120680f357d0d3b863688782a9))
+
 ## [0.4.7](https://github.com/aguil/agents/compare/v0.4.6...v0.4.7) (2026-07-18)
 
 
