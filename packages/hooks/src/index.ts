@@ -1,5 +1,6 @@
 import type {
   HookEvent,
+  HookEventClass,
   HookHandlerSpec,
   HooksSpec,
 } from "@aguil/agents-harness-config";
@@ -23,6 +24,33 @@ const CURSOR_EVENT_MAPPING: Readonly<
   post_tool_call: ["afterFileEdit"],
   role_stop: ["stop"],
 };
+
+/**
+ * Event-class classification of Cursor tool events (spec v0.2
+ * `applies_to`). A handler scoped to a class list only registers on Cursor
+ * events belonging to those classes, so a shell-only handler no longer
+ * spawns on every MCP call (#71).
+ */
+const CURSOR_EVENT_CLASS: Readonly<
+  Partial<Record<CursorHookEvent, HookEventClass>>
+> = {
+  beforeShellExecution: "shell",
+  beforeMCPExecution: "mcp",
+  afterFileEdit: "edit",
+};
+
+function handlerRegistersOn(
+  handler: HookHandlerSpec,
+  cursorEvent: CursorHookEvent,
+): boolean {
+  if (handler.appliesTo === undefined) {
+    return true;
+  }
+  const eventClass = CURSOR_EVENT_CLASS[cursorEvent];
+  // Non-tool events (e.g. stop) have no class; applies_to never narrows
+  // them — the loader already rejects applies_to on non-tool-call events.
+  return eventClass === undefined || handler.appliesTo.includes(eventClass);
+}
 
 export interface CursorHookEntry {
   readonly command: string;
@@ -131,7 +159,9 @@ export function generateCursorHooksConfig(
     }
     for (const cursorEvent of cursorEvents) {
       for (const handler of handlers) {
-        push(cursorEvent, toCursorEntry(handler));
+        if (handlerRegistersOn(handler, cursorEvent)) {
+          push(cursorEvent, toCursorEntry(handler));
+        }
       }
     }
   }

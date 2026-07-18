@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { HooksSpec } from "@aguil/agents-harness-config";
+import type { HookHandlerSpec, HooksSpec } from "@aguil/agents-harness-config";
 import {
   generateCursorHooksConfig,
   renderCursorHooksConfig,
@@ -98,6 +98,49 @@ test("rendered policy bridge config is invariant across roles and policies", () 
   const triageRoleConfig = renderForRole();
   const implementationRoleConfig = renderForRole();
   expect(triageRoleConfig).toBe(implementationRoleConfig);
+});
+
+test("applies_to scopes handlers to event classes (#71)", () => {
+  const shellOnly: HookHandlerSpec = {
+    command: "/h/hooks/shell-only.sh",
+    matcher: "Execute",
+    appliesTo: ["shell"],
+  };
+  const mcpAndEdit: HookHandlerSpec = {
+    command: "/h/hooks/audit.sh",
+    appliesTo: ["mcp", "edit"],
+  };
+  const unscoped: HookHandlerSpec = { command: "/h/hooks/everything.sh" };
+  const { config } = generateCursorHooksConfig({
+    hooks: {
+      pre_tool_call: [shellOnly, mcpAndEdit, unscoped],
+      post_tool_call: [mcpAndEdit],
+    },
+    policyBridge: true,
+  });
+
+  const commands = (event: keyof typeof config.hooks) =>
+    (config.hooks[event] ?? []).map((entry) => entry.command);
+
+  // Shell-only handler registers on beforeShellExecution but NOT on
+  // beforeMCPExecution — the wasted spawn per MCP call is gone.
+  expect(commands("beforeShellExecution")).toContain(
+    'HOOK_MATCHER="Execute" /h/hooks/shell-only.sh',
+  );
+  expect(commands("beforeMCPExecution")).not.toContain(
+    'HOOK_MATCHER="Execute" /h/hooks/shell-only.sh',
+  );
+  // Class lists select exactly their events; unscoped handlers keep the
+  // register-everywhere behavior (absence must not narrow).
+  expect(commands("beforeMCPExecution")).toContain("/h/hooks/audit.sh");
+  expect(commands("beforeShellExecution")).not.toContain("/h/hooks/audit.sh");
+  expect(commands("afterFileEdit")).toContain("/h/hooks/audit.sh");
+  expect(commands("beforeShellExecution")).toContain("/h/hooks/everything.sh");
+  expect(commands("beforeMCPExecution")).toContain("/h/hooks/everything.sh");
+  // The policy bridge is never narrowed: still first on every tool event.
+  expect(commands("beforeShellExecution")[0]).toBe('"agents" policy-eval');
+  expect(commands("beforeMCPExecution")[0]).toBe('"agents" policy-eval');
+  expect(commands("afterFileEdit")[0]).toBe('"agents" policy-eval');
 });
 
 test("renderCursorHooksConfig emits stable versioned JSON", () => {

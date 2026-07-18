@@ -96,6 +96,84 @@ test("loadHarness rejects unsupported hook events and handler types", async () =
   }
 });
 
+test("applies_to narrows tool-call handlers and is rejected elsewhere (spec v0.2)", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "scoped");
+    await mkdir(dir, { recursive: true });
+    const spec = (hooksLines: readonly string[]) =>
+      writeFile(
+        join(dir, "harness.yaml"),
+        [
+          'spec_version: "0.2"',
+          "kind: harness",
+          "harness: { id: scoped }",
+          "roles: { a: { description: A } }",
+          "hooks:",
+          ...hooksLines,
+        ].join("\n"),
+      );
+
+    await spec([
+      "  pre_tool_call:",
+      '    - command: "x"',
+      '      applies_to: ["shell"]',
+    ]);
+    const loaded = await loadHarness({
+      agentsDir: scratch,
+      harnessId: "scoped",
+    });
+    expect(loaded.hooks.pre_tool_call?.[0].appliesTo).toEqual(["shell"]);
+
+    // applies_to only exists on tool-call events.
+    await spec([
+      "  role_stop:",
+      '    - command: "x"',
+      '      applies_to: ["shell"]',
+    ]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "scoped" }),
+    ).rejects.toThrow("only valid on tool-call events");
+
+    // Unknown classes and empty lists fail loudly.
+    await spec([
+      "  pre_tool_call:",
+      '    - command: "x"',
+      '      applies_to: ["carrier-pigeon"]',
+    ]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "scoped" }),
+    ).rejects.toThrow("must be one of: shell, mcp, edit");
+
+    await spec([
+      "  pre_tool_call:",
+      '    - command: "x"',
+      "      applies_to: []",
+    ]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "scoped" }),
+    ).rejects.toThrow("non-empty list");
+
+    // v0.1 documents stay loadable; unknown versions still fail.
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.1"',
+        "kind: harness",
+        "harness: { id: scoped }",
+        "roles: { a: { description: A } }",
+      ].join("\n"),
+    );
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "scoped" }),
+    ).resolves.toBeDefined();
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
 test("loadHarness resolves the referenced policy", async () => {
   const loaded = await loadHarness({
     agentsDir: fixturesDir,

@@ -6,7 +6,13 @@ import type {
   RoleDefinition,
 } from "@aguil/agents-orchestration";
 
-export const HARNESS_SPEC_VERSION = "0.1";
+export const HARNESS_SPEC_VERSION = "0.2";
+
+/**
+ * Accepted `spec_version` values. v0.2 is additive over v0.1 (per-handler
+ * `applies_to` event classes), so v0.1 documents remain loadable unchanged.
+ */
+export const SUPPORTED_SPEC_VERSIONS: readonly string[] = ["0.1", "0.2"];
 
 /** AGENTS-1-style capability constraint lists (carried, not enforced here). */
 export interface PolicyCapabilityRules {
@@ -50,12 +56,30 @@ export const HOOK_EVENTS = [
 
 export type HookEvent = (typeof HOOK_EVENTS)[number];
 
-/** Command handler — the only handler type in spec v0.1. */
+/**
+ * Adapter-level classes a tool-call hook can scope itself to (spec v0.2).
+ * The canonical pre/post_tool_call events are coarser than what authors
+ * often mean: a shell-only handler registered on every projection wastes a
+ * process spawn per MCP call (#71). `applies_to` records the author's
+ * intent explicitly instead of interpreting matcher regexes heuristically —
+ * silent under-registration of a policy-adjacent hook is the wrong failure
+ * mode, so absence still means "all classes".
+ */
+export const HOOK_EVENT_CLASSES = ["shell", "mcp", "edit"] as const;
+
+export type HookEventClass = (typeof HOOK_EVENT_CLASSES)[number];
+
+/** Command handler — the only handler type in spec v0.1/v0.2. */
 export interface HookHandlerSpec {
   readonly command: string;
   /** Regex over tool names (e.g. "Execute", "Create|Edit"). */
   readonly matcher?: string;
   readonly timeoutS?: number;
+  /**
+   * Event classes this handler registers on (spec v0.2, tool-call events
+   * only). Absent = every class the canonical event projects to.
+   */
+  readonly appliesTo?: readonly HookEventClass[];
 }
 
 export type HooksSpec = Readonly<
@@ -424,6 +448,33 @@ function parseExecution(
   }
 }
 
+function parseAppliesTo(
+  value: unknown,
+  event: string,
+  index: number,
+): { readonly appliesTo?: readonly HookEventClass[] } {
+  if (value === undefined) {
+    return {};
+  }
+  const label = `hooks.${event}[${index}].applies_to`;
+  if (event !== "pre_tool_call" && event !== "post_tool_call") {
+    fail(`${label} is only valid on tool-call events`);
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    fail(`${label} must be a non-empty list of event classes`);
+  }
+  const classes = value.map((entry) => {
+    if (
+      typeof entry !== "string" ||
+      !(HOOK_EVENT_CLASSES as readonly string[]).includes(entry)
+    ) {
+      fail(`${label} entries must be one of: ${HOOK_EVENT_CLASSES.join(", ")}`);
+    }
+    return entry as HookEventClass;
+  });
+  return { appliesTo: classes };
+}
+
 function parseHooks(value: unknown, harnessDir: string): HooksSpec {
   if (value === undefined) {
     return {};
@@ -443,11 +494,12 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
     hooks[event as HookEvent] = handlersValue.map((handlerValue, index) => {
       const handler = asRecord(handlerValue, `hooks.${event}[${index}]`);
       const unknownKeys = Object.keys(handler).filter(
-        (key) => !["command", "matcher", "timeout_s"].includes(key),
+        (key) =>
+          !["command", "matcher", "timeout_s", "applies_to"].includes(key),
       );
       if (unknownKeys.length > 0) {
         fail(
-          `hooks.${event}[${index}] has unsupported fields: ${unknownKeys.join(", ")} (spec v0.1 supports command handlers only)`,
+          `hooks.${event}[${index}] has unsupported fields: ${unknownKeys.join(", ")} (spec v0.2 supports command handlers only)`,
         );
       }
       const commandRaw = requiredString(
@@ -472,6 +524,7 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
                 `hooks.${event}[${index}].timeout_s`,
               ),
             }),
+        ...parseAppliesTo(handler.applies_to, event, index),
       };
     });
   }
@@ -534,9 +587,9 @@ export async function loadHarness(
   );
 
   const specVersion = requiredString(parsed.spec_version, "spec_version");
-  if (specVersion !== HARNESS_SPEC_VERSION) {
+  if (!SUPPORTED_SPEC_VERSIONS.includes(specVersion)) {
     fail(
-      `unsupported spec_version "${specVersion}" (expected "${HARNESS_SPEC_VERSION}")`,
+      `unsupported spec_version "${specVersion}" (supported: ${SUPPORTED_SPEC_VERSIONS.join(", ")})`,
     );
   }
   if (parsed.kind !== "harness") {
