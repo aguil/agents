@@ -10,7 +10,7 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Finding, HarnessRunResult } from "@aguil/agents-core";
 import { ReplayAgentAdapter } from "@aguil/agents-execution";
 import { findingFingerprint } from "@aguil/agents-reporting";
@@ -160,11 +160,38 @@ export function deltaHash(delta: ParityDelta): string {
   return createHash("sha256").update(canonical).digest("hex");
 }
 
+/**
+ * Entry names come from manifest.json, which is data, not trusted config:
+ * a compromised corpus must not be able to point the referee at arbitrary
+ * host paths via `../` segments (it reads result.json/bundles/stdout from
+ * the resolved directory). Token grammar plus resolved containment check.
+ */
+const ENTRY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function resolveEntryDir(corpusDir: string, entryName: string): string {
+  if (!ENTRY_NAME_PATTERN.test(entryName) || entryName.includes("..")) {
+    throw new Error(
+      `replay-parity: corpus entry name "${entryName}" is invalid (allowed: letters, digits, '.', '_', '-')`,
+    );
+  }
+  const runsRoot = resolve(corpusDir, "runs");
+  const entryDir = resolve(runsRoot, entryName);
+  if (
+    entryDir !== join(runsRoot, entryName) ||
+    !entryDir.startsWith(`${runsRoot}/`)
+  ) {
+    throw new Error(
+      `replay-parity: corpus entry "${entryName}" escapes the corpus runs directory`,
+    );
+  }
+  return entryDir;
+}
+
 export async function replayEntry(
   corpusDir: string,
   entryName: string,
 ): Promise<{ recorded: RecordedResult; replayed: HarnessRunResult }> {
-  const entryDir = join(corpusDir, "runs", entryName);
+  const entryDir = resolveEntryDir(corpusDir, entryName);
   const recorded = (await Bun.file(
     join(entryDir, "result.json"),
   ).json()) as RecordedResult;

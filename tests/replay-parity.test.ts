@@ -4,6 +4,7 @@ import {
   computeDelta,
   deltaHash,
   findingKey,
+  resolveEntryDir,
 } from "../harnesses/code-review/src/replay-parity";
 
 function finding(overrides: Partial<Finding> = {}): Finding {
@@ -124,6 +125,25 @@ test("deltaHash is stable across object key order and distinct per delta", () =>
   expect(deltaHash(a)).toBe(deltaHash({ ...a }));
   expect(deltaHash(a)).not.toBe(deltaHash(b));
   expect(deltaHash(a)).toMatch(/^[0-9a-f]{64}$/);
+});
+
+test("corpus entry names cannot escape the runs directory", () => {
+  expect(resolveEntryDir("/corpus", "agents--code-review-abc")).toBe(
+    "/corpus/runs/agents--code-review-abc",
+  );
+  for (const hostile of [
+    "../secrets",
+    "a/../../etc",
+    "runs/../../x",
+    "a/b",
+    "/absolute",
+    ".hidden/..",
+    "..",
+  ]) {
+    expect(() => resolveEntryDir("/corpus", hostile)).toThrow(
+      /invalid|escapes/,
+    );
+  }
 });
 
 test("findingKey carries the canonical fingerprint", () => {
