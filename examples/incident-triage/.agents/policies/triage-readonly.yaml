@@ -3,7 +3,10 @@ description: Read-only investigation policy for scout, diagnose, and verify
 capabilities:
   filesystem:
     allow: ["**"]
-    deny: [".env", "**/secrets/**"]
+    # Deny secrets and the governance surfaces that enforce policy: even a
+    # read-only role must not be able to weaken .cursor/ hook config or
+    # .agents/ policy definitions.
+    deny: [".env", "**/secrets/**", ".cursor/**", ".agents/**"]
   exec:
     allow: ["rg", "grep", "cat", "ls", "bun run check.ts", "bun check.ts"]
     deny: ["rm", "git push", "curl", "wget"]

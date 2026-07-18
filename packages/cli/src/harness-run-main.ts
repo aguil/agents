@@ -162,18 +162,15 @@ async function setUpHookEnforcement(
 
   const mode = loaded.definition.execution?.mode ?? "parallel";
   if (mode === "chain") {
-    // Regeneration is awaited on the role-startup critical path; skip the
-    // rewrite when consecutive roles share an effective policy.
-    let lastPolicyId: string | undefined;
-    let wroteOnce = false;
     return {
+      // Regenerate unconditionally at every role start. Skipping the rewrite
+      // when the policy id is unchanged would let a role tamper with
+      // .cursor/hooks.json and have the next same-policy role reuse it; a
+      // governance surface must re-establish canonical enforcement per role.
+      // The idempotent JSON write is negligible next to that bypass window.
       onRoleStart: async (roleId: string) => {
         const policyId = roleEffectivePolicyId(loaded, roleId);
-        if (!wroteOnce || policyId !== lastPolicyId) {
-          await writeRoleHooks(loaded, args, policyId);
-          lastPolicyId = policyId;
-          wroteOnce = true;
-        }
+        await writeRoleHooks(loaded, args, policyId);
         console.warn(
           `harness run: role "${roleId}" enforced under policy "${policyId ?? "(none)"}"`,
         );

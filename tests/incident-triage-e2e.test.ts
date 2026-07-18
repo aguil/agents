@@ -263,6 +263,11 @@ test("the example harness configuration resolves per-role policies", async () =>
     harnessId: "incident-triage",
   });
   expect(loaded.rolePolicies.scout?.id).toBe("triage-readonly");
+  // Read-only roles must not be able to weaken enforcement surfaces either.
+  const scoutDeny =
+    loaded.rolePolicies.scout?.capabilities?.filesystem?.deny ?? [];
+  expect(scoutDeny).toContain(".cursor/**");
+  expect(scoutDeny).toContain(".agents/**");
   expect(loaded.rolePolicies.fix?.id).toBe("triage-fix");
   expect(loaded.rolePolicies.fix?.confirmations?.requiredFor).toEqual([
     "exec.unknown",
