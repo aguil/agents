@@ -192,6 +192,42 @@ async function setUpHookEnforcement(
   return {};
 }
 
+/**
+ * Build the orchestrator pass gate from `execution.pass_check`: run the
+ * command in the workspace after roles complete; exit 0 => passed. Runtime-
+ * evaluated so agent output cannot decide status. Undefined when the harness
+ * declares no pass_check.
+ */
+function makePassGate(
+  loaded: LoadedHarness,
+  workspacePath: string,
+): (() => Promise<boolean>) | undefined {
+  const execution = loaded.definition.execution;
+  if (
+    execution === undefined ||
+    execution.mode !== "chain" ||
+    execution.passCheck === undefined
+  ) {
+    return undefined;
+  }
+  const command = execution.passCheck;
+  return async () => {
+    const proc = Bun.spawn({
+      cmd: [...command],
+      cwd: workspacePath,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      console.warn(
+        `harness run: pass_check "${command.join(" ")}" exited ${exitCode}; run FAILED`,
+      );
+    }
+    return exitCode === 0;
+  };
+}
+
 /** Effective policy id for a role: role override, else harness default. */
 export function roleEffectivePolicyId(
   loaded: LoadedHarness,
@@ -245,11 +281,14 @@ export async function runHarnessRunCli(
     ],
   });
 
+  const passGate = makePassGate(loaded, workspacePath);
+
   const orchestrator = new NativeBunOrchestrator({
     definition: loaded.definition,
     adapter: constructAdapter(parsed.adapter),
     contextBundlePath,
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
+    ...(passGate === undefined ? {} : { passGate }),
   });
 
   const result = await orchestrator.run({

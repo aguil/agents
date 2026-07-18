@@ -38,6 +38,11 @@ test("loadHarness maps harness.yaml to orchestration types", async () => {
     order: ["scout", "diagnose"],
   });
 
+  // pass_check is optional and absent in this fixture.
+  expect(
+    (loaded.definition.execution as { passCheck?: unknown }).passCheck,
+  ).toBeUndefined();
+
   const preToolCall = loaded.hooks.pre_tool_call ?? [];
   expect(preToolCall).toHaveLength(1);
   expect(preToolCall[0].matcher).toBe("Execute");

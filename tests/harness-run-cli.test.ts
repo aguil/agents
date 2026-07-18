@@ -54,7 +54,7 @@ test("harness run rejects unknown adapters and arguments", async () => {
   expect(unknown.stderr).toContain('unknown argument "--frobnicate"');
 });
 
-test("harness run executes the incident-triage example chain with the fake adapter", async () => {
+test("harness run executes the full chain via the CLI; pass_check fails an unhealed run", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "harness-run-"));
   try {
     await cp(
@@ -74,11 +74,16 @@ test("harness run executes the incident-triage example chain with the fake adapt
       "fake",
       "--allow-unenforced-policy",
     ]);
-    expect(result.exitCode).toBe(0);
+    // The chain runs end to end (all roles complete)...
     expect(result.stdout).toContain("execution: chain");
     expect(result.stdout).toContain(
       "roles completed: scout,diagnose,fix,verify",
     );
+    // ...but the fake agent heals nothing, so the pass_check gate
+    // (bun run check.ts) fails the run — deterministic success signal.
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("pass_check");
+    expect(result.stderr).toContain("run FAILED");
     // Non-cursor adapters must loudly report missing hook enforcement.
     expect(result.stderr).toContain("WITHOUT generated hook enforcement");
   } finally {

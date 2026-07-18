@@ -49,6 +49,21 @@ recorded here rather than left implicit in the example PR (#74).
    about any per-role policy that is therefore coarsened, since per-role
    regeneration would race on the shared hook file.
 
+6. **Run status is decoupled from finding severity for generalized harnesses.**
+   A manual real-adapter run showed a live agent emits diagnostic findings (e.g.
+   scout calling the bug "critical") even when prompted for outcomes, and the
+   code-review status rule (`critical finding => failed`) then failed a run
+   whose incident was actually healed. The scripted E2E masked this (the fake
+   agent emits no happy-path findings). For execution-configured harnesses,
+   findings and outcomes are diagnostic payload and never drive status. Status
+   comes from role execution (failed/timed-out) plus an optional
+   **`execution.pass_check`** — a command the runtime runs in the workspace
+   after the chain (exit 0 => passed). It is deliberately runtime-evaluated, not
+   agent-reported: agent self-report is the same fragility that caused the bug.
+   Legacy harnesses (no `execution`) keep finding-severity status. For
+   incident-triage, `pass_check: ["bun","run","check.ts"]` makes success mean
+   "the incident is actually healed."
+
 **Consequences:**
 
 - The example lives under `examples/incident-triage/` as a reference, not a

@@ -37,3 +37,9 @@ roles:
 execution:
   mode: chain
   order: [scout, diagnose, fix, verify]
+  # Authoritative, deterministic success gate: the runtime runs this in the
+  # workspace after the chain completes. The run passes iff the incident is
+  # actually healed, regardless of the diagnostic findings/outcomes the
+  # agents emit. The verify role is the agent-facing confirmation; this is
+  # the machine truth.
+  pass_check: ["bun", "run", "check.ts"]

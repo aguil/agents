@@ -40,6 +40,14 @@ export interface ChainExecution {
    * needs them.
    */
   readonly onStepFailure?: "abort";
+  /**
+   * Command run in the workspace after all roles complete to determine run
+   * success (exit 0 => passed). The authoritative, deterministic pass gate —
+   * the runtime wires it to the orchestrator's passGate. Runtime-evaluated
+   * (not agent-reported) so diagnostic findings/outcomes cannot decide
+   * status. Declared in harness.yaml (build-time trusted config, like hooks).
+   */
+  readonly passCheck?: readonly string[];
 }
 
 export interface ValidationLoopExecution {

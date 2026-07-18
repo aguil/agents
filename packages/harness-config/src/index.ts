@@ -383,7 +383,18 @@ function parseExecution(
       if (order !== undefined) {
         requireRoles("execution.order", order);
       }
-      return { mode: "chain", ...(order === undefined ? {} : { order }) };
+      const passCheck = optionalStringArray(
+        record.pass_check,
+        "execution.pass_check",
+      );
+      if (passCheck !== undefined && passCheck.length === 0) {
+        fail("execution.pass_check must list at least one command token");
+      }
+      return {
+        mode: "chain",
+        ...(order === undefined ? {} : { order }),
+        ...(passCheck === undefined ? {} : { passCheck }),
+      };
     }
     case "validation-loop": {
       return {

@@ -84,6 +84,28 @@ function createIncidentAgent(options: { readonly applyFix: boolean }): {
         case "scout": {
           const alert = await readFile(join(workspace, "alert.log"), "utf8");
           const check = await runHealthCheck(workspace);
+          // A real agent also emits a diagnostic (often critical) finding
+          // describing the bug, even when prompted for outcomes. That must
+          // NOT fail a healed run — this is the regression guard for the
+          // false-failure the manual run surfaced.
+          yield createAgentEvent({
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "finding",
+            data: {
+              id: "scout-pagination-off-by-one",
+              severity: "critical",
+              title: "Page end index excludes the last item of each page",
+              description:
+                "paginate() slices one short, dropping the final item.",
+              evidence: "src/pagination.ts:21 uses cursor + pageSize - 1",
+              sourceRole: "scout",
+              validation: {
+                status: "verified",
+                details: "Reproduced via bun run check.ts (2 failing checks).",
+              },
+            },
+          });
           yield* outcomeEvents(request, {
             id: "scout-evidence",
             kind: "evidence",
@@ -188,6 +210,9 @@ async function runIncidentTriage(applyFix: boolean) {
     definition: loaded.definition,
     adapter: agent.adapter,
     contextBundlePath: join(scratchpadPath, "context.json"),
+    // Mirror the CLI: the authoritative pass gate runs the health check in
+    // the workspace. Status derives from this, not from emitted findings.
+    passGate: async () => (await runHealthCheck(workspace)).exitCode === 0,
   });
   const result = await orchestrator.run({
     runId: "e2e-incident-triage",
@@ -214,14 +239,27 @@ test("incident-triage chain heals the fixture end to end (happy path)", async ()
     const finalCheck = await runHealthCheck(workspace);
     expect(finalCheck.exitCode).toBe(0);
 
-    // Verify stayed silent, so the run passes with zero findings.
+    // Regression guard: the run PASSES even though a role emitted a critical
+    // diagnostic finding — status is driven by the pass_check gate (healed),
+    // not by finding severity. This is the false-failure the manual run
+    // caught; the pre-fix code returned "failed" here.
     expect(result.status).toBe("passed");
-    expect(result.findings).toHaveLength(0);
+    expect(
+      result.findings.some((f) => f.id === "scout-pagination-off-by-one"),
+    ).toBe(true);
 
-    // Falsification core: outcomes are generic kinds, not findings.
-    const kinds = (result.outcomes ?? []).map((outcome) => outcome.kind);
-    expect(kinds).toEqual(["evidence", "diagnosis", "remediation"]);
-    for (const outcome of result.outcomes ?? []) {
+    // Falsification core: the roles' native outcomes are generic kinds, not
+    // findings. (result.outcomes also carries findings-converted-to-outcomes;
+    // scope the claim to the non-finding outcomes the roles genuinely emit.)
+    const genericOutcomes = (result.outcomes ?? []).filter(
+      (outcome) => outcome.kind !== "finding",
+    );
+    expect(genericOutcomes.map((outcome) => outcome.kind)).toEqual([
+      "evidence",
+      "diagnosis",
+      "remediation",
+    ]);
+    for (const outcome of genericOutcomes) {
       expect(isFindingOutcome(outcome)).toBe(false);
       expect(harnessOutcomeToFinding(outcome)).toBeUndefined();
     }
@@ -247,11 +285,14 @@ test("incident-triage fails loudly when remediation does not heal the fixture", 
     const finalCheck = await runHealthCheck(workspace);
     expect(finalCheck.exitCode).toBe(1);
 
-    // Verify emitted a critical finding; the run fails rather than passing.
+    // The incident is not healed, so the pass_check gate fails the run —
+    // deterministically, regardless of what the agents emitted.
     expect(result.status).toBe("failed");
-    expect(result.findings).toHaveLength(1);
-    expect(result.findings[0].id).toBe("verification-failed");
-    expect(result.findings[0].severity).toBe("critical");
+    // verify still emits its diagnostic finding, but it is not what decides
+    // status now.
+    expect(result.findings.some((f) => f.id === "verification-failed")).toBe(
+      true,
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
