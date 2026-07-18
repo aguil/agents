@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","cwd":"/workspace","session_id":"00000000-0000-0000-0000-000000000000","model":"fixture","permissionMode":"default"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reviewing the bundle now."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"{\"finding\":{\"id\":\"quality-fixture-nested\",\"severity\":\"warning\",\"title\":\"Nested fixture finding\",\"description\":\"Emitted inside assistant text the way real stream-json runs do.\",\"evidence\":\"fixture stdout.log line 3\",\"sourceRole\":\"quality\",\"validation\":{\"status\":\"verified\",\"details\":\"synthetic recording\"}}}"}]}}
+{"finding":{"id":"quality-fixture-toplevel","severity":"warning","title":"Top-level fixture finding","description":"Emitted as a standalone stdout line.","evidence":"fixture stdout.log line 4","sourceRole":"quality","validation":{"status":"verified","details":"synthetic recording"}}}
+{"outcome":{"id":"quality-fixture-outcome","kind":"evidence","sourceRole":"quality","title":"Fixture outcome","data":{"note":"replayed"}}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1200,"result":"done"}

@@ -16,6 +16,9 @@ docs/exploration/
 # keep it tracked despite any global `*.log` ignore (repo patterns win).
 !examples/incident-triage/fixture/alert.log
 
+# Recorded-run replay fixture (stream-json stdout) must stay tracked too.
+!tests/fixtures/replay-run/**/stdout.log
+
 .env
 .env.*
 !.env.example
