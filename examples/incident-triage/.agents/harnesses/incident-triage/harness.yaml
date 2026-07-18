@@ -1,0 +1,39 @@
+spec_version: "0.1"
+kind: harness
+
+harness:
+  id: incident-triage
+  description: >-
+    Proof harness (ADR 0005): investigate a synthetic incident, diagnose the
+    root cause, apply a fix, and verify recovery — expressed entirely as
+    configuration.
+
+# Harness default; roles may override with their own policy reference.
+policy: triage-readonly
+
+roles:
+  scout:
+    description: Investigate incident signals and locate suspect code
+    prompt_path: prompts/scout.md
+    timeout_ms: 300000
+    allowed_commands: ["rg", "cat", "ls", "bun run check.ts"]
+  diagnose:
+    description: Identify the root cause from scout findings
+    prompt_path: prompts/diagnose.md
+    timeout_ms: 300000
+    allowed_commands: ["rg", "cat", "bun run check.ts"]
+  fix:
+    description: Apply the minimal remediation for the diagnosed root cause
+    prompt_path: prompts/fix.md
+    timeout_ms: 420000
+    policy: triage-fix
+    allowed_commands: ["rg", "cat", "bun run check.ts"]
+  verify:
+    description: Run the health signal and report recovery status
+    prompt_path: prompts/verify.md
+    timeout_ms: 180000
+    allowed_commands: ["bun run check.ts"]
+
+execution:
+  mode: chain
+  order: [scout, diagnose, fix, verify]

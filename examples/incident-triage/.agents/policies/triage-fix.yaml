@@ -1,0 +1,15 @@
+id: triage-fix
+description: Remediation policy for the fix role — write allowed, exec gated
+capabilities:
+  filesystem:
+    allow: ["**"]
+    deny: [".env", "**/secrets/**", "alert.log", "check.ts"]
+  exec:
+    allow: ["rg", "grep", "cat", "ls", "bun run check.ts", "bun check.ts"]
+    deny: ["rm", "git push", "curl", "wget"]
+  network:
+    deny: ["*"]
+confirmations:
+  requiredFor: [exec.unknown]
+limits:
+  timeout_ms: 300000

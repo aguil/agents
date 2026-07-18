@@ -1,0 +1,13 @@
+id: triage-readonly
+description: Read-only investigation policy for scout, diagnose, and verify
+capabilities:
+  filesystem:
+    allow: ["**"]
+    deny: [".env", "**/secrets/**"]
+  exec:
+    allow: ["rg", "grep", "cat", "ls", "bun run check.ts", "bun check.ts"]
+    deny: ["rm", "git push", "curl", "wget"]
+  network:
+    deny: ["*"]
+limits:
+  timeout_ms: 300000
