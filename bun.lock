@@ -98,6 +98,13 @@
         "@aguil/agents-orchestration": "workspace:*",
       },
     },
+    "packages/hooks": {
+      "name": "@aguil/agents-hooks",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-harness-config": "workspace:*",
+      },
+    },
     "packages/orchestration": {
       "name": "@aguil/agents-orchestration",
       "version": "0.0.0",
@@ -222,6 +229,8 @@
     "@aguil/agents-github": ["@aguil/agents-github@workspace:packages/github"],
 
     "@aguil/agents-harness-config": ["@aguil/agents-harness-config@workspace:packages/harness-config"],
+
+    "@aguil/agents-hooks": ["@aguil/agents-hooks@workspace:packages/hooks"],
 
     "@aguil/agents-orchestration": ["@aguil/agents-orchestration@workspace:packages/orchestration"],
 
