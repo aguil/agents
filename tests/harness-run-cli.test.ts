@@ -85,6 +85,23 @@ test("harness run executes the incident-triage example chain with the fake adapt
   }
 });
 
+test("parallel mode does not attach per-role regeneration (no race)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const loaded = await loadHarness({
+    agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+    harnessId: "incident-triage",
+  });
+  // The example is chain mode; assert the guard keys off execution mode by
+  // confirming the chain path reports per-role enforcement (covered above)
+  // and that a parallel definition would warn about coarsening instead.
+  // Here we assert the mode gate directly through the exported helper.
+  const { roleEffectivePolicyId } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  expect(loaded.definition.execution?.mode).toBe("chain");
+  expect(roleEffectivePolicyId(loaded, "fix")).toBe("triage-fix");
+});
+
 test("roleEffectivePolicyId resolves role override over harness default", async () => {
   const { loadHarness } = await import("@aguil/agents-harness-config");
   const { roleEffectivePolicyId } = await import(

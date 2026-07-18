@@ -107,15 +107,19 @@ async function writeRoleHooks(
 }
 
 /**
- * Build the onRoleStart callback that regenerates hook config with each
- * role's effective policy (role override > harness default). Returns
- * undefined when there is nothing to enforce, or warns and returns
- * undefined for non-cursor adapters so the gap is visible, not silent.
+ * Decide how hook config is materialized for this run.
+ *
+ * Per-role regeneration rewrites the single workspace `.cursor/hooks.json`
+ * before each role, which is only race-free when roles run sequentially
+ * (chain mode). For parallel and validation-loop modes we generate once
+ * from the harness-level policy and warn about any role whose stricter
+ * own-policy is therefore not enforced. Returns the onRoleStart callback
+ * (chain) or undefined after doing one-shot generation (other modes).
  */
-function makeRoleHookRegenerator(
+async function setUpHookEnforcement(
   loaded: LoadedHarness,
   args: HarnessRunArgs,
-): ((roleId: string) => Promise<void>) | undefined {
+): Promise<((roleId: string) => Promise<void>) | undefined> {
   const hasHooks = Object.keys(loaded.hooks).length > 0;
   const hasAnyPolicy =
     loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0;
@@ -128,13 +132,30 @@ function makeRoleHookRegenerator(
     );
     return undefined;
   }
-  return async (roleId: string) => {
-    const policyId = roleEffectivePolicyId(loaded, roleId);
-    await writeRoleHooks(loaded, args, policyId);
+
+  const mode = loaded.definition.execution?.mode ?? "parallel";
+  if (mode === "chain") {
+    return async (roleId: string) => {
+      const policyId = roleEffectivePolicyId(loaded, roleId);
+      await writeRoleHooks(loaded, args, policyId);
+      console.warn(
+        `harness run: role "${roleId}" enforced under policy "${policyId ?? "(none)"}"`,
+      );
+    };
+  }
+
+  // Non-sequential: one-shot generation from the harness-level policy;
+  // per-role regeneration would race on the shared hooks file.
+  await writeRoleHooks(loaded, args, loaded.policy?.id);
+  const coarsened = Object.keys(loaded.rolePolicies).filter(
+    (roleId) => loaded.rolePolicies[roleId]?.id !== loaded.policy?.id,
+  );
+  if (coarsened.length > 0) {
     console.warn(
-      `harness run: role "${roleId}" enforced under policy "${policyId ?? "(none)"}"`,
+      `harness run: ${mode} mode enforces the harness-level policy "${loaded.policy?.id ?? "(none)"}" for all roles; per-role policies for [${coarsened.join(", ")}] require chain mode`,
     );
-  };
+  }
+  return undefined;
 }
 
 /** Effective policy id for a role: role override, else harness default. */
@@ -167,7 +188,7 @@ export async function runHarnessRunCli(
     return 1;
   }
 
-  const onRoleStart = makeRoleHookRegenerator(loaded, parsed);
+  const onRoleStart = await setUpHookEnforcement(loaded, parsed);
 
   const workspacePath = resolve(parsed.workspace);
   const runId = createRunId(`harness-${parsed.harnessId}`);
