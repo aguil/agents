@@ -512,6 +512,54 @@ test("enablement referencing an unavailable binding aborts fail-closed", async (
   }
 });
 
+test("declared reporting template renders report.md into the scratchpad", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-report-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-report-agents-"));
+  try {
+    const {
+      mkdir: mkdirP,
+      writeFile: writeFileP,
+      readFile: readFileP,
+      readdir: readdirP,
+    } = await import("node:fs/promises");
+    const dir = join(agentsDir, "harnesses", "reported");
+    await mkdirP(dir, { recursive: true });
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: reported }",
+        "reporting:",
+        "  template: builtin:outcomes-markdown",
+        "roles:",
+        "  a:",
+        "    description: A",
+        '    prompt: "p"',
+        "execution: { mode: chain, order: [a] }",
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "reported",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    expect(result.stdout).toContain("report: ");
+    const runsDir = join(workspace, ".agents-harness", "runs");
+    const [runDir] = await readdirP(runsDir);
+    const report = await readFileP(join(runsDir, runDir, "report.md"), "utf8");
+    expect(report).toContain("# Harness Report");
+    expect(report.endsWith("\n")).toBe(true);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});
+
 test("harness run surfaces loader errors with a nonzero exit", async () => {
   const result = await runHarnessCli([
     "no-such-harness",
