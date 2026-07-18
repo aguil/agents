@@ -15,17 +15,27 @@ support multiple specialized harnesses; harness-specific logic belongs in
 | `packages/reporting`     | `@aguil/agents-reporting`     | Validation filtering, finding deduplication (canonical fingerprint), severity status, Markdown rendering                                                         |
 | `packages/telemetry`     | `@aguil/agents-telemetry`     | Structured JSONL event sinks; future observability integrations                                                                                                  |
 
+## Harness governance packages
+
+Configuration and policy enforcement shared by all harnesses (ADR 0005/0006):
+
+| Package                   | npm name                       | Owns                                                                                                                                                                           |
+| ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/harness-config` | `@aguil/agents-harness-config` | `.agents/` loader: `harness.yaml` spec v0.1 (roles, execution, hooks), `policies/*.yaml` (AGENTS-1 capabilities/limits/confirmations), `manifest.yaml`; single-file resolution |
+| `packages/policy`         | `@aguil/agents-policy`         | Native policy evaluator: ACS 5-verdict model, deny-wins composition, fail-closed semantics, hook-contract adapter                                                              |
+| `packages/hooks`          | `@aguil/agents-hooks`          | Adapter hook config generation (Cursor `.cursor/hooks.json`): canonical event projection with builtin policy-eval bridge first                                                 |
+
 ## CLI and tooling packages
 
-| Package                      | npm name                          | Owns                                                                                                                            |
-| ---------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/cli`               | `@aguil/agents-cli`               | CLI entry points for `agents` binary: code-review, triage, pr-feedback, doctor, skills; jj workspace auto-resolution for git/gh |
-| `packages/triage`            | `@aguil/agents-triage`            | `TriageItemV1` / `TriageEnvelopeV1` schema; triage queue file I/O (JSON, toon); `defaultTriageQueueDir`                         |
-| `packages/pr-feedback`       | `@aguil/agents-pr-feedback`       | PR review thread collection, `PrFeedbackDocumentV1`/`PrFeedbackResponsesV1` schemas, thread reply submission                    |
-| `packages/code-review-inbox` | `@aguil/agents-code-review-inbox` | GitHub review assignment inbox source; review draft parsing and templating for `agents code-review inbox`                       |
-| `packages/code-review-post`  | `@aguil/agents-code-review-post`  | Pending-review posting via GitHub API (create, comment, submit)                                                                 |
-| `packages/github`            | `@aguil/agents-github`            | Thin `gh` CLI runner helpers (`runGhJson`, `runGhText`) used across packages                                                    |
-| `packages/publish`           | `@aguil/agents-publish`           | Publish gate evaluation; harness result publication hooks                                                                       |
+| Package                      | npm name                          | Owns                                                                                                                                         |
+| ---------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/cli`               | `@aguil/agents-cli`               | CLI entry points for `agents` binary: code-review, triage, pr-feedback, policy-eval, doctor, skills; jj workspace auto-resolution for git/gh |
+| `packages/triage`            | `@aguil/agents-triage`            | `TriageItemV1` / `TriageEnvelopeV1` schema; triage queue file I/O (JSON, toon); `defaultTriageQueueDir`                                      |
+| `packages/pr-feedback`       | `@aguil/agents-pr-feedback`       | PR review thread collection, `PrFeedbackDocumentV1`/`PrFeedbackResponsesV1` schemas, thread reply submission                                 |
+| `packages/code-review-inbox` | `@aguil/agents-code-review-inbox` | GitHub review assignment inbox source; review draft parsing and templating for `agents code-review inbox`                                    |
+| `packages/code-review-post`  | `@aguil/agents-code-review-post`  | Pending-review posting via GitHub API (create, comment, submit)                                                                              |
+| `packages/github`            | `@aguil/agents-github`            | Thin `gh` CLI runner helpers (`runGhJson`, `runGhText`) used across packages                                                                 |
+| `packages/publish`           | `@aguil/agents-publish`           | Publish gate evaluation; harness result publication hooks                                                                                    |
 
 ## `agentsd` daemon packages
 

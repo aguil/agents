@@ -152,6 +152,11 @@ export async function main(
     return await runTriageCli(argv);
   }
 
+  if (argv[0] === "policy-eval") {
+    const { runPolicyEvalCli } = await import("./policy-eval-main");
+    return await runPolicyEvalCli(argv.slice(1));
+  }
+
   if (argv[0] === "pr-feedback") {
     const { runPrFeedbackCli } = await import("./pr-feedback-main");
     return await runPrFeedbackCli(argv.slice(1));
