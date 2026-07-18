@@ -131,7 +131,11 @@ export const codeReviewHarnessDefinition: HarnessDefinition = {
   ],
 };
 
-async function writeLatestCodeReviewDiscoveryPointer(options: {
+/**
+ * Shared with the declarative runner so both paths publish discovery pointers
+ * under the same scratchpad-root rules.
+ */
+export async function writeLatestCodeReviewDiscoveryPointer(options: {
   readonly workspacePath: string;
   readonly scratchpadRoot: string;
   readonly resultPath: string;
@@ -474,14 +478,19 @@ function definitionForTriageWithCommands(
   };
 }
 
-function parseTriageTier(value: string | undefined): ReviewTriageTier {
+/** Shared with the declarative runner to keep unknown-tier fallback identical. */
+export function parseTriageTier(value: string | undefined): ReviewTriageTier {
   if (value === "trivial" || value === "lite" || value === "full") {
     return value;
   }
   return "lite";
 }
 
-function parseReviewPrMetadataFromContext(value: string | undefined):
+/**
+ * Shared with the declarative runner because PR metadata is a deterministic
+ * part of the code-review result contract.
+ */
+export function parseReviewPrMetadataFromContext(value: string | undefined):
   | {
       readonly number: number;
       readonly headSha?: string;
@@ -519,7 +528,11 @@ function extractTaggedValue(value: string, tag: string): string | undefined {
   return line?.slice(tag.length).trim();
 }
 
-function combineStatuses(
+/**
+ * Exported for the config-runner (subpath module): status composition is
+ * part of the parity contract and must not be reimplemented there.
+ */
+export function combineStatuses(
   rawStatus: HarnessRunResult["status"],
   findingStatus: HarnessRunResult["status"],
 ): HarnessRunResult["status"] {
@@ -535,7 +548,9 @@ function combineStatuses(
   return "passed";
 }
 
-async function loadContextBundleFromPath(path: string): Promise<ContextBundle> {
+export async function loadContextBundleFromPath(
+  path: string,
+): Promise<ContextBundle> {
   const raw = await readFile(resolve(path), "utf8");
   const parsed = JSON.parse(raw) as {
     readonly id?: unknown;
@@ -547,7 +562,8 @@ async function loadContextBundleFromPath(path: string): Promise<ContextBundle> {
   return parsed as ContextBundle;
 }
 
-async function detectWorkspaceVcsMode(
+/** Shared with the declarative runner so command grants remain VCS-aware. */
+export async function detectWorkspaceVcsMode(
   workspacePath: string,
 ): Promise<"jj" | "git" | "unknown"> {
   const hasJj = await pathExists(join(workspacePath, ".jj"));
@@ -561,7 +577,8 @@ async function detectWorkspaceVcsMode(
   return "unknown";
 }
 
-function defaultCommandsForVcsMode(
+/** Shared with the declarative runner so role command grants cannot drift. */
+export function defaultCommandsForVcsMode(
   vcsMode: "jj" | "git" | "unknown",
 ): readonly string[] {
   if (vcsMode === "jj") {
