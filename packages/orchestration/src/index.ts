@@ -7,6 +7,7 @@ import type {
   HarnessRunResult,
 } from "@aguil/agents-core";
 import {
+  createAgentEvent,
   ensureDirectory,
   findingToHarnessOutcome,
   isHarnessOutcome,
@@ -177,6 +178,23 @@ export interface NativeBunOrchestratorOptions {
     readonly findings: readonly Finding[];
     readonly outcomes: readonly HarnessOutcome[];
   }) => Promise<boolean> | boolean;
+  /**
+   * Schema enforcement over a role's collected outcomes (findings-as-
+   * outcomes included). Non-empty violations fail the role — an outcome
+   * that breaks its declared contract is a protocol violation, same class
+   * as a malformed envelope. Injected (like passGate/roleEnv) so the spec
+   * evaluation dependency stays out of orchestration.
+   */
+  readonly validateRoleOutcomes?: (input: {
+    readonly roleId: string;
+    readonly outcomes: readonly HarnessOutcome[];
+  }) => readonly RoleOutcomeViolation[];
+}
+
+export interface RoleOutcomeViolation {
+  readonly outcomeId: string;
+  readonly kind: string;
+  readonly errors: readonly string[];
 }
 
 interface RoleRunOutcome {
@@ -484,6 +502,31 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       }
       if (event.type === "error") {
         outcome = hasTimedOut(event.data) ? "timed_out" : "failed";
+      }
+    }
+
+    if (outcome === "completed" && this.options.validateRoleOutcomes) {
+      const violations = this.options.validateRoleOutcomes({
+        roleId: role.id,
+        outcomes: roleHarnessOutcomes({
+          roleId: role.id,
+          findings,
+          genericOutcomes,
+          artifacts: [],
+          outcome,
+        }),
+      });
+      if (violations.length > 0) {
+        outcome = "failed";
+        await this.options.eventSink?.write(
+          createAgentEvent({
+            runId: request.runId,
+            roleId: role.id,
+            type: "error",
+            message: `role output violates declared outcome schemas`,
+            data: { violations },
+          }),
+        );
       }
     }
 

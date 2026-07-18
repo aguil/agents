@@ -165,6 +165,81 @@ test("chain mode runs roles sequentially and interpolates {previous} and {output
   });
 });
 
+test("validateRoleOutcomes violations fail the emitting role", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const badOutcome: HarnessOutcome = {
+      id: "evidence-1",
+      kind: "evidence",
+      sourceRole: "scout",
+      title: "Evidence without required data",
+      data: {},
+    };
+    const { adapter, invocationOrder } = createScriptedAdapter({
+      scout: { outcomes: [badOutcome] },
+      fix: {},
+    });
+    const definition: HarnessDefinition = {
+      id: "triage",
+      roles: [makeRole("scout", "Investigate."), makeRole("fix", "Fix.")],
+      execution: { mode: "chain" },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+      validateRoleOutcomes: ({ roleId, outcomes }) =>
+        outcomes
+          .filter(
+            (outcome) =>
+              outcome.kind === "evidence" &&
+              (outcome.data as { alert?: unknown }).alert === undefined,
+          )
+          .map((outcome) => ({
+            outcomeId: outcome.id,
+            kind: outcome.kind,
+            errors: [`${roleId}: data.alert is required`],
+          })),
+    });
+
+    const result = await orchestrator.run(makeRequest(scratchpadPath));
+
+    // Schema violation is a protocol violation: role fails, chain aborts.
+    expect(invocationOrder).toEqual(["scout"]);
+    expect(result.status).toBe("error");
+    expect(result.metadata?.failed_roles).toBe("scout");
+  });
+});
+
+test("validateRoleOutcomes passes clean roles through untouched", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const goodOutcome: HarnessOutcome = {
+      id: "evidence-1",
+      kind: "evidence",
+      sourceRole: "scout",
+      title: "Evidence with data",
+      data: { alert: "disk full" },
+    };
+    const { adapter } = createScriptedAdapter({
+      scout: { outcomes: [goodOutcome] },
+    });
+    const definition: HarnessDefinition = {
+      id: "triage",
+      roles: [makeRole("scout", "Investigate.")],
+      execution: { mode: "chain" },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+      validateRoleOutcomes: () => [],
+    });
+
+    const result = await orchestrator.run(makeRequest(scratchpadPath));
+    expect(result.metadata?.completed_roles).toBe("scout");
+    expect(result.status).toBe("passed");
+  });
+});
+
 test("chain mode aborts at first failed step", async () => {
   await withScratchpad(async (scratchpadPath) => {
     const { adapter, invocationOrder } = createScriptedAdapter({
