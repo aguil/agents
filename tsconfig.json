@@ -29,6 +29,9 @@
       "@aguil/agents-code-review/replay-parity": [
         "harnesses/code-review/src/replay-parity.ts"
       ],
+      "@aguil/agents-code-review/config-runner": [
+        "harnesses/code-review/src/config-runner.ts"
+      ],
       "@aguil/agents-code-review-post": [
         "packages/code-review-post/src/index.ts"
       ],
