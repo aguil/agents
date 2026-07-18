@@ -26,6 +26,12 @@ export interface AgentRunRequest {
   readonly timeoutMs: number;
   readonly allowedCommands: readonly string[];
   readonly metadata?: Readonly<Record<string, string>>;
+  /**
+   * Merged into the subprocess environment at spawn time. Per-role policy
+   * enforcement identity travels here so hook processes spawned by the agent
+   * CLI inherit it.
+   */
+  readonly env?: Readonly<Record<string, string>>;
   /** When aborted, subprocess adapters terminate the child (SIGTERM then SIGKILL). */
   readonly signal?: AbortSignal;
 }
@@ -245,6 +251,7 @@ export class SubprocessAgentAdapter implements AgentAdapter {
         stdin: "ignore",
         env: {
           ...Bun.env,
+          ...request.env,
           ...command.env,
           AGENTS_REQUEST_PATH: requestPath,
         },

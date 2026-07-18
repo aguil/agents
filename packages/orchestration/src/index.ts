@@ -150,6 +150,15 @@ export interface NativeBunOrchestratorOptions {
    */
   readonly onRoleStart?: (roleId: string) => Promise<void> | void;
   /**
+   * Per-role environment merged into each role's agent subprocess spawn.
+   * Unlike onRoleStart (shared-file mutation, sequencing-sensitive), env is
+   * process-scoped and therefore safe in all execution modes including
+   * parallel.
+   */
+  readonly roleEnv?: (
+    roleId: string,
+  ) => Readonly<Record<string, string>> | undefined;
+  /**
    * Authoritative pass gate for execution-configured (generalized)
    * harnesses. Evaluated after all roles complete without failing/timing
    * out; `false` makes the run `failed`, `true`/absent makes it `passed`.
@@ -433,6 +442,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     );
     const findings: Finding[] = [];
     let outcome: "completed" | "timed_out" | "failed" = "completed";
+    const env = this.options.roleEnv?.(role.id);
 
     const agentRequest: AgentRunRequest = {
       runId: request.runId,
@@ -448,6 +458,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
         this.options.definition.defaultAllowedCommands ??
         [],
       metadata: request.metadata,
+      ...(env === undefined ? {} : { env }),
     };
 
     const genericOutcomes: HarnessOutcome[] = [];
