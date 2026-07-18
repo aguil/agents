@@ -107,6 +107,13 @@
         "@aguil/agents-telemetry": "workspace:*",
       },
     },
+    "packages/policy": {
+      "name": "@aguil/agents-policy",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aguil/agents-harness-config": "workspace:*",
+      },
+    },
     "packages/pr-feedback": {
       "name": "@aguil/agents-pr-feedback",
       "version": "0.0.0",
@@ -217,6 +224,8 @@
     "@aguil/agents-harness-config": ["@aguil/agents-harness-config@workspace:packages/harness-config"],
 
     "@aguil/agents-orchestration": ["@aguil/agents-orchestration@workspace:packages/orchestration"],
+
+    "@aguil/agents-policy": ["@aguil/agents-policy@workspace:packages/policy"],
 
     "@aguil/agents-pr-feedback": ["@aguil/agents-pr-feedback@workspace:packages/pr-feedback"],
 
