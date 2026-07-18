@@ -7,6 +7,15 @@ import type {
 } from "@aguil/agents-orchestration";
 import { evaluate, parse } from "@marcbachmann/cel-js";
 
+export type {
+  ApplyFindingPipelinesConfig,
+  OutcomeSchemaViolation,
+} from "./output-pipeline";
+export {
+  applyFindingPipelines,
+  validateOutcomesAgainstSchemas,
+} from "./output-pipeline";
+
 export const HARNESS_SPEC_VERSION = "0.2";
 
 /**
@@ -97,6 +106,19 @@ export interface ContextProviderSpec {
   readonly params: Readonly<Record<string, unknown>>;
 }
 
+export type BuiltinOutcomeSchema = "builtin:finding";
+
+export interface RecordOutcomeSchema {
+  readonly required?: readonly string[];
+  readonly dataRequired?: readonly string[];
+}
+
+export type OutcomeSchema = BuiltinOutcomeSchema | RecordOutcomeSchema;
+export type OutputSchemas = Readonly<Record<string, OutcomeSchema>>;
+
+export type FindingFilterStrategy = "builtin:actionable";
+export type FindingDeduperStrategy = "builtin:fingerprint";
+
 export interface LoadedHarness {
   readonly definition: HarnessDefinition;
   /** Harness-level default policy (when `policy:` is declared). */
@@ -109,6 +131,9 @@ export interface LoadedHarness {
   readonly rolePolicies: Readonly<Record<string, PolicySpec>>;
   readonly hooks: HooksSpec;
   readonly contextProviders?: readonly ContextProviderSpec[];
+  readonly outputSchemas?: OutputSchemas;
+  readonly findingFilters?: readonly FindingFilterStrategy[];
+  readonly findingDedupers?: readonly FindingDeduperStrategy[];
   /** Directory containing harness.yaml (prompt paths resolve against it). */
   readonly harnessDir: string;
 }
@@ -185,6 +210,19 @@ function optionalStringArray(
     value.some((entry) => typeof entry !== "string")
   ) {
     fail(`${label} must be a list of strings`);
+  }
+  return value as readonly string[];
+}
+
+function nonEmptyStringList(value: unknown, label: string): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some(
+      (entry) => typeof entry !== "string" || entry.trim().length === 0,
+    )
+  ) {
+    fail(`${label} must be a non-empty list of non-empty strings`);
   }
   return value as readonly string[];
 }
@@ -654,6 +692,96 @@ function parseContext(
   });
 }
 
+const OUTPUT_SCHEMA_FIELDS: ReadonlySet<string> = new Set([
+  "required",
+  "data_required",
+]);
+
+function parseOutputSchemas(value: unknown): OutputSchemas | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const output = asRecord(value, "output");
+  const outputUnknownKeys = Object.keys(output).filter(
+    (key) => key !== "schemas",
+  );
+  if (outputUnknownKeys.length > 0) {
+    fail(
+      `output has unsupported fields: ${outputUnknownKeys.join(", ")} (supported: schemas)`,
+    );
+  }
+  const schemas = asRecord(output.schemas, "output.schemas");
+  const parsed: Record<string, OutcomeSchema> = {};
+  for (const [kind, value] of Object.entries(schemas)) {
+    assertValidIdToken("outcome kind", kind);
+    const label = `output.schemas.${kind}`;
+    if (typeof value === "string") {
+      if (value !== "builtin:finding") {
+        fail(
+          `${label} has unknown builtin schema "${value}" (supported: builtin:finding)`,
+        );
+      }
+      if (kind !== "finding") {
+        fail(`${label} may use builtin:finding only for kind "finding"`);
+      }
+      parsed[kind] = value;
+      continue;
+    }
+
+    const schema = asRecord(value, label);
+    const unknownKeys = Object.keys(schema).filter(
+      (key) => !OUTPUT_SCHEMA_FIELDS.has(key),
+    );
+    if (unknownKeys.length > 0) {
+      fail(
+        `${label} has unsupported fields: ${unknownKeys.join(", ")} (supported: required, data_required)`,
+      );
+    }
+    parsed[kind] = {
+      ...(schema.required === undefined
+        ? {}
+        : {
+            required: nonEmptyStringList(schema.required, `${label}.required`),
+          }),
+      ...(schema.data_required === undefined
+        ? {}
+        : {
+            dataRequired: nonEmptyStringList(
+              schema.data_required,
+              `${label}.data_required`,
+            ),
+          }),
+    };
+  }
+  return parsed;
+}
+
+function parseFindingStrategies<T extends string>(
+  value: unknown,
+  section: string,
+  supported: readonly T[],
+): readonly T[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, section);
+  const unknownKeys = Object.keys(record).filter((key) => key !== "findings");
+  if (unknownKeys.length > 0) {
+    fail(
+      `${section} has unsupported fields: ${unknownKeys.join(", ")} (supported: findings)`,
+    );
+  }
+  const strategies = nonEmptyStringList(record.findings, `${section}.findings`);
+  for (const strategy of strategies) {
+    if (!(supported as readonly string[]).includes(strategy)) {
+      fail(
+        `${section}.findings has unknown strategy "${strategy}" (supported: ${supported.join(", ")})`,
+      );
+    }
+  }
+  return strategies as readonly T[];
+}
+
 /**
  * Policy and harness ids become filesystem path segments (and, for policy
  * ids, shell command arguments), so they are restricted to a conservative
@@ -740,6 +868,15 @@ export async function loadHarness(
   const execution = parseExecution(parsed.execution, roleIds);
   const hooks = parseHooks(parsed.hooks, harnessDir);
   const contextProviders = parseContext(parsed.context);
+  const outputSchemas = parseOutputSchemas(parsed.output);
+  const findingFilters = parseFindingStrategies(parsed.filtering, "filtering", [
+    "builtin:actionable",
+  ] as const);
+  const findingDedupers = parseFindingStrategies(
+    parsed.deduplication,
+    "deduplication",
+    ["builtin:fingerprint"] as const,
+  );
 
   const policyId = optionalString(parsed.policy, "policy");
   const policy =
@@ -785,6 +922,9 @@ export async function loadHarness(
     rolePolicies,
     hooks,
     ...(contextProviders === undefined ? {} : { contextProviders }),
+    ...(outputSchemas === undefined ? {} : { outputSchemas }),
+    ...(findingFilters === undefined ? {} : { findingFilters }),
+    ...(findingDedupers === undefined ? {} : { findingDedupers }),
     harnessDir,
   };
 }

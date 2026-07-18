@@ -5,6 +5,7 @@ import {
   resolveContextProvider,
   writeContextBundle,
 } from "@aguil/agents-context";
+import type { HarnessOutcome } from "@aguil/agents-core";
 import {
   createRunId,
   isReviewTriageTier,
@@ -18,7 +19,12 @@ import {
   OpenCodeAdapter,
 } from "@aguil/agents-execution";
 import type { LoadedHarness } from "@aguil/agents-harness-config";
-import { filterEnabledRoles, loadHarness } from "@aguil/agents-harness-config";
+import {
+  applyFindingPipelines,
+  filterEnabledRoles,
+  loadHarness,
+  validateOutcomesAgainstSchemas,
+} from "@aguil/agents-harness-config";
 import {
   generateCursorHooksConfig,
   renderCursorHooksConfig,
@@ -369,6 +375,12 @@ export async function runHarnessRunCli(
   }
 
   const passGate = makePassGate(loaded, workspacePath);
+  const outputSchemas = loaded.outputSchemas;
+  const validateRoleOutcomes =
+    outputSchemas === undefined
+      ? undefined
+      : (input: { readonly outcomes: readonly HarnessOutcome[] }) =>
+          validateOutcomesAgainstSchemas(input.outcomes, outputSchemas);
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
@@ -377,6 +389,7 @@ export async function runHarnessRunCli(
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),
     ...(passGate === undefined ? {} : { passGate }),
+    ...(validateRoleOutcomes === undefined ? {} : { validateRoleOutcomes }),
   });
 
   const result = await orchestrator.run({
@@ -395,6 +408,25 @@ export async function runHarnessRunCli(
   );
   if ((result.metadata?.failed_roles ?? "") !== "") {
     console.log(`roles failed: ${result.metadata?.failed_roles}`);
+  }
+  // Declared pipelines shape the reported findings the same way the
+  // code-review package does imperatively; the raw count is kept visible
+  // so filtering is observable, never silent.
+  if (
+    loaded.findingFilters !== undefined ||
+    loaded.findingDedupers !== undefined
+  ) {
+    const pipelined = applyFindingPipelines(result.findings, {
+      ...(loaded.findingFilters === undefined
+        ? {}
+        : { filters: loaded.findingFilters }),
+      ...(loaded.findingDedupers === undefined
+        ? {}
+        : { dedupers: loaded.findingDedupers }),
+    });
+    console.log(
+      `findings: ${pipelined.length} after pipelines (${result.findings.length} raw)`,
+    );
   }
   for (const outcome of result.outcomes ?? []) {
     console.log(

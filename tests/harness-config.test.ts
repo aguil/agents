@@ -649,3 +649,131 @@ test("loadHarness rejects malformed context sections", async () => {
     await rm(scratch, { recursive: true, force: true });
   }
 });
+
+test("loadHarness carries output schemas and finding pipelines", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "outputs");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: outputs }",
+        "roles: { a: { description: A } }",
+        "output:",
+        "  schemas:",
+        "    finding: builtin:finding",
+        "    evidence:",
+        "      required: [id, kind, title]",
+        "      data_required: [alert]",
+        "filtering:",
+        "  findings: [builtin:actionable]",
+        "deduplication:",
+        "  findings: [builtin:fingerprint]",
+      ].join("\n"),
+    );
+
+    const loaded = await loadHarness({
+      agentsDir: scratch,
+      harnessId: "outputs",
+    });
+    expect(loaded.outputSchemas).toEqual({
+      finding: "builtin:finding",
+      evidence: {
+        required: ["id", "kind", "title"],
+        dataRequired: ["alert"],
+      },
+    });
+    expect(loaded.findingFilters).toEqual(["builtin:actionable"]);
+    expect(loaded.findingDedupers).toEqual(["builtin:fingerprint"]);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("loadHarness rejects malformed output schemas and finding pipelines", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "outputs");
+    await mkdir(dir, { recursive: true });
+    const writeSections = (lines: readonly string[]) =>
+      writeFile(
+        join(dir, "harness.yaml"),
+        [
+          'spec_version: "0.2"',
+          "kind: harness",
+          "harness: { id: outputs }",
+          "roles: { a: { description: A } }",
+          ...lines,
+        ].join("\n"),
+      );
+
+    const cases: readonly {
+      readonly lines: readonly string[];
+      readonly message: string;
+    }[] = [
+      {
+        lines: ["filtering:", "  findings: [builtin:mystery]"],
+        message:
+          'filtering.findings has unknown strategy "builtin:mystery" (supported: builtin:actionable)',
+      },
+      {
+        lines: ["deduplication:", "  findings: [builtin:mystery]"],
+        message:
+          'deduplication.findings has unknown strategy "builtin:mystery" (supported: builtin:fingerprint)',
+      },
+      {
+        lines: ["output:", "  schemas:", "    evidence: builtin:finding"],
+        message:
+          'output.schemas.evidence may use builtin:finding only for kind "finding"',
+      },
+      {
+        lines: ["filtering:", "  findings: []"],
+        message:
+          "filtering.findings must be a non-empty list of non-empty strings",
+      },
+      {
+        lines: ["deduplication:", "  findings: []"],
+        message:
+          "deduplication.findings must be a non-empty list of non-empty strings",
+      },
+      {
+        lines: ["output:", "  schemas:", "    evidence: { optional: [title] }"],
+        message: "output.schemas.evidence has unsupported fields: optional",
+      },
+      {
+        lines: ["filtering:", "  outcomes: [builtin:actionable]"],
+        message: "filtering has unsupported fields: outcomes",
+      },
+      {
+        lines: ["output:", "  schemas:", "    evidence: { required: title }"],
+        message:
+          "output.schemas.evidence.required must be a non-empty list of non-empty strings",
+      },
+      {
+        lines: [
+          "output:",
+          "  schemas:",
+          "    evidence: { data_required: [1] }",
+        ],
+        message:
+          "output.schemas.evidence.data_required must be a non-empty list of non-empty strings",
+      },
+    ];
+
+    for (const rejection of cases) {
+      await writeSections(rejection.lines);
+      await expect(
+        loadHarness({ agentsDir: scratch, harnessId: "outputs" }),
+      ).rejects.toThrow(rejection.message);
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});

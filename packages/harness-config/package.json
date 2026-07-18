@@ -7,7 +7,10 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@aguil/agents-core": "workspace:*",
+    "@aguil/agents-execution": "workspace:*",
     "@aguil/agents-orchestration": "workspace:*",
+    "@aguil/agents-reporting": "workspace:*",
     "@marcbachmann/cel-js": "^8.0.0"
   }
 }
