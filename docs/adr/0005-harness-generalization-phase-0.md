@@ -60,6 +60,11 @@ config. (Disposition for review finding
 - The incident-triage proof harness can be expressed without editing shared
   packages: outcomes via `kind: "diagnosis"` etc., orchestration via `chain`,
   fixture inputs via generic providers, dispatch via a registered worker kind.
+  _Validated:_ `examples/incident-triage/` expresses the full scout → diagnose →
+  fix → verify chain as pure configuration, and
+  `tests/incident-triage-e2e.test.ts` proves it heals the synthetic fixture end
+  to end with generic (non-`Finding`) outcomes. Gates for promoting
+  config-driven harnesses to production surfaces: issue #73.
 - Code review behavior is unchanged: no `execution` config means the exact
   pre-Phase-0 result shape, providers keep legacy field precedence, and builtin
   worker routing is preserved.
