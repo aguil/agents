@@ -91,6 +91,9 @@ export function validateFinding(value: unknown): FindingValidationResult {
 
   const candidate = coerceFindingShape(value as Record<string, unknown>);
   requireString(candidate.id, "id", errors);
+  if (typeof candidate.id === "string" && candidate.id.includes("${")) {
+    errors.push("id looks like an echoed prompt template");
+  }
   if (candidate.severity !== "critical" && candidate.severity !== "warning") {
     errors.push("severity must be critical or warning");
   }
@@ -1044,8 +1047,18 @@ ${vcsGuidance}
 - Keep validation details concise but specific; separate distinct validation steps with newlines.
 - Use natural prose for single-point findings; use bullet points (- prefix) only when listing 3+ items.
 
-When you find an issue, emit it as a JSON line shaped like this example:
-{"finding":{"id":"${request.roleId}-duplicate-calls","severity":"warning","title":"Fallback repeats expensive PR discovery","description":"Function re-runs discovery when patch fetch fails.\n\nThis adds avoidable process calls on a latency-sensitive path.","evidence":"Explicit-PR block calls at lines 359-360.\n\nFallback path repeats at lines 381-382.","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"Verified by control-flow inspection.\n\nDuplicate calls are unconditional on fallback path."},"file":"src/index.ts","line":381}}
+Emit each finding as a single JSON line: a JSON object with a single top-level key \`finding\`, whose value has these fields:
+- \`id\`: a stable slug prefixed with the role id (start it with \`${request.roleId}-\` followed by a hyphenated slug)
+- \`severity\`: \`critical\` or \`warning\`
+- \`title\`
+- \`description\`
+- \`evidence\`
+- \`sourceRole\`: the string \`${request.roleId}\`
+- \`validation\`: an object with \`status\` (\`verified\`, \`not_reproduced\`, or \`not_run\`) and \`details\`
+- optional \`file\`
+- optional \`line\`: a positive integer
+
+Emit the JSON line once per finding, with real values. Do not emit a template, placeholder, or example version of it.
 
 If there are no verified critical or warning findings, do not emit a finding line.`;
 }
@@ -1113,8 +1126,18 @@ ${vcsGuidance}
 - Keep validation details concise but specific; separate distinct validation steps with newlines.
 - Use natural prose for single-point findings; use bullet points (- prefix) only when listing 3+ items.
 
-Required finding shape (example with formatting):
-{"finding":{"id":"${request.roleId}-duplicate-calls","severity":"warning","title":"Fallback repeats expensive PR discovery","description":"Function re-runs discovery when patch fetch fails.\n\nThis adds avoidable process calls on a latency-sensitive path.","evidence":"Explicit-PR block calls at lines 359-360.\n\nFallback path repeats at lines 381-382.","sourceRole":"${request.roleId}","validation":{"status":"verified","details":"Verified by control-flow inspection.\n\nDuplicate calls are unconditional on fallback path."},"file":"src/index.ts","line":381}}
+Emit each finding as a single JSON line: a JSON object with a single top-level key \`finding\`, whose value has these fields:
+- \`id\`: a stable slug prefixed with the role id (start it with \`${request.roleId}-\` followed by a hyphenated slug)
+- \`severity\`: \`critical\` or \`warning\`
+- \`title\`
+- \`description\`
+- \`evidence\`
+- \`sourceRole\`: the string \`${request.roleId}\`
+- \`validation\`: an object with \`status\` (\`verified\`, \`not_reproduced\`, or \`not_run\`) and \`details\`
+- optional \`file\`
+- optional \`line\`: a positive integer
+
+Emit the JSON line once per finding, with real values. Do not emit a template, placeholder, or example version of it.
 
 If no verified critical or warning findings exist, do not emit any finding JSON line.`;
 }
