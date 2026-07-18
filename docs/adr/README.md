@@ -37,3 +37,7 @@ shared package boundaries.
   — ADR 0009: spec v0.2 `applies_to` hook event-class scoping (#71), policy
   bridge per-hook cost accepted with measurement (#70), `agents hooks test`
   probe surface.
+- [0010-context-providers-spec.md](0010-context-providers-spec.md) — ADR 0010:
+  `context.providers` declarative context collection (spec v0.2) — builtin
+  registry, YAML-unreachable build-time seams, shell-command trust model and
+  bounds.
