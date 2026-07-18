@@ -11,6 +11,8 @@
     "@aguil/agents-code-review-post": "workspace:*",
     "@aguil/agents-code-review-inbox": "workspace:*",
     "@aguil/agents-core": "workspace:*",
+    "@aguil/agents-harness-config": "workspace:*",
+    "@aguil/agents-policy": "workspace:*",
     "@aguil/agents-pr-feedback": "workspace:*",
     "@aguil/agents-reporting": "workspace:*",
     "@aguil/agents-triage": "workspace:*",

@@ -432,6 +432,20 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
   return hooks;
 }
 
+/** Load and parse one policy from `.agents/policies/<id>.yaml`. */
+export async function loadPolicy(
+  agentsDir: string,
+  policyId: string,
+): Promise<PolicySpec> {
+  return parsePolicy(
+    await readYamlFile(
+      join(resolve(agentsDir), "policies", `${policyId}.yaml`),
+      `policy "${policyId}"`,
+    ),
+    policyId,
+  );
+}
+
 /**
  * Load one harness definition from `.agents/harnesses/<id>/harness.yaml`,
  * resolving a `policy: <id>` reference against `.agents/policies/<id>.yaml`.
