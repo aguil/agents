@@ -4,16 +4,19 @@ import type {
   PolicyHookInput,
   PolicyVerdictDecision,
 } from "@aguil/agents-policy";
-import { createPolicyEvalHandler } from "@aguil/agents-policy";
+import {
+  createPolicyEvalHandler,
+  POLICY_NONE_TOKEN,
+} from "@aguil/agents-policy";
 
 interface PolicyEvalArgs {
-  readonly policyId: string;
-  readonly agentsDir: string;
+  readonly policyId?: string;
+  readonly agentsDir?: string;
 }
 
 function parsePolicyEvalArgv(argv: readonly string[]): PolicyEvalArgs | string {
   let policyId: string | undefined;
-  let agentsDir = ".agents";
+  let agentsDir: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--policy") {
@@ -26,10 +29,10 @@ function parsePolicyEvalArgv(argv: readonly string[]): PolicyEvalArgs | string {
       return `policy-eval: unknown argument "${arg}"`;
     }
   }
-  if (policyId === undefined || policyId.length === 0) {
-    return "policy-eval: --policy <id> is required";
-  }
-  return { policyId, agentsDir };
+  return {
+    ...(policyId === undefined ? {} : { policyId }),
+    ...(agentsDir === undefined ? {} : { agentsDir }),
+  };
 }
 
 /** Cursor-or-canonical hook payload → canonical PolicyHookInput. */
@@ -113,14 +116,28 @@ export async function runPolicyEvalCli(
     return 1;
   }
 
+  const policyId = parsed.policyId ?? Bun.env.AGENTS_POLICY_ID;
+  if (policyId === undefined || policyId.length === 0) {
+    console.log(JSON.stringify({ permission: "deny" }));
+    console.error(
+      "policy-eval: policy identity env AGENTS_POLICY_ID is missing; the enforcement environment may have been stripped; failing closed",
+    );
+    return 0;
+  }
+  if (policyId === POLICY_NONE_TOKEN) {
+    console.log(JSON.stringify({ permission: "allow" }));
+    return 0;
+  }
+  const agentsDir = parsed.agentsDir ?? Bun.env.AGENTS_AGENTS_DIR ?? ".agents";
+
   let policy: PolicySpec;
   try {
-    policy = await loadPolicy(parsed.agentsDir, parsed.policyId);
+    policy = await loadPolicy(agentsDir, policyId);
   } catch (error) {
     // Fail closed: an unreadable policy denies the action.
     console.log(JSON.stringify({ permission: "deny" }));
     console.error(
-      `policy-eval: could not load policy "${parsed.policyId}": ${error instanceof Error ? error.message : String(error)}`,
+      `policy-eval: could not load policy "${policyId}": ${error instanceof Error ? error.message : String(error)}`,
     );
     return 0;
   }

@@ -17,16 +17,12 @@ const sampleHooks: HooksSpec = {
 test("policy bridge is the first handler on every mapped tool event", () => {
   const { config } = generateCursorHooksConfig({
     hooks: sampleHooks,
-    policyId: "triage-readonly",
-    agentsDir: "/repo/.agents",
+    policyBridge: true,
   });
   const shell = config.hooks.beforeShellExecution ?? [];
   const mcp = config.hooks.beforeMCPExecution ?? [];
-  expect(shell[0].command).toContain('policy-eval --policy "triage-readonly"');
-  expect(shell[0].command).toContain('--agents-dir "/repo/.agents"');
-  // The CLI token is quoted too (operator-supplied, may contain spaces).
-  expect(shell[0].command.startsWith('"agents" policy-eval')).toBe(true);
-  expect(mcp[0].command).toContain('policy-eval --policy "triage-readonly"');
+  expect(shell[0].command).toBe('"agents" policy-eval');
+  expect(mcp[0].command).toBe('"agents" policy-eval');
   // User hook comes after the bridge, carrying its matcher as an env
   // prefix the handler script can filter on.
   expect(shell[1].command).toBe(
@@ -38,13 +34,27 @@ test("policy bridge is the first handler on every mapped tool event", () => {
 test("policy bridge also precedes post_tool_call user hooks (afterFileEdit)", () => {
   const { config } = generateCursorHooksConfig({
     hooks: sampleHooks,
-    policyId: "triage-readonly",
+    policyBridge: true,
   });
   const fileEdit = config.hooks.afterFileEdit ?? [];
-  expect(fileEdit[0].command).toContain(
-    'policy-eval --policy "triage-readonly"',
-  );
+  expect(fileEdit[0].command).toBe('"agents" policy-eval');
   expect(fileEdit[1].command).toContain("prettier");
+});
+
+test("custom policy bridge CLI is JSON-quoted without role-specific data", () => {
+  const { config } = generateCursorHooksConfig({
+    hooks: sampleHooks,
+    policyBridge: true,
+    agentsCli: "/tools/agents cli",
+  });
+  const rendered = renderCursorHooksConfig(config);
+  expect(config.hooks.beforeShellExecution?.[0].command).toBe(
+    '"/tools/agents cli" policy-eval',
+  );
+  expect(rendered).not.toContain("triage-readonly");
+  expect(rendered).not.toContain("/repo/.agents");
+  expect(rendered).not.toContain("--policy");
+  expect(rendered).not.toContain("--agents-dir");
 });
 
 test("canonical events project to Cursor equivalents; unmappable events are reported", () => {
@@ -62,6 +72,32 @@ test("canonical events project to Cursor equivalents; unmappable events are repo
   expect(config.hooks.beforeMCPExecution?.[0].command).toBe(
     'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
   );
+});
+
+test("policyBridge false yields no bridge entries", () => {
+  const { config } = generateCursorHooksConfig({
+    hooks: sampleHooks,
+    policyBridge: false,
+  });
+  expect(config.hooks.beforeShellExecution?.[0].command).toBe(
+    'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
+  );
+  expect(config.hooks.afterFileEdit?.[0].command).toContain("prettier");
+});
+
+test("rendered policy bridge config is invariant across roles and policies", () => {
+  const renderForRole = () =>
+    renderCursorHooksConfig(
+      generateCursorHooksConfig({
+        hooks: sampleHooks,
+        policyBridge: true,
+        agentsCli: "/tools/agents",
+      }).config,
+    );
+
+  const triageRoleConfig = renderForRole();
+  const implementationRoleConfig = renderForRole();
+  expect(triageRoleConfig).toBe(implementationRoleConfig);
 });
 
 test("renderCursorHooksConfig emits stable versioned JSON", () => {

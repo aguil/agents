@@ -13,7 +13,13 @@ const fixturesAgentsDir = join(
 async function runPolicyEval(
   args: readonly string[],
   stdinPayload: unknown,
+  reservedEnv: Readonly<Record<string, string>> = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const env = Object.fromEntries(
+    Object.entries(Bun.env).filter(
+      ([key]) => key !== "AGENTS_POLICY_ID" && key !== "AGENTS_AGENTS_DIR",
+    ),
+  );
   const proc = Bun.spawn({
     cmd: [
       "bun",
@@ -23,6 +29,7 @@ async function runPolicyEval(
       ...args,
     ],
     cwd: repoRoot,
+    env: { ...env, ...reservedEnv },
     stdin: new TextEncoder().encode(JSON.stringify(stdinPayload)),
     stdout: "pipe",
     stderr: "pipe",
@@ -85,6 +92,65 @@ test("missing policy fails closed with deny", async () => {
   );
   expect(lastJsonLine(result.stdout).permission).toBe("deny");
   expect(result.stderr).toContain("could not load policy");
+});
+
+test("policy identity and agents dir fall back to inherited env", async () => {
+  const result = await runPolicyEval(
+    [],
+    {
+      hook_event_name: "beforeShellExecution",
+      command: "rm -rf /tmp/x",
+    },
+    {
+      AGENTS_POLICY_ID: "triage-readonly",
+      AGENTS_AGENTS_DIR: fixturesAgentsDir,
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(lastJsonLine(result.stdout).permission).toBe("deny");
+  expect(String(lastJsonLine(result.stdout).agentMessage)).toContain(
+    "triage-readonly",
+  );
+});
+
+test("@none explicitly allows without loading a policy", async () => {
+  const result = await runPolicyEval(
+    [],
+    { hook_event_name: "beforeShellExecution", command: "rm -rf /tmp/x" },
+    {
+      AGENTS_POLICY_ID: "@none",
+      AGENTS_AGENTS_DIR: join(repoRoot, "does-not-exist"),
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(lastJsonLine(result.stdout)).toEqual({ permission: "allow" });
+  expect(result.stderr).toBe("");
+});
+
+test("missing policy flag and env fails closed with deny", async () => {
+  const result = await runPolicyEval([], {
+    hook_event_name: "beforeShellExecution",
+    command: "echo hi",
+  });
+  expect(result.exitCode).toBe(0);
+  expect(lastJsonLine(result.stdout)).toEqual({ permission: "deny" });
+  expect(result.stderr).toContain("AGENTS_POLICY_ID is missing");
+  expect(result.stderr).toContain("environment may have been stripped");
+});
+
+test("policy flag takes precedence over inherited env", async () => {
+  const result = await runPolicyEval(
+    ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
+    {
+      hook_event_name: "beforeShellExecution",
+      command: "rm -rf /tmp/x",
+    },
+    {
+      AGENTS_POLICY_ID: "@none",
+      AGENTS_AGENTS_DIR: join(repoRoot, "does-not-exist"),
+    },
+  );
+  expect(lastJsonLine(result.stdout).permission).toBe("deny");
 });
 
 test("invalid stdin fails closed with deny", async () => {

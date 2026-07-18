@@ -29,3 +29,7 @@ shared package boundaries.
   0007: harness governance Phase 2 — spec extensions from the proof harness
   (per-role `policy:`, `{"outcome":...}` envelopes, unconditional per-role hook
   regeneration, fail-closed on unenforceable policy, `agents harness run`).
+- [0008-env-carried-policy-enforcement.md](0008-env-carried-policy-enforcement.md)
+  — ADR 0008: env-carried per-role policy enforcement — role-invariant hook
+  config, `AGENTS_POLICY_ID`/`AGENTS_AGENTS_DIR` per spawn, `@none` token,
+  per-role policies in all execution modes (supersedes ADR 0007 §3/§5 carrier).

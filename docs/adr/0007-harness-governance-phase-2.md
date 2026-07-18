@@ -1,6 +1,7 @@
 # ADR 0007: Harness governance Phase 2 — spec extensions from the proof harness
 
-**Status:** Accepted  
+**Status:** Accepted (§3's regeneration-as-policy-carrier and §5's
+non-sequential coarsening rule superseded by ADR 0008)  
 **Context:** Phase 2 set out only to _prove_ the ADR 0005/0006 machinery with
 the incident-triage example, not to extend the contract. In practice, building
 and dogfooding the example (including a live real-adapter run) surfaced several

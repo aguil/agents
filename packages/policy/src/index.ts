@@ -26,6 +26,15 @@ export interface PolicyVerdict {
  */
 export const POLICY_RUNTIME_ERROR_REASON = "policy-runtime-error";
 
+/**
+ * Reserved AGENTS_POLICY_ID token for roles that explicitly run without a
+ * policy: the bridge treats it as an allow no-op. Distinct from a MISSING
+ * variable, which means the enforcement env was stripped and must deny
+ * (fail closed). '@' is outside the policy id grammar, so the token cannot
+ * collide with a real policy id (ADR 0008).
+ */
+export const POLICY_NONE_TOKEN = "@none";
+
 export type PolicyInterventionPoint =
   | "pre_tool_call"
   | "post_tool_call"
