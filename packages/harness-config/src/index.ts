@@ -5,6 +5,7 @@ import type {
   HarnessDefinition,
   RoleDefinition,
 } from "@aguil/agents-orchestration";
+import { evaluate, parse } from "@marcbachmann/cel-js";
 
 export const HARNESS_SPEC_VERSION = "0.2";
 
@@ -116,6 +117,16 @@ export interface LoadHarnessOptions {
   /** Absolute or cwd-relative path to the `.agents/` directory. */
   readonly agentsDir: string;
   readonly harnessId: string;
+}
+
+export interface RoleEnablementEnv {
+  /** Triage tier and any other scalar bindings exposed to expressions. */
+  readonly [key: string]: string | number | boolean;
+}
+
+export interface RoleEnablementResult {
+  readonly definition: HarnessDefinition;
+  readonly disabledRoleIds: readonly string[];
 }
 
 class HarnessConfigError extends Error {}
@@ -309,6 +320,7 @@ function parsePolicy(value: unknown, id: string): PolicySpec {
 
 const ROLE_FIELDS: ReadonlySet<string> = new Set([
   "description",
+  "enabled",
   "prompt",
   "prompt_path",
   "timeout_ms",
@@ -340,6 +352,22 @@ function parseRole(
   if (policyId !== undefined) {
     assertValidPolicyId(policyId);
   }
+  let enabledWhen: string | undefined;
+  if (record.enabled !== undefined) {
+    if (typeof record.enabled !== "string" || record.enabled.length === 0) {
+      fail(`role ${roleId} enabled must be a non-empty string`);
+    }
+    enabledWhen = record.enabled;
+  }
+  if (enabledWhen !== undefined) {
+    try {
+      parse(enabledWhen);
+    } catch (error) {
+      fail(
+        `role ${roleId} enabled expression is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   const prompt = optionalString(record.prompt, `role ${roleId} prompt`);
   const promptPathRaw = optionalString(
     record.prompt_path,
@@ -362,6 +390,7 @@ function parseRole(
     ),
     ...(prompt === undefined ? {} : { prompt }),
     ...(promptPath === undefined ? {} : { promptPath }),
+    ...(enabledWhen === undefined ? {} : { enabledWhen }),
     requiredCapabilities:
       optionalStringArray(
         record.required_capabilities,
@@ -452,6 +481,70 @@ function parseExecution(
         `execution.mode "${mode}" is not supported (parallel, chain, validation-loop)`,
       );
   }
+}
+
+export function filterEnabledRoles(
+  definition: HarnessDefinition,
+  env: RoleEnablementEnv,
+): RoleEnablementResult {
+  const disabledRoleIds: string[] = [];
+  const roles = definition.roles.filter((role) => {
+    if (role.enabledWhen === undefined) {
+      return true;
+    }
+
+    let result: unknown;
+    try {
+      result = evaluate(role.enabledWhen, env);
+    } catch (error) {
+      throw new Error(
+        `role "${role.id}" enablement evaluation failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (typeof result !== "boolean") {
+      throw new Error(
+        `role "${role.id}" enablement expression returned ${typeof result}, expected boolean`,
+      );
+    }
+    if (!result) {
+      disabledRoleIds.push(role.id);
+    }
+    return result;
+  });
+
+  if (roles.length === 0) {
+    throw new Error(
+      `harness "${definition.id}" has no enabled roles for the evaluation environment`,
+    );
+  }
+
+  const disabledRoleIdSet = new Set(disabledRoleIds);
+  let execution = definition.execution;
+  if (execution?.mode === "chain" && execution.order !== undefined) {
+    execution = {
+      ...execution,
+      order: execution.order.filter((roleId) => !disabledRoleIdSet.has(roleId)),
+    };
+  } else if (execution?.mode === "validation-loop") {
+    const disabledParticipants = [
+      ...execution.implementationRoles,
+      ...execution.validationRoles,
+    ].filter((roleId) => disabledRoleIdSet.has(roleId));
+    if (disabledParticipants.length > 0) {
+      throw new Error(
+        `harness "${definition.id}" validation-loop references disabled role${disabledParticipants.length === 1 ? "" : "s"}: ${[...new Set(disabledParticipants)].join(", ")}`,
+      );
+    }
+  }
+
+  return {
+    definition: {
+      ...definition,
+      roles,
+      ...(execution === undefined ? {} : { execution }),
+    },
+    disabledRoleIds,
+  };
 }
 
 function parseAppliesTo(

@@ -21,6 +21,8 @@ export interface RoleDefinition {
   readonly description: string;
   readonly prompt?: string;
   readonly promptPath?: string;
+  /** CEL expression deciding whether the role runs for a given evaluation environment; absent = always enabled. */
+  readonly enabledWhen?: string;
   readonly requiredCapabilities: readonly string[];
   readonly timeoutMs: number;
   readonly allowedCommands?: readonly string[];

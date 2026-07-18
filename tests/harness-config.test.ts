@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadHarness, loadManifest } from "@aguil/agents-harness-config";
+import {
+  filterEnabledRoles,
+  loadHarness,
+  loadManifest,
+} from "@aguil/agents-harness-config";
+import type { HarnessDefinition } from "@aguil/agents-orchestration";
 
 const fixturesDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -315,6 +320,192 @@ test("roles reject unknown fields", async () => {
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+});
+
+test("role enabled expressions are parsed and compile-checked", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "conditional");
+    await mkdir(dir, { recursive: true });
+    const writeRole = (role: string) =>
+      writeFile(
+        join(dir, "harness.yaml"),
+        [
+          'spec_version: "0.2"',
+          "kind: harness",
+          "harness: { id: conditional }",
+          "roles:",
+          `  gated: ${role}`,
+        ].join("\n"),
+      );
+
+    await writeRole("{ description: Gated, enabled: 'tier == \"full\"' }");
+    const loaded = await loadHarness({
+      agentsDir: scratch,
+      harnessId: "conditional",
+    });
+    expect(loaded.definition.roles[0].enabledWhen).toBe('tier == "full"');
+
+    await writeRole('{ description: Gated, enabled: "tier ===" }');
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "conditional" }),
+    ).rejects.toThrow(/role gated enabled expression is invalid/);
+
+    await writeRole("{ description: Gated, enabled: true }");
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "conditional" }),
+    ).rejects.toThrow("role gated enabled must be a non-empty string");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+const conditionalDefinition: HarnessDefinition = {
+  id: "code-review",
+  roles: [
+    {
+      id: "quality",
+      description: "Quality",
+      requiredCapabilities: [],
+      timeoutMs: 1,
+    },
+    {
+      id: "security",
+      description: "Security",
+      enabledWhen: 'tier != "trivial"',
+      requiredCapabilities: [],
+      timeoutMs: 1,
+    },
+    {
+      id: "performance",
+      description: "Performance",
+      enabledWhen: 'tier == "full"',
+      requiredCapabilities: [],
+      timeoutMs: 1,
+    },
+    {
+      id: "compliance",
+      description: "Compliance",
+      enabledWhen: 'tier != "trivial"',
+      requiredCapabilities: [],
+      timeoutMs: 1,
+    },
+  ],
+  execution: {
+    mode: "chain",
+    order: ["security", "performance", "quality", "compliance"],
+  },
+};
+
+test("filterEnabledRoles filters code-review tiers and chain order", () => {
+  const trivial = filterEnabledRoles(conditionalDefinition, {
+    tier: "trivial",
+  });
+  expect(trivial.definition.roles.map((role) => role.id)).toEqual(["quality"]);
+  expect(trivial.definition.execution).toEqual({
+    mode: "chain",
+    order: ["quality"],
+  });
+  expect(trivial.disabledRoleIds).toEqual([
+    "security",
+    "performance",
+    "compliance",
+  ]);
+
+  const lite = filterEnabledRoles(conditionalDefinition, { tier: "lite" });
+  expect(lite.definition.roles.map((role) => role.id)).toEqual([
+    "quality",
+    "security",
+    "compliance",
+  ]);
+  expect(lite.definition.execution).toEqual({
+    mode: "chain",
+    order: ["security", "quality", "compliance"],
+  });
+
+  const full = filterEnabledRoles(conditionalDefinition, { tier: "full" });
+  expect(full.definition.roles.map((role) => role.id)).toEqual([
+    "quality",
+    "security",
+    "performance",
+    "compliance",
+  ]);
+  expect(full.definition.execution).toEqual(conditionalDefinition.execution);
+  expect(full.disabledRoleIds).toEqual([]);
+});
+
+test("filterEnabledRoles fails closed on evaluation errors and non-booleans", () => {
+  const definitionWith = (enabledWhen: string): HarnessDefinition => ({
+    id: "broken",
+    roles: [
+      {
+        id: "gated",
+        description: "Gated",
+        enabledWhen,
+        requiredCapabilities: [],
+        timeoutMs: 1,
+      },
+    ],
+  });
+
+  expect(() =>
+    filterEnabledRoles(definitionWith('tier2 == "x"'), { tier: "full" }),
+  ).toThrow(/role "gated" enablement evaluation failed/);
+  expect(() =>
+    filterEnabledRoles(definitionWith("tier"), { tier: "full" }),
+  ).toThrow(/role "gated" enablement expression returned string/);
+});
+
+test("filterEnabledRoles rejects empty harnesses and disabled loop participants", () => {
+  expect(() =>
+    filterEnabledRoles(
+      {
+        id: "empty",
+        roles: [
+          {
+            id: "off",
+            description: "Off",
+            enabledWhen: "false",
+            requiredCapabilities: [],
+            timeoutMs: 1,
+          },
+        ],
+      },
+      {},
+    ),
+  ).toThrow('harness "empty" has no enabled roles');
+
+  expect(() =>
+    filterEnabledRoles(
+      {
+        id: "loop",
+        roles: [
+          {
+            id: "implementation",
+            description: "Implementation",
+            requiredCapabilities: [],
+            timeoutMs: 1,
+          },
+          {
+            id: "validation",
+            description: "Validation",
+            enabledWhen: "false",
+            requiredCapabilities: [],
+            timeoutMs: 1,
+          },
+        ],
+        execution: {
+          mode: "validation-loop",
+          implementationRoles: ["implementation"],
+          validationRoles: ["validation"],
+          maxRounds: 1,
+        },
+      },
+      {},
+    ),
+  ).toThrow(/validation-loop references disabled role: validation/);
 });
 
 test("harness ids with traversal or separators are rejected before path use", async () => {
