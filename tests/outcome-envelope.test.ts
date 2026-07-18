@@ -40,6 +40,29 @@ test("a malformed outcome envelope becomes an error event, not a silent drop", (
   expect(events[0]?.message).toBe("invalid outcome envelope");
 });
 
+test("extracts an outcome envelope nested in stream-json assistant text", () => {
+  // Mirrors what a real Cursor agent emits: the outcome envelope lives in
+  // the assistant message's text, not as a standalone stdout line.
+  const streamJson = {
+    type: "assistant",
+    message: {
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: 'Emitting the remediation outcome:\n\n{"outcome":{"id":"remediation","kind":"remediation","sourceRole":"fix","title":"Fixed off-by-one","data":{"applied":true}}}',
+        },
+      ],
+    },
+  };
+  const events = normalizeAgentOutputLine(request, JSON.stringify(streamJson));
+  const outcomeEvents = events.filter((event) => event.type === "outcome");
+  expect(outcomeEvents).toHaveLength(1);
+  expect((outcomeEvents[0]?.data as { kind?: string }).kind).toBe(
+    "remediation",
+  );
+});
+
 test("finding and outcome envelopes remain disjoint", () => {
   const findingEvents = normalizeAgentOutputLine(
     request,

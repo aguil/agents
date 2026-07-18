@@ -617,8 +617,26 @@ export function normalizeAgentOutputLine(
         data: envelope.value,
       });
     });
-    if (nestedFindings.length > 0) {
-      return nestedFindings;
+    const nestedOutcomes = extractOutcomeEnvelopes(parsed).map((envelope) => {
+      if ("invalid" in envelope) {
+        return createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "error",
+          message: "invalid nested outcome envelope",
+        });
+      }
+      return createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "outcome",
+        message: envelope.value.title,
+        data: envelope.value,
+      });
+    });
+    const nested = [...nestedFindings, ...nestedOutcomes];
+    if (nested.length > 0) {
+      return nested;
     }
 
     return [
@@ -698,6 +716,33 @@ function extractFindingEnvelopes(
     }
   }
   return envelopes;
+}
+
+type NestedOutcome =
+  | { readonly value: HarnessOutcome }
+  | { readonly invalid: true };
+
+/**
+ * Scan nested text candidates for `{"outcome":...}` envelopes. Real
+ * subprocess agents (e.g. Cursor stream-json) emit the envelope inside an
+ * assistant message's text rather than as a standalone stdout line, so the
+ * top-level check in normalizeAgentOutputLine is not enough on its own.
+ */
+function extractOutcomeEnvelopes(value: unknown): readonly NestedOutcome[] {
+  const outcomes: NestedOutcome[] = [];
+  for (const text of extractTextCandidates(value)) {
+    for (const line of text.split(/\r?\n/).filter(Boolean)) {
+      try {
+        const envelope = readOutcomeEnvelope(JSON.parse(line) as unknown);
+        if (envelope !== undefined) {
+          outcomes.push(envelope);
+        }
+      } catch {
+        // Non-JSON text inside an agent event is expected.
+      }
+    }
+  }
+  return outcomes;
 }
 
 function extractTextCandidates(value: unknown): readonly string[] {
