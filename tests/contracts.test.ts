@@ -1015,6 +1015,33 @@ test("validates finding shape before accepting agent output", () => {
   expect(invalid.errors).toContain("description must be a non-empty string");
 });
 
+test("rejects echoed prompt templates only when the finding id contains a token", () => {
+  const base = {
+    severity: "warning" as const,
+    title: "T",
+    description: "D",
+    evidence: "E",
+    sourceRole: "quality",
+    validation: { status: "verified" as const, details: "ok" },
+  };
+
+  const templateEcho = validateFinding({
+    ...base,
+    id: "${request.roleId}-duplicate-calls",
+  });
+  expect(templateEcho.valid).toBe(false);
+  expect(templateEcho.errors).toContain(
+    "id looks like an echoed prompt template",
+  );
+
+  const quotedCode = validateFinding({
+    ...base,
+    id: "quality-template-literal",
+    description: "The code interpolates ${request.roleId} in this path.",
+  });
+  expect(quotedCode.valid).toBe(true);
+});
+
 test("coerces empty and null file or line before validating findings", () => {
   const base = {
     id: "finding-1",
