@@ -130,6 +130,39 @@ test("filesystem deny globs match tool file paths", () => {
   );
 });
 
+test("traversal aliases and uncontained paths cannot dodge filesystem rules", () => {
+  // "src/../.env" canonicalizes to ".env", which is deny-listed.
+  const aliased = preToolCall("Read", { file_path: "src/../.env" });
+  expect(aliased.decision).toBe("deny");
+  expect(aliased.reason).toBe("filesystem-denied");
+
+  // Paths escaping the workspace root cannot be classified: deny.
+  const escaping = preToolCall("Read", { file_path: "../outside.txt" });
+  expect(escaping.decision).toBe("deny");
+  expect(escaping.reason).toBe("filesystem-uncontained-path");
+
+  // Absolute paths likewise.
+  const absolute = preToolCall("Read", { file_path: "/etc/passwd" });
+  expect(absolute.decision).toBe("deny");
+  expect(absolute.reason).toBe("filesystem-uncontained-path");
+
+  // A policy without filesystem rules does not gate uncontained paths.
+  const unruled = evaluatePolicy(
+    { id: "p", capabilities: { exec: { deny: ["rm"] } } },
+    {
+      interventionPoint: "pre_tool_call",
+      toolName: "Read",
+      toolInput: { file_path: "/etc/hosts" },
+    },
+  );
+  expect(unruled.decision).toBe("allow");
+
+  // Benign redundant segments still canonicalize and pass.
+  expect(preToolCall("Read", { file_path: "./src/index.ts" }).decision).toBe(
+    "allow",
+  );
+});
+
 test("filesystem.write confirmation escalates write tools only", () => {
   const withConfirmation: PolicySpec = {
     ...basePolicy,

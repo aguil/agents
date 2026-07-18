@@ -101,6 +101,34 @@ function pathMatchesRule(relativePath: string, rule: string): boolean {
   return new Bun.Glob(rule).match(relativePath);
 }
 
+/**
+ * Collapse `.` / `..` segments with posix semantics so traversal aliases
+ * ("src/../.env") cannot dodge deny globs written against canonical
+ * workspace-relative paths. Returns undefined when the path escapes the
+ * workspace root or is absolute — globs cannot classify those, so callers
+ * must treat them as denied under any filesystem-ruled policy.
+ */
+function canonicalizeCandidatePath(path: string): string | undefined {
+  if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) {
+    return undefined;
+  }
+  const segments: string[] = [];
+  for (const segment of path.split(/[\\/]+/)) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (segments.length === 0) {
+        return undefined;
+      }
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  return segments.join("/");
+}
+
 function hostMatchesRule(host: string, rule: string): boolean {
   if (rule === "*") {
     return true;
@@ -212,9 +240,23 @@ function evaluateFilesystem(
   policy: PolicySpec,
   input: PolicyEvalInput,
 ): PolicyVerdict {
-  const path = extractFilePath(input);
-  if (path === undefined) {
+  const rawPath = extractFilePath(input);
+  if (rawPath === undefined) {
     return ALLOW_VERDICT;
+  }
+  const path = canonicalizeCandidatePath(rawPath);
+  if (path === undefined) {
+    // Absolute or workspace-escaping path: rules written against
+    // workspace-relative paths cannot classify it — deny when the policy
+    // has filesystem rules at all, allow when it does not.
+    if (policy.capabilities?.filesystem === undefined) {
+      return ALLOW_VERDICT;
+    }
+    return {
+      decision: "deny",
+      reason: "filesystem-uncontained-path",
+      message: `Path escapes the workspace or is absolute and cannot be classified by policy ${policy.id}: ${rawPath}`,
+    };
   }
   const result = evaluateRules(
     policy.capabilities?.filesystem,
