@@ -10,6 +10,16 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.4](https://github.com/aguil/agents/compare/v0.4.3...v0.4.4) (2026-07-18)
+
+
+### Added
+
+* **cli:** enforce per-role policy in all execution modes via roleEnv ([60ca345](https://github.com/aguil/agents/commit/60ca345a012b9d97e017c64beb2de5f54ede5e5f))
+* env-carried per-role policy enforcement in all execution modes (ADR 0008) ([912858b](https://github.com/aguil/agents/commit/912858bd2aed38fcb8c1c76103e997a18328a8e9))
+* **execution,orchestration:** per-role env threading for subprocess spawns ([cc4474a](https://github.com/aguil/agents/commit/cc4474aa9961c23b7eab75804e698d8e3b69a062))
+* **hooks,policy,cli:** env-carried policy bridge; role-invariant hook config ([18e845b](https://github.com/aguil/agents/commit/18e845b239720cccbc0c1774146ca3592bb5e33e))
+
 ## [0.4.3](https://github.com/aguil/agents/compare/v0.4.2...v0.4.3) (2026-07-18)
 
 
