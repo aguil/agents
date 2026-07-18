@@ -1,5 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ReviewTriageTier } from "@aguil/agents-core";
 import {
   ensureDirectory,
@@ -189,23 +189,36 @@ export interface StaticFileProviderOptions {
 /**
  * Resolve a candidate path and enforce workspace containment. Returns
  * undefined when the resolved path escapes the workspace root and escaping
- * was not explicitly allowed.
+ * was not explicitly allowed. Symlinks are resolved via realpath before the
+ * containment check (same pattern as collectLocalReferencedDoc), so a link
+ * inside the workspace pointing outside the root is rejected.
  */
-function resolveWorkspacePath(
+async function resolveWorkspacePath(
   workspacePath: string,
   candidate: string,
   allowOutsideWorkspace: boolean,
-): string | undefined {
+): Promise<string | undefined> {
   const resolved = isAbsolute(candidate)
     ? resolve(candidate)
     : resolve(workspacePath, candidate);
   if (allowOutsideWorkspace) {
     return resolved;
   }
-  const root = resolve(workspacePath);
-  return resolved === root || resolved.startsWith(root + sep)
-    ? resolved
-    : undefined;
+  const root = await realpath(resolve(workspacePath));
+  let real: string;
+  try {
+    real = await realpath(resolved);
+  } catch {
+    // Leaf does not exist yet; contain via its closest existing ancestor so
+    // symlinked parent directories still cannot smuggle reads outside root.
+    try {
+      real = join(await realpath(dirname(resolved)), basename(resolved));
+    } catch {
+      // Nothing on disk to disclose; downstream reads fail with ENOENT.
+      return resolved;
+    }
+  }
+  return real === root || real.startsWith(root + sep) ? real : undefined;
 }
 
 /** Generic provider: read one file (relative to workspace or absolute). */
@@ -215,7 +228,7 @@ export class StaticFileProvider implements ContextProvider {
   constructor(private readonly options: StaticFileProviderOptions) {}
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const path = resolveWorkspacePath(
+    const path = await resolveWorkspacePath(
       request.workspacePath,
       this.options.path,
       this.options.allowOutsideWorkspace === true,
@@ -345,7 +358,7 @@ export class FileGlobProvider implements ContextProvider {
     for (const relativePath of limited) {
       // Glob matches must stay inside the workspace; a pattern containing
       // `..` could otherwise surface host files into LLM-bound context.
-      const path = resolveWorkspacePath(
+      const path = await resolveWorkspacePath(
         request.workspacePath,
         relativePath,
         false,

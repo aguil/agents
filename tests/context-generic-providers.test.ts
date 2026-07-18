@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ContextRequest } from "@aguil/agents-context";
@@ -93,6 +93,25 @@ test("StaticFileProvider refuses traversal and absolute escapes unless opted in"
       });
       const artifacts = await optedIn.collect(makeRequest(workspacePath));
       expect(artifacts[0]?.content).toBe("host secret");
+    } finally {
+      await rm(outside, { force: true });
+    }
+  });
+});
+
+test("StaticFileProvider rejects symlinks targeting outside the workspace", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const outside = join(workspacePath, "..", "symlink-target-marker.txt");
+    await writeFile(outside, "host secret");
+    try {
+      await symlink(outside, join(workspacePath, "innocent-looking.log"));
+      const provider = new StaticFileProvider({
+        id: "symlinked",
+        path: "innocent-looking.log",
+      });
+      await expect(
+        provider.collect(makeRequest(workspacePath)),
+      ).rejects.toThrow("refuses path outside the workspace");
     } finally {
       await rm(outside, { force: true });
     }
