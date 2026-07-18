@@ -3,10 +3,18 @@ description: Read-only investigation policy for scout, diagnose, and verify
 capabilities:
   filesystem:
     allow: ["**"]
-    # Deny secrets and the governance surfaces that enforce policy: even a
-    # read-only role must not be able to weaken .cursor/ hook config or
-    # .agents/ policy definitions.
-    deny: [".env", "**/secrets/**", ".cursor/**", ".agents/**"]
+    # Deny secrets, the governance surfaces that enforce policy (.cursor/
+    # hook config, .agents/ definitions), and the pass_check target + the
+    # incident record. A read-only role runs immediately before the
+    # authoritative gate (bun run check.ts), so it must not be able to
+    # rewrite check.ts to fake a pass, nor edit alert.log.
+    deny:
+      - ".env"
+      - "**/secrets/**"
+      - ".cursor/**"
+      - ".agents/**"
+      - "check.ts"
+      - "alert.log"
   exec:
     allow: ["rg", "grep", "cat", "ls", "bun run check.ts", "bun check.ts"]
     deny: ["rm", "git push", "curl", "wget"]
