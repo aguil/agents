@@ -50,7 +50,20 @@ recorded here rather than left implicit in the example PR (#74).
    about any per-role policy that is therefore coarsened, since per-role
    regeneration would race on the shared hook file.
 
-6. **Run status is decoupled from finding severity for generalized harnesses.**
+6. **Generic outcomes are deduplicated by `id` at collection, first occurrence
+   wins.** Real subprocess agents repeat the same `{"outcome":...}` envelope in
+   an intermediate assistant message and the terminal result event, so the
+   nested-envelope scan captures duplicates. The outcome `id` is its identity:
+   the orchestrator keeps the first occurrence per role run, and the merged
+   outcomes view applies the same rule so a stream-echoed duplicate finding
+   cannot appear twice after conversion. `result.findings` is deliberately
+   exempt — code-review reporting owns finding dedup (canonical fingerprint)
+   with different semantics. Companion fix: prompts must not contain
+   copy-pasteable envelope examples (a literal example is valid JSON the model
+   can echo verbatim and the pipeline would capture); prompt files describe the
+   envelope as a field list instead.
+
+7. **Run status is decoupled from finding severity for generalized harnesses.**
    A manual real-adapter run showed a live agent emits diagnostic findings (e.g.
    scout calling the bug "critical") even when prompted for outcomes, and the
    code-review status rule (`critical finding => failed`) then failed a run
@@ -69,8 +82,8 @@ recorded here rather than left implicit in the example PR (#74).
 
 - The example lives under `examples/incident-triage/` as a reference, not a
   supported harness; promotion gates remain tracked in #73.
-- Known non-blocking follow-up: real-adapter outcomes can be duplicated or echo
-  prompt placeholders (#75).
+- Real-adapter outcome duplication and prompt-placeholder echo (#75) are
+  resolved by §6 (outcome-id dedup + de-exemplified prompts).
 - The v0.1 spec surface is now: harness metadata, roles (with optional per-role
   `policy:`), `execution` modes, `hooks` (command handlers), harness- and
   role-level `policy:` references, and `outcome` envelopes as the role output

@@ -7,10 +7,17 @@ edit anything, do not re-diagnose.
 
 If the check passes, emit no finding at all (a clean verify is silent).
 
-If the check still fails, emit exactly one finding JSON line:
+If the check still fails, emit exactly one line: a JSON object with a single
+top-level key `finding`, whose value has these fields:
 
-{"finding":{"id":"verification-failed","severity":"critical","title":"Health
-signal still failing after
-remediation","description":"<which checks still fail>","evidence":"<check.ts
-output>","sourceRole":"verify","validation":{"status":"verified","details":"exit
-code and output captured from bun run check.ts"}}}
+- `id`: the string `verification-failed`
+- `severity`: the string `critical`
+- `title`: the string `Health signal still failing after remediation`
+- `description`: which checks still fail
+- `evidence`: the check.ts output
+- `sourceRole`: the string `verify`
+- `validation`: an object with `status` set to `verified` and `details`
+  describing the exit code and output you captured
+
+Emit the JSON line once, with your real values. Do not emit a template,
+placeholder, or example version of it.

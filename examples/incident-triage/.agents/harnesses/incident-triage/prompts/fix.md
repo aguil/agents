@@ -9,7 +9,15 @@ Apply the minimal fix for the diagnosed root cause:
    record are not yours to change.
 3. Re-run `bun run check.ts` to confirm the signal flips to passing.
 
-Emit exactly one outcome JSON line describing the remediation:
+When the remediation is applied, emit exactly one line: a JSON object with a
+single top-level key `outcome`, whose value has these fields:
 
-{"outcome":{"id":"remediation","kind":"remediation","sourceRole":"fix","title":"<fix in one line>","data":{"applied":true,"change":"<file:line;
-before/after expression>","checkResult":"<check.ts output after the fix>"}}}
+- `id`: the string `remediation`
+- `kind`: the string `remediation`
+- `sourceRole`: the string `fix`
+- `title`: your fix in one line
+- `data`: an object with `applied` (boolean), `change` (file:line and the
+  before/after expression), and `checkResult` (check.ts output after the fix)
+
+Emit the JSON line once, with your real values. Do not emit a template,
+placeholder, or example version of it.

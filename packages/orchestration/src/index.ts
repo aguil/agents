@@ -462,12 +462,22 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     };
 
     const genericOutcomes: HarnessOutcome[] = [];
+    // Real subprocess agents emit the same envelope in an intermediate
+    // assistant message AND the terminal result event, so the nested-text
+    // scan captures it twice (#75). The outcome `id` is its identity:
+    // first occurrence wins, per role run.
+    const seenOutcomeIds = new Set<string>();
     for await (const event of this.options.adapter.run(agentRequest)) {
       await this.options.eventSink?.write(event);
       if (event.type === "finding" && isFinding(event.data)) {
         findings.push(event.data);
       }
-      if (event.type === "outcome" && isHarnessOutcome(event.data)) {
+      if (
+        event.type === "outcome" &&
+        isHarnessOutcome(event.data) &&
+        !seenOutcomeIds.has(event.data.id)
+      ) {
+        seenOutcomeIds.add(event.data.id);
         genericOutcomes.push(event.data);
       }
       if (event.type === "error") {
@@ -504,10 +514,22 @@ function resolveRoleOrder(
 }
 
 function roleHarnessOutcomes(outcome: RoleRunOutcome): HarnessOutcome[] {
-  return [
+  // The outcomes view is deduped by id (first wins): a stream-echoed
+  // duplicate finding must not appear twice after conversion. Deliberately
+  // NOT applied to result.findings itself — code-review reporting owns
+  // finding dedup (canonical fingerprint), and its semantics differ.
+  const seen = new Set<string>();
+  const combined = [
     ...outcome.findings.map(findingToHarnessOutcome),
     ...outcome.genericOutcomes,
   ];
+  return combined.filter((entry) => {
+    if (seen.has(entry.id)) {
+      return false;
+    }
+    seen.add(entry.id);
+    return true;
+  });
 }
 
 function serializeRoleOutput(outcome: RoleRunOutcome): string {

@@ -44,13 +44,18 @@ async function runHealthCheck(
 }
 
 // Emit the outcome the way a real agent does — as a `{"outcome":{...}}`
-// JSON line through the subprocess line parser — so the test exercises the
-// actual envelope path, not a hand-built event.
+// JSON line through the subprocess line parser, TWICE: real agents repeat
+// the envelope in an intermediate assistant message and again in the
+// terminal result event (#75). The orchestrator must dedup by id.
 function outcomeEvents(
   request: AgentRunRequest,
   outcome: HarnessOutcome,
 ): readonly AgentEvent[] {
-  return normalizeAgentOutputLine(request, JSON.stringify({ outcome }));
+  const line = JSON.stringify({ outcome });
+  return [
+    ...normalizeAgentOutputLine(request, line),
+    ...normalizeAgentOutputLine(request, line),
+  ];
 }
 
 /**
@@ -251,6 +256,9 @@ test("incident-triage chain heals the fixture end to end (happy path)", async ()
     // Falsification core: the roles' native outcomes are generic kinds, not
     // findings. (result.outcomes also carries findings-converted-to-outcomes;
     // scope the claim to the non-finding outcomes the roles genuinely emit.)
+    // Every envelope was emitted twice by the scripted agent (mimicking the
+    // real-adapter stream duplication from #75); exactly-one-each proves
+    // collection dedups by id.
     const genericOutcomes = (result.outcomes ?? []).filter(
       (outcome) => outcome.kind !== "finding",
     );
@@ -259,6 +267,8 @@ test("incident-triage chain heals the fixture end to end (happy path)", async ()
       "diagnosis",
       "remediation",
     ]);
+    const allOutcomeIds = (result.outcomes ?? []).map((outcome) => outcome.id);
+    expect(new Set(allOutcomeIds).size).toBe(allOutcomeIds.length);
     for (const outcome of genericOutcomes) {
       expect(isFindingOutcome(outcome)).toBe(false);
       expect(harnessOutcomeToFinding(outcome)).toBeUndefined();
@@ -295,6 +305,39 @@ test("incident-triage fails loudly when remediation does not heal the fixture", 
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("prompts contain no copy-pasteable envelope examples (#75 placeholder echo)", async () => {
+  // A literal example envelope in a prompt is valid JSON the model can echo
+  // verbatim, which the pipeline then captures as a real outcome (the
+  // `<root cause in one line>` diagnosis from the manual run). Guard: no
+  // line of any prompt file may parse as a finding/outcome envelope.
+  const promptsDir = join(
+    exampleAgentsDir,
+    "harnesses",
+    "incident-triage",
+    "prompts",
+  );
+  const glob = new Bun.Glob("*.md");
+  const promptFiles = await Array.fromAsync(glob.scan({ cwd: promptsDir }));
+  expect(promptFiles.length).toBeGreaterThanOrEqual(4);
+  for (const file of promptFiles) {
+    const content = await readFile(join(promptsDir, file), "utf8");
+    for (const line of content.split("\n")) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof parsed === "object" && parsed !== null) {
+        expect(
+          "outcome" in parsed || "finding" in parsed,
+          `${file} contains a parseable envelope example: ${line}`,
+        ).toBe(false);
+      }
+    }
   }
 });
 
