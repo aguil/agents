@@ -83,9 +83,33 @@ export function truncateRoleOutput(
   maxLines: number = ROLE_OUTPUT_MAX_LINES,
 ): string {
   let truncated = output;
-  const lines = truncated.split("\n");
-  if (lines.length > maxLines) {
-    truncated = `${lines.slice(0, maxLines).join("\n")}\n[truncated: ${lines.length - maxLines} more lines]`;
+  // Find the cut offset by scanning newlines instead of split(), so huge
+  // outputs never materialize a per-line array.
+  let cutOffset = -1;
+  let newlines = 0;
+  for (
+    let index = output.indexOf("\n");
+    index !== -1;
+    index = output.indexOf("\n", index + 1)
+  ) {
+    newlines += 1;
+    if (newlines === maxLines) {
+      cutOffset = index;
+      break;
+    }
+  }
+  if (cutOffset !== -1 && cutOffset < output.length - 1) {
+    let remaining = 0;
+    for (
+      let index = output.indexOf("\n", cutOffset + 1);
+      index !== -1;
+      index = output.indexOf("\n", index + 1)
+    ) {
+      remaining += 1;
+    }
+    // Lines beyond the cut: one for the partial after cutOffset plus one
+    // per remaining newline (matches previous split-based accounting).
+    truncated = `${output.slice(0, cutOffset)}\n[truncated: ${remaining + 1} more lines]`;
   }
   if (Buffer.byteLength(truncated, "utf8") > maxBytes) {
     truncated = `${Buffer.from(truncated, "utf8").subarray(0, maxBytes).toString("utf8")}\n[truncated at ${maxBytes} bytes]`;
