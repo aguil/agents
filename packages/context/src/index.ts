@@ -276,17 +276,25 @@ export interface ShellCommandProviderOptions {
 export class ShellCommandProvider implements ContextProvider {
   readonly name = "shell-command";
 
-  private readonly commandRunner: CommandRunner;
+  private readonly commandRunner: CommandRunner | undefined;
 
+  /**
+   * Injected runners retain full-output semantics for compatibility; only the
+   * provider's default subprocess path bounds stdout before artifact truncation.
+   */
   constructor(private readonly options: ShellCommandProviderOptions) {
-    this.commandRunner = options.commandRunner ?? runCommand;
+    this.commandRunner = options.commandRunner;
   }
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const stdout = await this.commandRunner(
-      this.options.cmd,
-      request.workspacePath,
-    );
+    const stdout =
+      this.commandRunner === undefined
+        ? await runBoundedCommand(
+            this.options.cmd,
+            request.workspacePath,
+            this.options.maxBytes,
+          )
+        : await this.commandRunner(this.options.cmd, request.workspacePath);
     const content =
       stdout === undefined
         ? `Command failed: ${this.options.cmd.join(" ")}`
@@ -419,6 +427,96 @@ async function readBoundedFile(
     return buffer.subarray(0, bytesRead).toString("utf8");
   } finally {
     await handle.close();
+  }
+}
+
+async function runBoundedCommand(
+  cmd: readonly string[],
+  cwd: string,
+  maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
+): Promise<string | undefined> {
+  try {
+    const proc = Bun.spawn({
+      cmd: [...cmd],
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    let hitCap = false;
+    let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
+    const kill = (signal: "SIGTERM" | "SIGKILL"): void => {
+      try {
+        proc.kill(signal);
+      } catch {}
+    };
+    const terminate = (): void => {
+      kill("SIGTERM");
+      hardKillTimer = setTimeout(() => kill("SIGKILL"), 1_000);
+    };
+
+    const stdoutReader = (async (): Promise<string> => {
+      if (!(proc.stdout instanceof ReadableStream)) {
+        return "";
+      }
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+      const chunks: string[] = [];
+      const cap = maxBytes + 1;
+      let bytesRead = 0;
+      try {
+        while (bytesRead < cap) {
+          const { value, done } = await reader.read();
+          if (done) {
+            return chunks.join("") + decoder.decode();
+          }
+          const remaining = cap - bytesRead;
+          const bounded = value.subarray(0, remaining);
+          bytesRead += bounded.byteLength;
+          chunks.push(decoder.decode(bounded, { stream: true }));
+          if (bytesRead === cap) {
+            hitCap = true;
+            terminate();
+            await reader.cancel().catch(() => undefined);
+            break;
+          }
+        }
+        return chunks.join("") + decoder.decode();
+      } finally {
+        reader.releaseLock();
+      }
+    })();
+
+    const stderrDrainer = (async (): Promise<void> => {
+      if (!(proc.stderr instanceof ReadableStream)) {
+        return;
+      }
+      const reader = proc.stderr.getReader();
+      try {
+        while (true) {
+          if ((await reader.read()).done) {
+            return;
+          }
+        }
+      } catch {
+      } finally {
+        reader.releaseLock();
+      }
+    })();
+
+    try {
+      const [stdout, exitCode] = await Promise.all([
+        stdoutReader,
+        proc.exited,
+        stderrDrainer,
+      ]);
+      return exitCode === 0 || hitCap ? stdout : undefined;
+    } finally {
+      if (hardKillTimer !== undefined) {
+        clearTimeout(hardKillTimer);
+      }
+    }
+  } catch {
+    return undefined;
   }
 }
 
