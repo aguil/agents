@@ -157,6 +157,11 @@ export async function main(
     return await runPolicyEvalCli(argv.slice(1));
   }
 
+  if (argv[0] === "harness" && argv[1] === "run") {
+    const { runHarnessRunCli } = await import("./harness-run-main");
+    return await runHarnessRunCli(argv.slice(2));
+  }
+
   if (argv[0] === "pr-feedback") {
     const { runPrFeedbackCli } = await import("./pr-feedback-main");
     return await runPrFeedbackCli(argv.slice(1));
