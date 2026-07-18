@@ -10,6 +10,40 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.3](https://github.com/aguil/agents/compare/v0.4.2...v0.4.3) (2026-07-18)
+
+
+### Added
+
+* **cli:** add 'agents harness run' — generic config-driven harness runner ([9a2524f](https://github.com/aguil/agents/commit/9a2524f8d9c44b03daa19e683c8c7d913c5d997d))
+* **core,orchestration:** collect generic outcome events from adapters ([afcb4d0](https://github.com/aguil/agents/commit/afcb4d0b21b5c23a3eda2e6d42e9f266c96c05a5))
+* **examples:** incident-triage harness definition (pure configuration) ([61c00eb](https://github.com/aguil/agents/commit/61c00ebc4c1c4db2903962b49ed8f1d052fa6adc))
+* **examples:** synthetic incident fixture for the triage proof harness ([c8fcb8c](https://github.com/aguil/agents/commit/c8fcb8cf74606fc8678fccb6fa4fdc759a314b16))
+* **execution:** parse generic outcome envelopes from adapter output ([8ae1500](https://github.com/aguil/agents/commit/8ae15001348d36310df15cd38b03da4183fd54ec))
+* **harness-config,cli:** runtime pass_check gate for chain harnesses ([070e142](https://github.com/aguil/agents/commit/070e1423a0cf39bc3df90ace56ac8785d5b2d921))
+* **harness-config:** per-role policy references; reject unknown role fields ([b9ccc8a](https://github.com/aguil/agents/commit/b9ccc8a1a521793ba5514cd4c59481e32e2c1fa9))
+
+
+### Fixed
+
+* **cli,examples:** regenerate hooks every role; deny governance-surface writes ([2ca8856](https://github.com/aguil/agents/commit/2ca8856ca689dbe286ad9dd19988b49dfe66c6af))
+* **cli,orchestration:** enforce each role's policy via per-role hook regeneration ([f2f1e70](https://github.com/aguil/agents/commit/f2f1e7097759b330c37d4bb0e343f4a226a3b25e))
+* **cli:** fail closed when a policy cannot be enforced on the chosen adapter ([898c213](https://github.com/aguil/agents/commit/898c2135b0d73a1f1f952d4f16a4525fefd3d86a))
+* **cli:** only regenerate per-role hooks for sequential execution modes ([21ddb52](https://github.com/aguil/agents/commit/21ddb522007e41f8a64427e092253dcfe4321515))
+* **examples:** deny .cursor and .agents writes in the triage-fix policy ([8a19e60](https://github.com/aguil/agents/commit/8a19e609e06a9fc795e12b56a512a3de52aecd63))
+* **examples:** incident-triage prompts emit outcome envelopes, not findings ([38fa078](https://github.com/aguil/agents/commit/38fa07873c0eeaee3cc549139c90242be0e277af))
+* **examples:** protect the pass_check target from all roles ([e2393c5](https://github.com/aguil/agents/commit/e2393c584738ee05e38838b4a4846409e10171dd))
+* **execution:** extract outcome envelopes from nested agent text ([2520d50](https://github.com/aguil/agents/commit/2520d50035caf136f337fe8ee1e6161878ca4126))
+* **hooks:** quote the agents-cli token in the generated bridge command ([ad3e3cc](https://github.com/aguil/agents/commit/ad3e3ccde4b7d31f91ada3737693be851a982097))
+* **orchestration:** decouple generalized-harness status from finding severity ([db55053](https://github.com/aguil/agents/commit/db55053b8eadbd0a4b0a0990ffdde7e28c2e33ea))
+* **orchestration:** validation-loop convergence drives run status ([0d5b237](https://github.com/aguil/agents/commit/0d5b2376f8c6e17b2576922f4c9e72ea64b523fe))
+
+
+### Performance
+
+* **cli:** skip hook regeneration when a role's policy is unchanged ([faaee62](https://github.com/aguil/agents/commit/faaee628ff3a1341c9e682b555be096a3af63d9d))
+* **execution:** scan nested envelopes in a single pass ([f9e275f](https://github.com/aguil/agents/commit/f9e275f640f689a02a906de6f1bae9b63bb63ea9))
+
 ## [0.4.2](https://github.com/aguil/agents/compare/v0.4.1...v0.4.2) (2026-07-18)
 
 
