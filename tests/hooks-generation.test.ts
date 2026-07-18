@@ -24,6 +24,8 @@ test("policy bridge is the first handler on every mapped tool event", () => {
   const mcp = config.hooks.beforeMCPExecution ?? [];
   expect(shell[0].command).toContain('policy-eval --policy "triage-readonly"');
   expect(shell[0].command).toContain('--agents-dir "/repo/.agents"');
+  // The CLI token is quoted too (operator-supplied, may contain spaces).
+  expect(shell[0].command.startsWith('"agents" policy-eval')).toBe(true);
   expect(mcp[0].command).toContain('policy-eval --policy "triage-readonly"');
   // User hook comes after the bridge, carrying its matcher as an env
   // prefix the handler script can filter on.
