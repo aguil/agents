@@ -599,7 +599,11 @@ export function normalizeAgentOutputLine(
       ];
     }
 
-    const nestedFindings = extractFindingEnvelopes(parsed).map((envelope) => {
+    const {
+      findings: nestedFindingEnvelopes,
+      outcomes: nestedOutcomeEnvelopes,
+    } = extractNestedEnvelopes(parsed);
+    const nestedFindings = nestedFindingEnvelopes.map((envelope) => {
       if (!envelope.validation.valid) {
         return createAgentEvent({
           runId: request.runId,
@@ -617,7 +621,7 @@ export function normalizeAgentOutputLine(
         data: envelope.value,
       });
     });
-    const nestedOutcomes = extractOutcomeEnvelopes(parsed).map((envelope) => {
+    const nestedOutcomes = nestedOutcomeEnvelopes.map((envelope) => {
       if ("invalid" in envelope) {
         return createAgentEvent({
           runId: request.runId,
@@ -698,51 +702,47 @@ function readOutcomeEnvelope(
   return { invalid: true };
 }
 
-function extractFindingEnvelopes(
-  value: unknown,
-): readonly ParsedFindingEnvelope[] {
-  const envelopes: ParsedFindingEnvelope[] = [];
-  const texts = extractTextCandidates(value);
-  for (const text of texts) {
-    for (const line of text.split(/\r?\n/).filter(Boolean)) {
-      try {
-        const envelope = readFindingEnvelope(JSON.parse(line) as unknown);
-        if (envelope !== undefined) {
-          envelopes.push(envelope);
-        }
-      } catch {
-        // Non-JSON text inside an agent event is expected.
-      }
-    }
-  }
-  return envelopes;
-}
-
 type NestedOutcome =
   | { readonly value: HarnessOutcome }
   | { readonly invalid: true };
 
+interface NestedEnvelopes {
+  readonly findings: readonly ParsedFindingEnvelope[];
+  readonly outcomes: readonly NestedOutcome[];
+}
+
 /**
- * Scan nested text candidates for `{"outcome":...}` envelopes. Real
- * subprocess agents (e.g. Cursor stream-json) emit the envelope inside an
- * assistant message's text rather than as a standalone stdout line, so the
- * top-level check in normalizeAgentOutputLine is not enough on its own.
+ * Scan nested text candidates once for both finding and outcome envelopes.
+ * Real subprocess agents (e.g. Cursor stream-json) embed envelopes inside an
+ * assistant message's text rather than as standalone stdout lines, so the
+ * top-level checks in normalizeAgentOutputLine are not enough on their own.
+ * Both envelope types share a single tree walk + line parse to avoid
+ * scanning and JSON-parsing the same blob twice.
  */
-function extractOutcomeEnvelopes(value: unknown): readonly NestedOutcome[] {
+function extractNestedEnvelopes(value: unknown): NestedEnvelopes {
+  const findings: ParsedFindingEnvelope[] = [];
   const outcomes: NestedOutcome[] = [];
   for (const text of extractTextCandidates(value)) {
     for (const line of text.split(/\r?\n/).filter(Boolean)) {
+      let parsed: unknown;
       try {
-        const envelope = readOutcomeEnvelope(JSON.parse(line) as unknown);
-        if (envelope !== undefined) {
-          outcomes.push(envelope);
-        }
+        parsed = JSON.parse(line) as unknown;
       } catch {
         // Non-JSON text inside an agent event is expected.
+        continue;
+      }
+      const finding = readFindingEnvelope(parsed);
+      if (finding !== undefined) {
+        findings.push(finding);
+        continue;
+      }
+      const outcome = readOutcomeEnvelope(parsed);
+      if (outcome !== undefined) {
+        outcomes.push(outcome);
       }
     }
   }
-  return outcomes;
+  return { findings, outcomes };
 }
 
 function extractTextCandidates(value: unknown): readonly string[] {
