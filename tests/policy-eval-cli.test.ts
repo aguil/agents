@@ -133,3 +133,41 @@ test("normalizeHookPayload maps Cursor events and lifts top-level fields", () =>
   expect(canonical.hook_event).toBe("pre_tool_call");
   expect(canonical.tool_input?.url).toBe("https://example.com");
 });
+
+test("normalizeHookPayload lifts nested MCP arguments", () => {
+  const mcpNested = normalizeHookPayload({
+    hook_event_name: "beforeMCPExecution",
+    tool_name: "fetch_url",
+    tool_input: { arguments: { url: "https://evil.example.com/x" } },
+  });
+  expect(mcpNested.hook_event).toBe("pre_tool_call");
+  expect(mcpNested.tool_input?.url).toBe("https://evil.example.com/x");
+
+  const mcpTopLevel = normalizeHookPayload({
+    hook_event_name: "beforeMCPExecution",
+    arguments: { path: "/etc/passwd" },
+  });
+  expect(mcpTopLevel.tool_input?.path).toBe("/etc/passwd");
+
+  // Explicit canonical fields win over nested arguments.
+  const both = normalizeHookPayload({
+    hook_event: "pre_tool_call",
+    tool_input: {
+      url: "https://explicit.example.com",
+      arguments: { url: "https://nested.example.com" },
+    },
+  });
+  expect(both.tool_input?.url).toBe("https://explicit.example.com");
+});
+
+test("MCP-shaped payload with nested url is denied by network policy", async () => {
+  const result = await runPolicyEval(
+    ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
+    {
+      hook_event_name: "beforeMCPExecution",
+      tool_name: "fetch_url",
+      tool_input: { arguments: { url: "https://example.com/data" } },
+    },
+  );
+  expect(lastJsonLine(result.stdout).permission).toBe("deny");
+});

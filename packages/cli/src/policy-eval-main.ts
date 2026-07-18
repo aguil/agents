@@ -58,11 +58,26 @@ export function normalizeHookPayload(payload: unknown): PolicyHookInput {
       ? (record.tool_input as Record<string, unknown>)
       : {};
   // Cursor's beforeShellExecution puts `command` at top level; afterFileEdit
-  // puts `file_path` at top level. Merge them into the canonical tool_input.
+  // puts `file_path` at top level; MCP payloads nest values under an
+  // `arguments` record (top-level or inside tool_input). Merge all of them
+  // into the canonical tool_input, explicit canonical fields winning.
+  const argumentsRecord = (source: Record<string, unknown>) =>
+    typeof source.arguments === "object" && source.arguments !== null
+      ? (source.arguments as Record<string, unknown>)
+      : {};
+  const nestedArguments = {
+    ...argumentsRecord(record),
+    ...argumentsRecord(toolInputRaw),
+  };
   const toolInput: Record<string, unknown> = { ...toolInputRaw };
   for (const key of ["command", "file_path", "path", "url"]) {
-    if (toolInput[key] === undefined && typeof record[key] === "string") {
+    if (toolInput[key] !== undefined) {
+      continue;
+    }
+    if (typeof record[key] === "string") {
       toolInput[key] = record[key];
+    } else if (typeof nestedArguments[key] === "string") {
+      toolInput[key] = nestedArguments[key];
     }
   }
 
