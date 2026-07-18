@@ -81,6 +81,8 @@ export function normalizeHookPayload(payload: unknown): PolicyHookInput {
     }
   }
 
+  // Note: any `state` in the payload is intentionally dropped — hook stdin
+  // is not a trustworthy accounting source (see PolicyHookInput docs).
   return {
     hook_event: event,
     ...(typeof record.tool_name === "string"
@@ -89,9 +91,6 @@ export function normalizeHookPayload(payload: unknown): PolicyHookInput {
         ? { tool_name: "Execute" }
         : {}),
     tool_input: toolInput,
-    ...(typeof record.state === "object" && record.state !== null
-      ? { state: record.state as PolicyHookInput["state"] }
-      : {}),
   };
 }
 

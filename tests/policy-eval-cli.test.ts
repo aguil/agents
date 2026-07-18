@@ -134,6 +134,30 @@ test("normalizeHookPayload maps Cursor events and lifts top-level fields", () =>
   expect(canonical.tool_input?.url).toBe("https://example.com");
 });
 
+test("stdin-supplied cost state cannot influence the verdict", async () => {
+  // Fixture policy has cost_usd: 2.5; a payload claiming zero spend must
+  // not matter because stdin state is dropped entirely — and conversely a
+  // payload claiming huge spend must not deny an allowed command.
+  const result = await runPolicyEval(
+    ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
+    {
+      hook_event_name: "beforeShellExecution",
+      command: "bun test",
+      state: { cumulative_cost_usd: 999 },
+    },
+  );
+  expect(lastJsonLine(result.stdout).permission).toBe("allow");
+});
+
+test("normalizeHookPayload drops stdin state", () => {
+  const normalized = normalizeHookPayload({
+    hook_event: "pre_tool_call",
+    tool_input: { command: "rg foo" },
+    state: { cumulative_cost_usd: 0 },
+  });
+  expect("state" in normalized).toBe(false);
+});
+
 test("normalizeHookPayload lifts nested MCP arguments", () => {
   const mcpNested = normalizeHookPayload({
     hook_event_name: "beforeMCPExecution",

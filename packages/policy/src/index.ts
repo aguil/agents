@@ -382,15 +382,18 @@ export function evaluatePolicy(
   }
 }
 
-/** Hook-shaped input (JSON stdin contract used by the hook pipeline). */
+/**
+ * Hook-shaped input (JSON stdin contract used by the hook pipeline).
+ *
+ * Deliberately carries NO state fields: hook stdin comes from the adapter
+ * process, not the harness runtime, so cost/elapsed accounting from that
+ * channel is not trustworthy. Cost enforcement happens where the runtime
+ * itself calls evaluatePolicy with runtime-owned state.
+ */
 export interface PolicyHookInput {
   readonly hook_event: string;
   readonly tool_name?: string;
   readonly tool_input?: Readonly<Record<string, unknown>>;
-  readonly state?: {
-    readonly elapsed_ms?: number;
-    readonly cumulative_cost_usd?: number;
-  };
 }
 
 export interface PolicyHookOutput {
@@ -430,10 +433,6 @@ export function createPolicyEvalHandler(
       interventionPoint,
       toolName: input.tool_name,
       toolInput: input.tool_input,
-      state: {
-        elapsedMs: input.state?.elapsed_ms,
-        cumulativeCostUsd: input.state?.cumulative_cost_usd,
-      },
     });
     return {
       verdict: verdict.decision,
