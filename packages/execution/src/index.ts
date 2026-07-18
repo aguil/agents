@@ -1,9 +1,10 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentEvent, Finding } from "@aguil/agents-core";
+import type { AgentEvent, Finding, HarnessOutcome } from "@aguil/agents-core";
 import {
   createAgentEvent,
   ensureDirectory,
+  isHarnessOutcome,
   writeJsonFile,
 } from "@aguil/agents-core";
 
@@ -563,6 +564,29 @@ export function normalizeAgentOutputLine(
         }),
       ];
     }
+    const outcomeEnvelope = readOutcomeEnvelope(parsed);
+    if (outcomeEnvelope !== undefined) {
+      if ("invalid" in outcomeEnvelope) {
+        return [
+          createAgentEvent({
+            runId: request.runId,
+            roleId: request.roleId,
+            type: "error",
+            message: "invalid outcome envelope",
+            data: { raw: parsed },
+          }),
+        ];
+      }
+      return [
+        createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "outcome",
+          message: outcomeEnvelope.value.title,
+          data: outcomeEnvelope.value,
+        }),
+      ];
+    }
     if (isAgentEventEnvelope(parsed)) {
       return [
         createAgentEvent({
@@ -638,6 +662,24 @@ function readFindingEnvelope(
   return { value: coerced as Finding, validation };
 }
 
+/**
+ * Read a `{"outcome":{...}}` envelope into a validated HarnessOutcome.
+ * Returns undefined for non-outcome values; returns an invalid marker when
+ * the envelope key is present but the payload is malformed.
+ */
+function readOutcomeEnvelope(
+  value: unknown,
+): { readonly value: HarnessOutcome } | { readonly invalid: true } | undefined {
+  if (typeof value !== "object" || value === null || !("outcome" in value)) {
+    return undefined;
+  }
+  const rawOutcome = (value as { readonly outcome?: unknown }).outcome;
+  if (isHarnessOutcome(rawOutcome)) {
+    return { value: rawOutcome };
+  }
+  return { invalid: true };
+}
+
 function extractFindingEnvelopes(
   value: unknown,
 ): readonly ParsedFindingEnvelope[] {
@@ -695,6 +737,7 @@ function isAgentEventEnvelope(
     event.type === "stderr" ||
     event.type === "tool" ||
     event.type === "finding" ||
+    event.type === "outcome" ||
     event.type === "completed" ||
     event.type === "error"
   );

@@ -10,6 +10,7 @@ import {
   isFindingOutcome,
 } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
+import { normalizeAgentOutputLine } from "@aguil/agents-execution";
 import { loadHarness } from "@aguil/agents-harness-config";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 
@@ -42,16 +43,14 @@ async function runHealthCheck(
   return { exitCode, output: `${stdout}\n${stderr}` };
 }
 
-function outcomeEvent(
+// Emit the outcome the way a real agent does — as a `{"outcome":{...}}`
+// JSON line through the subprocess line parser — so the test exercises the
+// actual envelope path, not a hand-built event.
+function outcomeEvents(
   request: AgentRunRequest,
   outcome: HarnessOutcome,
-): AgentEvent {
-  return createAgentEvent({
-    runId: request.runId,
-    roleId: request.roleId,
-    type: "outcome",
-    data: outcome,
-  });
+): readonly AgentEvent[] {
+  return normalizeAgentOutputLine(request, JSON.stringify({ outcome }));
 }
 
 /**
@@ -85,7 +84,7 @@ function createIncidentAgent(options: { readonly applyFix: boolean }): {
         case "scout": {
           const alert = await readFile(join(workspace, "alert.log"), "utf8");
           const check = await runHealthCheck(workspace);
-          yield outcomeEvent(request, {
+          yield* outcomeEvents(request, {
             id: "scout-evidence",
             kind: "evidence",
             sourceRole: "scout",
@@ -105,7 +104,7 @@ function createIncidentAgent(options: { readonly applyFix: boolean }): {
             "utf8",
           );
           const hasBug = source.includes(BUGGY_EXPRESSION);
-          yield outcomeEvent(request, {
+          yield* outcomeEvents(request, {
             id: "diagnosis",
             kind: "diagnosis",
             sourceRole: "diagnose",
@@ -130,7 +129,7 @@ function createIncidentAgent(options: { readonly applyFix: boolean }): {
             );
           }
           const check = await runHealthCheck(workspace);
-          yield outcomeEvent(request, {
+          yield* outcomeEvents(request, {
             id: "remediation",
             kind: "remediation",
             sourceRole: "fix",
