@@ -168,6 +168,61 @@ test("ShellCommandProvider captures stdout and records failures without throwing
   });
 });
 
+test("ShellCommandProvider bounds large stdout and marks it truncated", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const provider = new ShellCommandProvider({
+      id: "large-output",
+      cmd: ["sh", "-c", "yes x | head -c 1000000"],
+      maxBytes: 1024,
+    });
+    const startedAt = performance.now();
+    const artifacts = await provider.collect(makeRequest(workspacePath));
+
+    expect(performance.now() - startedAt).toBeLessThan(2000);
+    expect(artifacts[0].content).toContain("[truncated at 1024 bytes]");
+    expect(Buffer.byteLength(artifacts[0].content, "utf8")).toBeLessThan(1100);
+  });
+});
+
+test("ShellCommandProvider terminates a producer after reaching the stdout cap", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const donePath = join(workspacePath, "done-file");
+    const provider = new ShellCommandProvider({
+      id: "early-kill",
+      cmd: [
+        "sh",
+        "-c",
+        "head -c 200000 /dev/zero | tr '\\0' x; sleep 5; touch \"$1\"",
+        "sh",
+        donePath,
+      ],
+      maxBytes: 1024,
+    });
+    const startedAt = performance.now();
+    const artifacts = await provider.collect(makeRequest(workspacePath));
+
+    expect(performance.now() - startedAt).toBeLessThan(2000);
+    expect(artifacts[0].content).toContain("[truncated at 1024 bytes]");
+    expect(await Bun.file(donePath).exists()).toBe(false);
+  });
+});
+
+test("ShellCommandProvider records an uncapped nonzero exit as a failure", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const provider = new ShellCommandProvider({
+      id: "native-failure",
+      cmd: ["sh", "-c", "printf partial-output; exit 7"],
+      maxBytes: 1024,
+    });
+    const artifacts = await provider.collect(makeRequest(workspacePath));
+
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0].content).toBe(
+      "Command failed: sh -c printf partial-output; exit 7",
+    );
+  });
+});
+
 test("FileGlobProvider collects matching files up to maxFiles in sorted order", async () => {
   await withWorkspace(async (workspacePath) => {
     await mkdir(join(workspacePath, "docs"), { recursive: true });
