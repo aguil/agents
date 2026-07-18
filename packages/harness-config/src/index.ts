@@ -14,6 +14,9 @@ export interface PolicyCapabilityRules {
   readonly deny?: readonly string[];
 }
 
+/** Action categories that route to approval instead of a hard verdict. */
+export type PolicyConfirmationCategory = "exec.unknown" | "filesystem.write";
+
 export interface PolicySpec {
   readonly id: string;
   readonly description?: string;
@@ -26,7 +29,15 @@ export interface PolicySpec {
     readonly costUsd?: number;
     readonly timeoutMs?: number;
   };
+  readonly confirmations?: {
+    readonly requiredFor: readonly PolicyConfirmationCategory[];
+  };
 }
+
+const CONFIRMATION_CATEGORIES: ReadonlySet<string> = new Set([
+  "exec.unknown",
+  "filesystem.write",
+]);
 
 export interface HarnessManifest {
   readonly specVersion?: string;
@@ -172,6 +183,26 @@ function parsePolicy(value: unknown, id: string): PolicySpec {
     record.limits === undefined
       ? undefined
       : asRecord(record.limits, `policy ${id} limits`);
+  const confirmations =
+    record.confirmations === undefined
+      ? undefined
+      : asRecord(record.confirmations, `policy ${id} confirmations`);
+  const requiredFor =
+    confirmations === undefined
+      ? undefined
+      : (optionalStringArray(
+          confirmations.requiredFor ?? confirmations.required_for,
+          `policy ${id} confirmations.requiredFor`,
+        ) ?? []);
+  if (requiredFor !== undefined) {
+    for (const category of requiredFor) {
+      if (!CONFIRMATION_CATEGORIES.has(category)) {
+        fail(
+          `policy ${id} confirmations.requiredFor has unknown category "${category}" (supported: ${[...CONFIRMATION_CATEGORIES].join(", ")})`,
+        );
+      }
+    }
+  }
   return {
     id,
     description: optionalString(record.description, `policy ${id} description`),
@@ -203,6 +234,13 @@ function parsePolicy(value: unknown, id: string): PolicySpec {
               limits.timeout_ms,
               `policy ${id} limits.timeout_ms`,
             ),
+          },
+        }),
+    ...(requiredFor === undefined
+      ? {}
+      : {
+          confirmations: {
+            requiredFor: requiredFor as readonly PolicyConfirmationCategory[],
           },
         }),
   };

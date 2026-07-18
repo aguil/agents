@@ -49,6 +49,7 @@ test("loadHarness resolves the referenced policy", async () => {
   expect(loaded.policy?.capabilities?.network?.deny).toEqual(["*"]);
   expect(loaded.policy?.limits?.costUsd).toBe(2.5);
   expect(loaded.policy?.limits?.timeoutMs).toBe(600_000);
+  expect(loaded.policy?.confirmations?.requiredFor).toEqual(["exec.unknown"]);
 });
 
 test("loadManifest reads enabled harnesses and tolerates a missing file", async () => {

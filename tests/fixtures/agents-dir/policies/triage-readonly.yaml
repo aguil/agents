@@ -12,3 +12,5 @@ capabilities:
 limits:
   cost_usd: 2.5
   timeout_ms: 600000
+confirmations:
+  requiredFor: [exec.unknown]
