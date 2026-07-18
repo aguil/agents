@@ -33,7 +33,11 @@ export interface ChainExecution {
   readonly mode: "chain";
   /** Step order; defaults to definition role order. */
   readonly order?: readonly string[];
-  /** v1 supports abort only (see exploration doc §8.1 thin defaults). */
+  /**
+   * v1 supports abort only: the first failed or timed-out step stops the
+   * chain. Retry/skip semantics are deferred until a concrete harness
+   * needs them.
+   */
   readonly onStepFailure?: "abort";
 }
 
@@ -65,7 +69,11 @@ export interface HarnessDefinition {
   readonly execution?: ExecutionConfig;
 }
 
-/** Pi-derived output truncation defaults (exploration doc §8.1). */
+/**
+ * Truncation limits for role output flowing between steps, matching the
+ * limits pi-subagents ships (2000 lines / 50KB per subagent output) to
+ * prevent chain-mode context overflow.
+ */
 export const ROLE_OUTPUT_MAX_BYTES = 50_000;
 export const ROLE_OUTPUT_MAX_LINES = 2000;
 
