@@ -82,27 +82,19 @@ function constructAdapter(name: AdapterName): AgentAdapter {
 }
 
 /**
- * Generate the workspace .cursor/hooks.json so the policy-eval bridge and
- * harness hooks gate the run. Cursor adapter only in v1; other adapters get
- * a warning so the gap is visible rather than silent.
+ * Write `.cursor/hooks.json` for a single role's effective policy. Because
+ * Cursor reads one workspace-level hook config, per-role enforcement is
+ * achieved by regenerating this file immediately before each role runs (via
+ * the orchestrator's onRoleStart). Cursor adapter only in v1.
  */
-async function materializeHooks(
+async function writeRoleHooks(
   loaded: LoadedHarness,
   args: HarnessRunArgs,
+  policyId: string | undefined,
 ): Promise<void> {
-  const hasHooks = Object.keys(loaded.hooks).length > 0;
-  if (loaded.policy === undefined && !hasHooks) {
-    return;
-  }
-  if (args.adapter !== "cursor") {
-    console.warn(
-      `harness run: hook/policy config generation targets the cursor adapter; adapter "${args.adapter}" runs WITHOUT generated hook enforcement`,
-    );
-    return;
-  }
-  const { config, skippedEvents } = generateCursorHooksConfig({
+  const { config } = generateCursorHooksConfig({
     hooks: loaded.hooks,
-    policyId: loaded.policy?.id,
+    policyId,
     agentsDir: resolve(args.agentsDir),
     agentsCli: args.agentsCli,
   });
@@ -112,11 +104,45 @@ async function materializeHooks(
     join(cursorDir, "hooks.json"),
     renderCursorHooksConfig(config),
   );
-  if (skippedEvents.length > 0) {
-    console.warn(
-      `harness run: events without cursor equivalents were skipped: ${skippedEvents.join(", ")}`,
-    );
+}
+
+/**
+ * Build the onRoleStart callback that regenerates hook config with each
+ * role's effective policy (role override > harness default). Returns
+ * undefined when there is nothing to enforce, or warns and returns
+ * undefined for non-cursor adapters so the gap is visible, not silent.
+ */
+function makeRoleHookRegenerator(
+  loaded: LoadedHarness,
+  args: HarnessRunArgs,
+): ((roleId: string) => Promise<void>) | undefined {
+  const hasHooks = Object.keys(loaded.hooks).length > 0;
+  const hasAnyPolicy =
+    loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0;
+  if (!hasHooks && !hasAnyPolicy) {
+    return undefined;
   }
+  if (args.adapter !== "cursor") {
+    console.warn(
+      `harness run: hook/policy config generation targets the cursor adapter; adapter "${args.adapter}" runs WITHOUT generated hook enforcement`,
+    );
+    return undefined;
+  }
+  return async (roleId: string) => {
+    const policyId = roleEffectivePolicyId(loaded, roleId);
+    await writeRoleHooks(loaded, args, policyId);
+    console.warn(
+      `harness run: role "${roleId}" enforced under policy "${policyId ?? "(none)"}"`,
+    );
+  };
+}
+
+/** Effective policy id for a role: role override, else harness default. */
+export function roleEffectivePolicyId(
+  loaded: LoadedHarness,
+  roleId: string,
+): string | undefined {
+  return loaded.rolePolicies[roleId]?.id ?? loaded.policy?.id;
 }
 
 export async function runHarnessRunCli(
@@ -141,7 +167,7 @@ export async function runHarnessRunCli(
     return 1;
   }
 
-  await materializeHooks(loaded, parsed);
+  const onRoleStart = makeRoleHookRegenerator(loaded, parsed);
 
   const workspacePath = resolve(parsed.workspace);
   const runId = createRunId(`harness-${parsed.harnessId}`);
@@ -163,6 +189,7 @@ export async function runHarnessRunCli(
     definition: loaded.definition,
     adapter: constructAdapter(parsed.adapter),
     contextBundlePath,
+    ...(onRoleStart === undefined ? {} : { onRoleStart }),
   });
 
   const result = await orchestrator.run({

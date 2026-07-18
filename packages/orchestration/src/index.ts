@@ -132,6 +132,15 @@ export interface NativeBunOrchestratorOptions {
   readonly eventSink?: EventSink;
   readonly contextBundlePath: string;
   readonly embeddedPrompts?: Readonly<Record<string, string>>;
+  /**
+   * Invoked immediately before each role runs. Lets the caller apply
+   * role-scoped setup — notably regenerating adapter hook config with the
+   * role's effective policy. Awaited; a throw aborts the run. Safe for
+   * sequential modes (chain, validation-loop rounds); for parallel mode
+   * callbacks may interleave, so only use it there for role-independent
+   * setup.
+   */
+  readonly onRoleStart?: (roleId: string) => Promise<void> | void;
 }
 
 interface RoleRunOutcome {
@@ -336,6 +345,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
   ): Promise<RoleRunOutcome> {
     const roleScratchpadPath = join(request.scratchpadPath, "roles", role.id);
     await ensureDirectory(roleScratchpadPath);
+    await this.options.onRoleStart?.(role.id);
     const prompt = interpolatePrompt(
       await readPrompt(role, this.options.embeddedPrompts),
       interpolation,

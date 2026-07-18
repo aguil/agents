@@ -85,6 +85,20 @@ test("harness run executes the incident-triage example chain with the fake adapt
   }
 });
 
+test("roleEffectivePolicyId resolves role override over harness default", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { roleEffectivePolicyId } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const loaded = await loadHarness({
+    agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+    harnessId: "incident-triage",
+  });
+  expect(roleEffectivePolicyId(loaded, "fix")).toBe("triage-fix");
+  expect(roleEffectivePolicyId(loaded, "scout")).toBe("triage-readonly");
+  expect(roleEffectivePolicyId(loaded, "verify")).toBe("triage-readonly");
+});
+
 test("harness run surfaces loader errors with a nonzero exit", async () => {
   const result = await runHarnessCli([
     "no-such-harness",

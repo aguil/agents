@@ -416,6 +416,28 @@ test("generic outcome events are collected and flow through {previous}", async (
   });
 });
 
+test("onRoleStart fires before each role in chain order", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const { adapter } = createScriptedAdapter({ a: {}, b: {}, c: {} });
+    const started: string[] = [];
+    const definition: HarnessDefinition = {
+      id: "hooked",
+      roles: [makeRole("a", "A."), makeRole("b", "B."), makeRole("c", "C.")],
+      execution: { mode: "chain", order: ["a", "b", "c"] },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+      onRoleStart: (roleId) => {
+        started.push(roleId);
+      },
+    });
+    await orchestrator.run(makeRequest(scratchpadPath));
+    expect(started).toEqual(["a", "b", "c"]);
+  });
+});
+
 test("truncateRoleOutput enforces line and byte limits", () => {
   const manyLines = Array.from({ length: 2500 }, (_, i) => `line ${i}`).join(
     "\n",
