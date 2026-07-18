@@ -9,6 +9,7 @@ import type {
 import {
   ensureDirectory,
   findingToHarnessOutcome,
+  isHarnessOutcome,
   writeJsonFile,
 } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
@@ -136,6 +137,7 @@ export interface NativeBunOrchestratorOptions {
 interface RoleRunOutcome {
   readonly roleId: string;
   readonly findings: readonly Finding[];
+  readonly genericOutcomes: readonly HarnessOutcome[];
   readonly artifacts: readonly string[];
   readonly outcome: "completed" | "timed_out" | "failed";
 }
@@ -261,9 +263,8 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       if (anyFailure) {
         break;
       }
-      const validationHarnessOutcomes = validationOutcomes.flatMap((outcome) =>
-        outcome.findings.map(findingToHarnessOutcome),
-      );
+      const validationHarnessOutcomes =
+        validationOutcomes.flatMap(roleHarnessOutcomes);
       if (passWhen(validationHarnessOutcomes)) {
         passed = true;
         break;
@@ -315,7 +316,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       }),
       findings,
       ...(includeOutcomes
-        ? { outcomes: findings.map(findingToHarnessOutcome) }
+        ? { outcomes: outcomes.flatMap(roleHarnessOutcomes) }
         : {}),
       artifacts,
       metadata,
@@ -358,10 +359,14 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       metadata: request.metadata,
     };
 
+    const genericOutcomes: HarnessOutcome[] = [];
     for await (const event of this.options.adapter.run(agentRequest)) {
       await this.options.eventSink?.write(event);
       if (event.type === "finding" && isFinding(event.data)) {
         findings.push(event.data);
+      }
+      if (event.type === "outcome" && isHarnessOutcome(event.data)) {
+        genericOutcomes.push(event.data);
       }
       if (event.type === "error") {
         outcome = hasTimedOut(event.data) ? "timed_out" : "failed";
@@ -371,6 +376,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     return {
       roleId: role.id,
       findings,
+      genericOutcomes,
       artifacts: [roleScratchpadPath],
       outcome,
     };
@@ -395,8 +401,15 @@ function resolveRoleOrder(
   });
 }
 
+function roleHarnessOutcomes(outcome: RoleRunOutcome): HarnessOutcome[] {
+  return [
+    ...outcome.findings.map(findingToHarnessOutcome),
+    ...outcome.genericOutcomes,
+  ];
+}
+
 function serializeRoleOutput(outcome: RoleRunOutcome): string {
-  return JSON.stringify(outcome.findings.map(findingToHarnessOutcome), null, 2);
+  return JSON.stringify(roleHarnessOutcomes(outcome), null, 2);
 }
 
 function interpolatePrompt(

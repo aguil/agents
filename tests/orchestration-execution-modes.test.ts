@@ -2,7 +2,11 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Finding, HarnessRunRequest } from "@aguil/agents-core";
+import type {
+  Finding,
+  HarnessOutcome,
+  HarnessRunRequest,
+} from "@aguil/agents-core";
 import { createAgentEvent } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
 import type {
@@ -28,6 +32,7 @@ function makeFinding(roleId: string, id: string): Finding {
 
 interface RoleScript {
   readonly findings?: readonly Finding[];
+  readonly outcomes?: readonly HarnessOutcome[];
   readonly fail?: boolean;
   /** Findings per invocation; overrides `findings` when set. */
   readonly perInvocation?: readonly (readonly Finding[])[];
@@ -69,6 +74,14 @@ function createScriptedAdapter(scripts: Readonly<Record<string, RoleScript>>): {
           roleId: request.roleId,
           type: "finding",
           data: finding,
+        });
+      }
+      for (const outcome of script.outcomes ?? []) {
+        yield createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "outcome",
+          data: outcome,
         });
       }
       if (script.fail === true) {
@@ -361,6 +374,45 @@ test("explicit execution config opts in to generic outcomes", async () => {
     const result = await orchestrator.run(makeRequest(scratchpadPath));
     expect(result.outcomes).toHaveLength(1);
     expect(result.outcomes?.[0].kind).toBe("finding");
+  });
+});
+
+test("generic outcome events are collected and flow through {previous}", async () => {
+  await withScratchpad(async (scratchpadPath) => {
+    const diagnosis: HarnessOutcome = {
+      id: "diagnosis-1",
+      kind: "diagnosis",
+      sourceRole: "diagnose",
+      title: "Root cause: off-by-one in pagination",
+      data: { rootCause: "end index drops final item" },
+    };
+    const { adapter, promptsByRole } = createScriptedAdapter({
+      diagnose: { outcomes: [diagnosis] },
+      fix: {},
+    });
+    const definition: HarnessDefinition = {
+      id: "triage",
+      roles: [
+        makeRole("diagnose", "Diagnose."),
+        makeRole("fix", "Fix using:\n{previous}"),
+      ],
+      execution: { mode: "chain" },
+    };
+    const orchestrator = new NativeBunOrchestrator({
+      definition,
+      adapter,
+      contextBundlePath: join(scratchpadPath, "context.json"),
+    });
+
+    const result = await orchestrator.run(makeRequest(scratchpadPath));
+
+    // The generic outcome reaches the result without masquerading as a
+    // Finding, and the next chain step sees it via {previous}.
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes?.[0].kind).toBe("diagnosis");
+    expect(result.findings).toHaveLength(0);
+    const fixPrompt = promptsByRole.get("fix")?.[0] ?? "";
+    expect(fixPrompt).toContain("off-by-one in pagination");
   });
 });
 
