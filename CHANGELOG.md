@@ -10,6 +10,30 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.2](https://github.com/aguil/agents/compare/v0.4.1...v0.4.2) (2026-07-18)
+
+
+### Added
+
+* **cli:** add policy-eval subcommand bridging hooks to the evaluator ([2e7ed4c](https://github.com/aguil/agents/commit/2e7ed4cc44cd38c5abace392831e0185331773d4))
+* **harness-config:** load harness.yaml + referenced policy from .agents/ ([78b1d0c](https://github.com/aguil/agents/commit/78b1d0c96fdd05625e474c22c8570fdbcaba5400))
+* **harness-config:** parse hooks section from harness.yaml ([c208a45](https://github.com/aguil/agents/commit/c208a45c8bf8d3f5a78e77243c8624b140c96bec))
+* **harness-config:** parse policy confirmations for escalate flows ([674e5ba](https://github.com/aguil/agents/commit/674e5ba4314142d7b1a17541f7c4db6de589caa7))
+* **hooks:** generate .cursor/hooks.json with builtin policy-eval first ([9a50b20](https://github.com/aguil/agents/commit/9a50b207f01ad72a1cb9ea78058cd5fb0524751e))
+* **policy:** native policy-eval with ACS 5-verdict model ([109d82b](https://github.com/aguil/agents/commit/109d82b7aad72a748bc2207a4896df2d3aa27395))
+
+
+### Fixed
+
+* **cli:** lift nested MCP arguments into canonical policy fields ([9fb3b5d](https://github.com/aguil/agents/commit/9fb3b5d35109bf9706cc63613881158681fcac6e))
+* **harness-config,hooks:** validate policy ids; quote bridge command args ([7c6d34e](https://github.com/aguil/agents/commit/7c6d34e9e92bf6dd997f9160c226ad0f5463a0c4))
+* **harness-config:** apply token grammar to harnessId path segment ([433aa71](https://github.com/aguil/agents/commit/433aa7106f8910b2f172d1ee7a31788b8c2b9931))
+* **hooks:** emit matchers as HOOK_MATCHER env prefix in generated commands ([5963f44](https://github.com/aguil/agents/commit/5963f44253c46139755476531b70ef106baabe63))
+* **hooks:** register policy bridge on all mapped tool events ([d2c6a53](https://github.com/aguil/agents/commit/d2c6a53c31cdddcbf8dcf07a633c13bd85f981de))
+* **policy,cli:** stop trusting cost state from hook stdin ([e0cde7b](https://github.com/aguil/agents/commit/e0cde7b5b8f92b72ef5b61ca68800b3aeb9a55a7))
+* **policy:** normalize file paths before glob matching ([9f7d025](https://github.com/aguil/agents/commit/9f7d025879ad9cb2cdb1a71ccc759d5591bdcb78))
+* **policy:** treat shell-chained commands as unlisted in allow matching ([eb3804f](https://github.com/aguil/agents/commit/eb3804fb496be642307eeede303a2d16717ef386))
+
 ## [0.4.1](https://github.com/aguil/agents/compare/v0.4.0...v0.4.1) (2026-07-18)
 
 
