@@ -10,6 +10,13 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.6](https://github.com/aguil/agents/compare/v0.4.5...v0.4.6) (2026-07-18)
+
+
+### Performance
+
+* bound ShellCommandProvider stdout at the stream ([#67](https://github.com/aguil/agents/issues/67)) ([6010c2a](https://github.com/aguil/agents/commit/6010c2a44cf91377494a6d3df588a8fa38c25bbc))
+
 ## [0.4.5](https://github.com/aguil/agents/compare/v0.4.4...v0.4.5) (2026-07-18)
 
 
