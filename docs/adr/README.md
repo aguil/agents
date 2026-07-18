@@ -17,3 +17,11 @@ shared package boundaries.
 - [0004-implementation-runtime-providers.md](0004-implementation-runtime-providers.md)
   — ADR 0004: provider-agnostic `implementation` runtime (`subprocess` /
   `app_server`, optional `codex:` alias).
+- [0005-harness-generalization-phase-0.md](0005-harness-generalization-phase-0.md)
+  — ADR 0005: harness generalization Phase 0 — `HarnessOutcome`,
+  chain/validation-loop execution modes, generic context providers, worker
+  registry.
+- [0006-harness-governance-phase-1.md](0006-harness-governance-phase-1.md) — ADR
+  0006: harness governance Phase 1 — `.agents/` loader (`harness.yaml` spec
+  v0.1), native policy evaluation (ACS 5-verdict, fail-closed), Cursor hook
+  config generation with policy-eval bridge first.
