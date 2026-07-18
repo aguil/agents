@@ -30,6 +30,18 @@ test("policy bridge is the first handler on every mapped tool event", () => {
   expect(shell[1].timeout).toBe(10);
 });
 
+test("policy bridge also precedes post_tool_call user hooks (afterFileEdit)", () => {
+  const { config } = generateCursorHooksConfig({
+    hooks: sampleHooks,
+    policyId: "triage-readonly",
+  });
+  const fileEdit = config.hooks.afterFileEdit ?? [];
+  expect(fileEdit[0].command).toContain(
+    'policy-eval --policy "triage-readonly"',
+  );
+  expect(fileEdit[1].command).toContain("prettier");
+});
+
 test("canonical events project to Cursor equivalents; unmappable events are reported", () => {
   const { config, skippedEvents } = generateCursorHooksConfig({
     hooks: sampleHooks,

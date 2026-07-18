@@ -106,8 +106,21 @@ export function generateCursorHooksConfig(
 
   const bridge = policyBridgeEntry(options);
   if (bridge !== undefined) {
-    for (const cursorEvent of CURSOR_EVENT_MAPPING.pre_tool_call ?? []) {
-      push(cursorEvent, bridge);
+    // ADR 0006 §3: the policy bridge is the first handler on EVERY mapped
+    // tool event, not just pre-tool projections — post_tool_call's
+    // afterFileEdit needs policy evaluation before user hooks too.
+    const toolEvents: readonly HookEvent[] = [
+      "pre_tool_call",
+      "post_tool_call",
+    ];
+    const seen = new Set<CursorHookEvent>();
+    for (const event of toolEvents) {
+      for (const cursorEvent of CURSOR_EVENT_MAPPING[event] ?? []) {
+        if (!seen.has(cursorEvent)) {
+          seen.add(cursorEvent);
+          push(cursorEvent, bridge);
+        }
+      }
     }
   }
 
