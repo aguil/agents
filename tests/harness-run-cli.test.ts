@@ -259,6 +259,160 @@ test("roleEffectivePolicyId resolves role override over harness default", async 
   expect(roleEffectivePolicyId(loaded, "verify")).toBe("triage-readonly");
 });
 
+test("declared context providers collect the bundle for the run", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-ctx-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-ctx-agents-"));
+  try {
+    await cp(
+      join(repoRoot, "examples", "incident-triage", "fixture"),
+      workspace,
+      { recursive: true },
+    );
+    const { mkdir: mkdirP, writeFile: writeFileP } = await import(
+      "node:fs/promises"
+    );
+    const dir = join(agentsDir, "harnesses", "ctx-demo");
+    await mkdirP(dir, { recursive: true });
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: ctx-demo }",
+        "context:",
+        "  providers:",
+        "    - use: static-file",
+        "      id: alert",
+        "      path: alert.log",
+        "roles:",
+        "  a:",
+        "    description: A",
+        '    prompt: "inspect the alert"',
+        "execution: { mode: chain, order: [a] }",
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "ctx-demo",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    expect(result.stdout).toContain("execution: chain");
+    // The declared static-file provider produced the bundle: it is written
+    // under context/ and contains the alert artifact.
+    const runsDir = join(workspace, ".agents-harness", "runs");
+    const { readdir: readdirP, readFile: readFileP } = await import(
+      "node:fs/promises"
+    );
+    const [runDir] = await readdirP(runsDir);
+    const bundleRaw = await readFileP(
+      join(runsDir, runDir, "context", "bundle.json"),
+      "utf8",
+    );
+    const bundle = JSON.parse(bundleRaw) as {
+      artifacts: Array<{ id: string; content: string }>;
+    };
+    expect(bundle.artifacts.some((artifact) => artifact.id === "alert")).toBe(
+      true,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});
+
+test("context collection failures use the controlled error surface", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-ctx-fail-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-ctx-fail-agents-"));
+  try {
+    const { mkdir: mkdirP, writeFile: writeFileP } = await import(
+      "node:fs/promises"
+    );
+    const dir = join(agentsDir, "harnesses", "ctx-fail");
+    await mkdirP(dir, { recursive: true });
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: ctx-fail }",
+        "context:",
+        "  providers:",
+        "    - use: static-file",
+        "      id: gone",
+        "      path: no-such-file.txt",
+        "      required: true",
+        "roles:",
+        "  a:",
+        "    description: A",
+        '    prompt: "p"',
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "ctx-fail",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("context collection failed");
+    // Controlled surface, not a bare stack trace.
+    expect(result.stderr).not.toContain("    at ");
+    expect(result.stdout).not.toContain("roles completed");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});
+
+test("unknown context provider names abort before any role runs", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-ctx-bad-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-ctx-bad-agents-"));
+  try {
+    const { mkdir: mkdirP, writeFile: writeFileP } = await import(
+      "node:fs/promises"
+    );
+    const dir = join(agentsDir, "harnesses", "ctx-bad");
+    await mkdirP(dir, { recursive: true });
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: ctx-bad }",
+        "context:",
+        "  providers:",
+        "    - use: carrier-pigeon",
+        "roles:",
+        "  a:",
+        "    description: A",
+        '    prompt: "p"',
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "ctx-bad",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("carrier-pigeon");
+    expect(result.stdout).not.toContain("roles completed");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});
+
 test("harness run surfaces loader errors with a nonzero exit", async () => {
   const result = await runHarnessCli([
     "no-such-harness",
