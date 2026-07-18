@@ -39,12 +39,12 @@ export interface CursorHooksConfig {
 export interface GenerateCursorHooksOptions {
   readonly hooks: HooksSpec;
   /**
-   * Policy id to enforce via the builtin policy-eval bridge. When set, the
-   * bridge command is registered as the FIRST handler on every mapped tool
-   * event so policy runs before user hooks (deny is not overridable).
+   * When true, registers the builtin env-carried policy bridge as the FIRST
+   * handler on every mapped tool event. The bridge reads AGENTS_POLICY_ID /
+   * AGENTS_AGENTS_DIR from its inherited process environment, so the generated
+   * file is role- and run-invariant.
    */
-  readonly policyId?: string;
-  readonly agentsDir?: string;
+  readonly policyBridge?: boolean;
   /** CLI executable used for the builtin bridge (default: "agents"). */
   readonly agentsCli?: string;
 }
@@ -58,20 +58,14 @@ export interface GeneratedCursorHooks {
 function policyBridgeEntry(
   options: GenerateCursorHooksOptions,
 ): CursorHookEntry | undefined {
-  if (options.policyId === undefined) {
+  if (options.policyBridge !== true) {
     return undefined;
   }
   // Defense in depth: this command lands in a shell-executed config file,
-  // so quote EVERY interpolated argument — including the CLI token, which
-  // may be an operator-supplied path with spaces or metacharacters.
+  // so quote the CLI token, which may be an operator-supplied path with spaces
+  // or metacharacters.
   const cli = JSON.stringify(options.agentsCli ?? "agents");
-  const agentsDirArg =
-    options.agentsDir === undefined
-      ? ""
-      : ` --agents-dir ${JSON.stringify(options.agentsDir)}`;
-  return {
-    command: `${cli} policy-eval --policy ${JSON.stringify(options.policyId)}${agentsDirArg}`,
-  };
+  return { command: `${cli} policy-eval` };
 }
 
 function toCursorEntry(handler: HookHandlerSpec): CursorHookEntry {
