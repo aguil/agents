@@ -15,6 +15,64 @@ export interface WorkerRouterOptions {
   readonly getDefinition?: () => WorkflowDefinition;
   readonly adapter?: AgentAdapter;
   readonly hostWorkspacePath: string;
+  /**
+   * Additional worker-kind handlers, merged over the builtin
+   * code_review/pr_feedback/implementation registrations. New harnesses
+   * register here instead of editing this router.
+   */
+  readonly workers?: Readonly<Record<string, WorkerHandler>>;
+}
+
+export interface WorkerContext {
+  readonly item: WorkItem;
+  readonly workspacePath: string;
+  readonly hostWorkspacePath: string;
+  readonly prompt: string;
+  readonly signal?: AbortSignal;
+  readonly definition: WorkflowDefinition;
+  readonly adapter: AgentAdapter;
+}
+
+export interface WorkerResult {
+  readonly status: "succeeded" | "failed";
+  readonly error?: string;
+  readonly closeWorkItem?: boolean;
+}
+
+export type WorkerHandler = (context: WorkerContext) => Promise<WorkerResult>;
+
+/** Builtin worker-kind handlers; extended via {@link WorkerRouterOptions.workers}. */
+export function builtinWorkerHandlers(): Readonly<
+  Record<string, WorkerHandler>
+> {
+  return {
+    code_review: (context) =>
+      runCodeReviewWorker({
+        item: context.item,
+        workspacePath: context.workspacePath,
+        hostWorkspacePath: context.hostWorkspacePath,
+        adapter: context.adapter,
+        definition: context.definition,
+        prompt: context.prompt,
+        signal: context.signal,
+      }),
+    pr_feedback: (context) =>
+      runPrFeedbackWorker({
+        item: context.item,
+        workspacePath: context.workspacePath,
+        hostWorkspacePath: context.hostWorkspacePath,
+        definition: context.definition,
+        signal: context.signal,
+      }),
+    implementation: (context) =>
+      runImplementationWorker({
+        item: context.item,
+        workspacePath: context.workspacePath,
+        prompt: context.prompt,
+        definition: context.definition,
+        signal: context.signal,
+      }),
+  };
 }
 
 export { readTriageQueueFile, runPrFeedbackFixes } from "./pr-feedback-fix";
@@ -32,45 +90,32 @@ export { createWorkflowAgentAdapter } from "./workflow-adapter";
 export function createWorkerRouter(
   options: WorkerRouterOptions,
 ): WorkQueueWorker {
+  const handlers: Readonly<Record<string, WorkerHandler>> = {
+    ...builtinWorkerHandlers(),
+    ...(options.workers ?? {}),
+  };
   return async ({ item, workspacePath, prompt, signal }) => {
     const definition = options.getDefinition?.() ?? options.definition;
     const adapter =
       options.adapter ?? createWorkflowAgentAdapter(definition.implementation);
     const workerKind = resolveWorkerKind(item, definition.workers);
+    const handler = handlers[workerKind];
+    if (handler === undefined) {
+      return {
+        status: "failed",
+        error: `no worker registered for kind ${workerKind} (item kind ${item.kind})`,
+      };
+    }
     try {
-      switch (workerKind) {
-        case "code_review":
-          return await runCodeReviewWorker({
-            item,
-            workspacePath,
-            hostWorkspacePath: options.hostWorkspacePath,
-            adapter,
-            definition,
-            prompt,
-            signal,
-          });
-        case "pr_feedback":
-          return await runPrFeedbackWorker({
-            item,
-            workspacePath,
-            hostWorkspacePath: options.hostWorkspacePath,
-            definition,
-            signal,
-          });
-        case "implementation":
-          return await runImplementationWorker({
-            item,
-            workspacePath,
-            prompt,
-            definition,
-            signal,
-          });
-        default:
-          return {
-            status: "failed",
-            error: `no worker mapping for kind ${item.kind}`,
-          };
-      }
+      return await handler({
+        item,
+        workspacePath,
+        hostWorkspacePath: options.hostWorkspacePath,
+        prompt,
+        signal,
+        definition,
+        adapter,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { status: "failed", error: message };

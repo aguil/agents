@@ -1,5 +1,5 @@
-import { readFile, realpath } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { open, readFile, realpath } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ReviewTriageTier } from "@aguil/agents-core";
 import {
   ensureDirectory,
@@ -10,9 +10,52 @@ import {
 
 export interface ContextRequest {
   readonly workspacePath: string;
-  readonly diffPath?: string;
-  readonly pullRequestNumber?: number;
   readonly scratchpadPath: string;
+  /**
+   * Harness-specific parameters. Generic providers read from here; the
+   * legacy top-level fields below are the code-review specialization and
+   * take precedence when both are set (migration window).
+   */
+  readonly params?: Readonly<Record<string, unknown>>;
+  /** @deprecated Use `params.diffPath`. */
+  readonly diffPath?: string;
+  /** @deprecated Use `params.pullRequestNumber`. */
+  readonly pullRequestNumber?: number;
+}
+
+/**
+ * Read a request parameter, preferring the legacy top-level field for the
+ * two code-review keys during the migration window.
+ */
+export function contextRequestParam(
+  request: ContextRequest,
+  key: string,
+): unknown {
+  if (key === "diffPath" && request.diffPath !== undefined) {
+    return request.diffPath;
+  }
+  if (key === "pullRequestNumber" && request.pullRequestNumber !== undefined) {
+    return request.pullRequestNumber;
+  }
+  return request.params?.[key];
+}
+
+function numberRequestParam(
+  request: ContextRequest,
+  key: string,
+): number | undefined {
+  const value = contextRequestParam(request, key);
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function stringRequestParam(
+  request: ContextRequest,
+  key: string,
+): string | undefined {
+  const value = contextRequestParam(request, key);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export interface ContextArtifact {
@@ -127,6 +170,258 @@ export class AgentsInstructionsProvider implements ContextProvider {
   }
 }
 
+export interface StaticFileProviderOptions {
+  readonly id: string;
+  readonly path: string;
+  readonly title?: string;
+  /** Fail the run when the file is missing (default: emit nothing). */
+  readonly required?: boolean;
+  readonly maxBytes?: number;
+  /**
+   * Permit paths that resolve outside the workspace root (absolute paths or
+   * `..` traversal). Off by default: reading host files into LLM-bound
+   * context artifacts is a disclosure vector, so escaping the workspace is
+   * an explicit opt-in for e.g. fixture logs staged outside the repo.
+   */
+  readonly allowOutsideWorkspace?: boolean;
+}
+
+/**
+ * Resolve a candidate path and enforce workspace containment. Returns
+ * undefined when the resolved path escapes the workspace root and escaping
+ * was not explicitly allowed. Symlinks are resolved via realpath before the
+ * containment check (same pattern as collectLocalReferencedDoc), so a link
+ * inside the workspace pointing outside the root is rejected.
+ */
+async function resolveWorkspacePath(
+  workspacePath: string,
+  candidate: string,
+  allowOutsideWorkspace: boolean,
+): Promise<string | undefined> {
+  const resolved = isAbsolute(candidate)
+    ? resolve(candidate)
+    : resolve(workspacePath, candidate);
+  if (allowOutsideWorkspace) {
+    return resolved;
+  }
+  const root = await realpath(resolve(workspacePath));
+  let real: string;
+  try {
+    real = await realpath(resolved);
+  } catch {
+    // Leaf does not exist yet; contain via its closest existing ancestor so
+    // symlinked parent directories still cannot smuggle reads outside root.
+    try {
+      real = join(await realpath(dirname(resolved)), basename(resolved));
+    } catch {
+      // Nothing on disk to disclose; downstream reads fail with ENOENT.
+      return resolved;
+    }
+  }
+  return real === root || real.startsWith(root + sep) ? real : undefined;
+}
+
+/** Generic provider: read one file (relative to workspace or absolute). */
+export class StaticFileProvider implements ContextProvider {
+  readonly name = "static-file";
+
+  constructor(private readonly options: StaticFileProviderOptions) {}
+
+  async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
+    const path = await resolveWorkspacePath(
+      request.workspacePath,
+      this.options.path,
+      this.options.allowOutsideWorkspace === true,
+    );
+    if (path === undefined) {
+      throw new Error(
+        `static-file provider "${this.options.id}" refuses path outside the workspace: ${this.options.path} (set allowOutsideWorkspace to permit)`,
+      );
+    }
+    let content: string;
+    try {
+      content = await readBoundedFile(path, this.options.maxBytes);
+    } catch (error) {
+      if (this.options.required === true) {
+        throw new Error(
+          `static-file provider "${this.options.id}" could not read required file ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return [];
+    }
+    return [
+      {
+        id: this.options.id,
+        title: this.options.title ?? this.options.path,
+        path,
+        content: truncateArtifactContent(content, this.options.maxBytes),
+      },
+    ];
+  }
+}
+
+export interface ShellCommandProviderOptions {
+  readonly id: string;
+  readonly cmd: readonly string[];
+  readonly title?: string;
+  readonly maxBytes?: number;
+  readonly commandRunner?: CommandRunner;
+}
+
+/**
+ * Generic provider: run a command in the workspace and capture stdout.
+ * A failing command yields an artifact recording the failure rather than
+ * aborting context assembly (context is advisory, not a gate).
+ */
+export class ShellCommandProvider implements ContextProvider {
+  readonly name = "shell-command";
+
+  private readonly commandRunner: CommandRunner;
+
+  constructor(private readonly options: ShellCommandProviderOptions) {
+    this.commandRunner = options.commandRunner ?? runCommand;
+  }
+
+  async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
+    const stdout = await this.commandRunner(
+      this.options.cmd,
+      request.workspacePath,
+    );
+    const content =
+      stdout === undefined
+        ? `Command failed: ${this.options.cmd.join(" ")}`
+        : stdout.trim().length === 0
+          ? "(command produced no output)"
+          : stdout;
+    return [
+      {
+        id: this.options.id,
+        title: this.options.title ?? this.options.cmd.join(" "),
+        content: truncateArtifactContent(content, this.options.maxBytes),
+      },
+    ];
+  }
+}
+
+export interface FileGlobProviderOptions {
+  readonly id?: string;
+  readonly pattern: string;
+  readonly maxFiles?: number;
+  readonly maxBytesPerFile?: number;
+  /**
+   * Stop scanning after this many matches (default 10000). Bounds scan time
+   * for overly broad patterns; when hit, a warning artifact records that the
+   * selection may be incomplete.
+   */
+  readonly maxScannedMatches?: number;
+}
+
+const DEFAULT_GLOB_MAX_SCANNED_MATCHES = 10_000;
+
+/** Generic provider: collect files matching a glob under the workspace. */
+export class FileGlobProvider implements ContextProvider {
+  readonly name = "file-glob";
+
+  constructor(private readonly options: FileGlobProviderOptions) {}
+
+  async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
+    const glob = new Bun.Glob(this.options.pattern);
+    const maxFiles = this.options.maxFiles ?? 5;
+    const maxScanned =
+      this.options.maxScannedMatches ?? DEFAULT_GLOB_MAX_SCANNED_MATCHES;
+    // Bounded selection: keep only the lexicographically-first maxFiles
+    // matches while scanning, so memory is O(maxFiles) instead of O(total
+    // matches). Result is identical to sorting all matches and slicing.
+    const limited: string[] = [];
+    let scanned = 0;
+    let scanTruncated = false;
+    for await (const match of glob.scan({
+      cwd: request.workspacePath,
+      dot: false,
+    })) {
+      scanned += 1;
+      if (scanned > maxScanned) {
+        scanTruncated = true;
+        break;
+      }
+      if (limited.length < maxFiles) {
+        limited.push(match);
+        limited.sort();
+      } else if (match < limited[limited.length - 1]) {
+        limited[limited.length - 1] = match;
+        limited.sort();
+      }
+    }
+    const idPrefix = this.options.id ?? "file-glob";
+
+    const artifacts: ContextArtifact[] = [];
+    for (const relativePath of limited) {
+      // Glob matches must stay inside the workspace; a pattern containing
+      // `..` could otherwise surface host files into LLM-bound context.
+      const path = await resolveWorkspacePath(
+        request.workspacePath,
+        relativePath,
+        false,
+      );
+      if (path === undefined) {
+        continue;
+      }
+      try {
+        artifacts.push({
+          id: `${idPrefix}:${relativePath}`,
+          title: relativePath,
+          path,
+          content: truncateArtifactContent(
+            await readBoundedFile(path, this.options.maxBytesPerFile),
+            this.options.maxBytesPerFile,
+          ),
+        });
+      } catch {
+        // Unreadable match (permissions, race); skip rather than abort.
+      }
+    }
+    if (scanTruncated) {
+      artifacts.push({
+        id: `${idPrefix}:scan-truncated`,
+        title: `Glob scan truncated: ${this.options.pattern}`,
+        content: `Pattern "${this.options.pattern}" matched more than ${maxScanned} paths; selection may be incomplete. Narrow the pattern or raise maxScannedMatches.`,
+      });
+    }
+    return artifacts;
+  }
+}
+
+const DEFAULT_ARTIFACT_MAX_BYTES = 50_000;
+
+function truncateArtifactContent(
+  content: string,
+  maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
+): string {
+  if (Buffer.byteLength(content, "utf8") <= maxBytes) {
+    return content;
+  }
+  return `${Buffer.from(content, "utf8").subarray(0, maxBytes).toString("utf8")}\n[truncated at ${maxBytes} bytes]`;
+}
+
+/**
+ * Read at most maxBytes+1 bytes so oversized files never load fully into
+ * memory; the extra byte lets truncateArtifactContent detect overflow and
+ * append its truncation marker.
+ */
+async function readBoundedFile(
+  path: string,
+  maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
+): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes + 1, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
 export class PullRequestMetadataProvider implements ContextProvider {
   readonly name = "pull-request-metadata";
 
@@ -140,7 +435,7 @@ export class PullRequestMetadataProvider implements ContextProvider {
     const pullRequest = await discoverPullRequest(
       request.workspacePath,
       this.commandRunner,
-      request.pullRequestNumber,
+      numberRequestParam(request, "pullRequestNumber"),
     );
     if (pullRequest === undefined) {
       return [
@@ -181,7 +476,7 @@ export class PullRequestReferencedDocsProvider implements ContextProvider {
     const pullRequest = await discoverPullRequest(
       request.workspacePath,
       this.commandRunner,
-      request.pullRequestNumber,
+      numberRequestParam(request, "pullRequestNumber"),
     );
     if (pullRequest === undefined) {
       return [
@@ -284,9 +579,10 @@ export class RepositoryDiffProvider implements ContextProvider {
   constructor(private readonly commandRunner: CommandRunner = runCommand) {}
 
   async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
-    const { diff, baseRef, strategy, reviewPr } = request.diffPath
+    const diffPath = stringRequestParam(request, "diffPath");
+    const { diff, baseRef, strategy, reviewPr } = diffPath
       ? {
-          diff: await readFile(request.diffPath, "utf8"),
+          diff: await readFile(diffPath, "utf8"),
           baseRef: undefined,
           strategy: "explicit_diff_path",
           reviewPr: undefined,
@@ -294,7 +590,7 @@ export class RepositoryDiffProvider implements ContextProvider {
       : await collectReviewDiff(
           request.workspacePath,
           this.commandRunner,
-          request.pullRequestNumber,
+          numberRequestParam(request, "pullRequestNumber"),
         );
 
     if (strategy === "pr_diff_unavailable") {
