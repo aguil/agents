@@ -25,8 +25,11 @@ test("policy bridge is the first handler on every mapped tool event", () => {
   expect(shell[0].command).toContain('policy-eval --policy "triage-readonly"');
   expect(shell[0].command).toContain('--agents-dir "/repo/.agents"');
   expect(mcp[0].command).toContain('policy-eval --policy "triage-readonly"');
-  // User hook comes after the bridge.
-  expect(shell[1].command).toBe("/h/hooks/validate-shell.sh");
+  // User hook comes after the bridge, carrying its matcher as an env
+  // prefix the handler script can filter on.
+  expect(shell[1].command).toBe(
+    'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
+  );
   expect(shell[1].timeout).toBe(10);
 });
 
@@ -50,12 +53,12 @@ test("canonical events project to Cursor equivalents; unmappable events are repo
   expect(config.hooks.stop?.[0].command).toBe("/h/hooks/check-coverage.sh");
   expect(skippedEvents).toEqual(["run_end"]);
   // No policy → no bridge entries; user pre_tool_call hooks project to both
-  // Cursor tool events (matcher narrowing happens at dispatch time).
+  // Cursor tool events, carrying the matcher env prefix.
   expect(config.hooks.beforeShellExecution?.[0].command).toBe(
-    "/h/hooks/validate-shell.sh",
+    'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
   );
   expect(config.hooks.beforeMCPExecution?.[0].command).toBe(
-    "/h/hooks/validate-shell.sh",
+    'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
   );
 });
 

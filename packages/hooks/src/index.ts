@@ -75,12 +75,15 @@ function policyBridgeEntry(
 }
 
 function toCursorEntry(handler: HookHandlerSpec): CursorHookEntry {
-  // Cursor's hook schema has no matcher field; matchers narrow tool names
-  // at dispatch time in richer runtimes. For generated command configs the
-  // handler itself must no-op on non-matching tools, so the matcher is
-  // passed through the HOOK_MATCHER environment variable by the runtime.
+  // Cursor's hook schema has no matcher field, so the matcher is projected
+  // into the command itself as a HOOK_MATCHER environment variable the
+  // handler script can filter on (hook payloads carry the tool name).
+  const command =
+    handler.matcher === undefined
+      ? handler.command
+      : `HOOK_MATCHER=${JSON.stringify(handler.matcher)} ${handler.command}`;
   return {
-    command: handler.command,
+    command,
     ...(handler.timeoutS === undefined ? {} : { timeout: handler.timeoutS }),
   };
 }
