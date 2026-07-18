@@ -68,6 +68,8 @@ config. (Disposition for review finding
 - Code review behavior is unchanged: no `execution` config means the exact
   pre-Phase-0 result shape, providers keep legacy field precedence, and builtin
   worker routing is preserved.
-- Follow-up phases: Phase 1 adds the `.agents/` loader, builtin policy-eval
-  (5-verdict, fail-closed) and per-adapter hook config generation; Phase 2 ships
-  the synthetic incident fixture and the end-to-end proof.
+- Follow-up phases (now delivered): Phase 1 added the `.agents/` loader, builtin
+  policy-eval (5-verdict, fail-closed) and per-adapter hook config generation
+  (ADR 0006); Phase 2 shipped the synthetic incident fixture, the end-to-end
+  proof, and the governance extensions that surfaced while building it (ADR
+  0007).
