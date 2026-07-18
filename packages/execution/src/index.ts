@@ -187,6 +187,86 @@ export class FakeAgentAdapter implements AgentAdapter {
   }
 }
 
+export interface ReplayAgentAdapterOptions {
+  /**
+   * Recorded run directory containing `roles/<roleId>/stdout.log` (the
+   * layout `.agents-code-review/runs/<id>/` and harness scratchpads write).
+   */
+  readonly runDir: string;
+}
+
+/**
+ * Replays a recorded agent run: each role's captured stdout is fed through
+ * the same line normalization the live subprocess adapter uses, so every
+ * downstream stage (envelope parsing, coercion, dedup, status) sees exactly
+ * what it saw live. This is the deterministic side of differential testing
+ * (#73 Tier 2): identical recorded inputs through two pipelines must yield
+ * identical deterministic fields.
+ *
+ * A missing recording for a requested role is an error event (failed
+ * role), not a silent skip — a corpus/config mismatch must fail loudly or
+ * the differential comparison would quietly compare against nothing.
+ */
+export class ReplayAgentAdapter implements AgentAdapter {
+  readonly name = "replay";
+
+  constructor(private readonly options: ReplayAgentAdapterOptions) {}
+
+  capabilities(): AdapterCapabilities {
+    return {
+      streaming: true,
+      structuredOutput: true,
+      readOnlyMode: true,
+      mcp: false,
+      cancellation: false,
+    };
+  }
+
+  async *run(request: AgentRunRequest): AsyncIterable<AgentEvent> {
+    const stdoutLogPath = join(
+      this.options.runDir,
+      "roles",
+      request.roleId,
+      "stdout.log",
+    );
+    const recording = Bun.file(stdoutLogPath);
+    if (!(await recording.exists())) {
+      yield createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "error",
+        message: `replay: no recording for role "${request.roleId}"`,
+        data: { reason: "recording_missing", stdoutLogPath },
+      });
+      return;
+    }
+
+    yield createAgentEvent({
+      runId: request.runId,
+      roleId: request.roleId,
+      type: "started",
+      message: `replay started ${request.roleId}`,
+      data: { stdoutLogPath },
+    });
+
+    const text = await recording.text();
+    for (const line of text.split(/\r?\n/)) {
+      if (line.length === 0) {
+        continue;
+      }
+      yield* normalizeAgentOutputLine(request, line);
+    }
+
+    yield createAgentEvent({
+      runId: request.runId,
+      roleId: request.roleId,
+      type: "completed",
+      message: `replay completed ${request.roleId}`,
+      data: { stdoutLogPath },
+    });
+  }
+}
+
 export interface CommandSpec {
   readonly cmd: readonly string[];
   readonly cwd?: string;
