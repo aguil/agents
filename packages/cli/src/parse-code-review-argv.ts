@@ -24,6 +24,7 @@ const STRING_OPTION_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   pr: "pr",
   "post-pr": "postPr",
   "review-summary": "reviewSummary",
+  impl: "impl",
 };
 
 const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
@@ -228,6 +229,7 @@ export function parseCodeReviewArgv(
     pr: stringOptions.pr,
     postPr: stringOptions["post-pr"],
     reviewSummary: stringOptions["review-summary"],
+    impl: stringOptions.impl,
     postOnly: false,
     noConfirm: flags.has("no-confirm"),
     replacePendingReview: flags.has("replace-pending-review"),

@@ -5,6 +5,7 @@ import {
   createCodeReviewAdapter,
   runCodeReview,
 } from "@aguil/agents-code-review";
+import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
 import {
   buildPendingReviewSummaryBody,
   candidateToComment,
@@ -264,6 +265,13 @@ export async function main(
       },
     });
 
+    const impl = options.impl ?? "package";
+    if (impl !== "package" && impl !== "config") {
+      console.error(`Invalid --impl value: ${options.impl}`);
+      console.error("Expected one of: package, config.");
+      return 1;
+    }
+
     const requestedConsensusRuns = parseConsensusRuns(options.consensus);
     if (
       options.consensus !== undefined &&
@@ -271,6 +279,13 @@ export async function main(
     ) {
       console.error(`Invalid --consensus value: ${options.consensus}`);
       console.error("Expected a positive integer greater than 0.");
+      return 1;
+    }
+    if (impl === "config" && (requestedConsensusRuns ?? 1) > 1) {
+      // ADR 0012: consensus is descoped from the config-declared harness.
+      console.error(
+        "--impl config does not support --consensus > 1 (consensus is descoped from the config harness; see ADR 0012). Use the package implementation for consensus runs.",
+      );
       return 1;
     }
     const pendingReviewEnabled = options.pendingReview && !options.dryRun;
@@ -304,7 +319,11 @@ export async function main(
 
     try {
       if (logShowsSummary(logLevel)) {
-        console.log(`Starting code review with adapter '${adapterName}'.`);
+        console.log(
+          impl === "config"
+            ? `Starting code review with adapter '${adapterName}' (config-declared harness).`
+            : `Starting code review with adapter '${adapterName}'.`,
+        );
         if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
           console.log(
             "Using default consensus=1 for --pending-review (override with --consensus <n>).",
@@ -317,7 +336,10 @@ export async function main(
         }
       }
 
-      const result = await runCodeReview({
+      // Shared inputs for both implementations; the config path takes the
+      // declarative harness from the review workspace's .agents tree and
+      // structurally has no consensus option (ADR 0012, guarded above).
+      const sharedRunInputs = {
         workspacePath: reviewWorkspacePath,
         scratchpadRoot: resolveScratchpadRootForRun(
           options,
@@ -326,7 +348,6 @@ export async function main(
         ),
         contextBundlePath: options.contextBundle,
         reviewPrNumber,
-        consensusRuns,
         strict: options.strict,
         metadata: await buildDeterminismMetadata(
           adapterName,
@@ -336,7 +357,11 @@ export async function main(
         ),
         adapter,
         onEvent: createRunEventLogger(logLevel),
-      });
+      };
+      const result =
+        impl === "config"
+          ? await runCodeReviewFromConfig(sharedRunInputs)
+          : await runCodeReview({ ...sharedRunInputs, consensusRuns });
       let verbosePrDiffContext: PullRequestDiffContext | undefined;
       if (logShowsSummary(logLevel)) {
         printVerboseFindingSummary(result.findings);

@@ -38,6 +38,7 @@ const STRING_FIELDS: readonly (keyof CliOptions & string)[] = [
   "pr",
   "postPr",
   "reviewSummary",
+  "impl",
 ];
 
 const BOOLEAN_FIELDS: readonly (keyof CliOptions & string)[] = [
@@ -134,6 +135,7 @@ const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
   PR: "pr",
   POST_PR: "postPr",
   REVIEW_SUMMARY: "reviewSummary",
+  IMPL: "impl",
   DRY_RUN: "dryRun",
   POST_ONLY: "postOnly",
   NO_CONFIRM: "noConfirm",
@@ -171,6 +173,9 @@ const REPO_BLOCKED_REVIEW_STEERING_KEYS = [
   "scratchpad",
   "workspace",
   "reposRoot",
+  // Switching the review execution path (package vs config harness) is
+  // steering of the same class as adapter selection.
+  "impl",
 ] as const satisfies readonly (keyof CliOptions)[];
 
 /** Strip repo-managed steering from workspace `.agents-code-review` partials before merge (including preset bodies). */
@@ -569,6 +574,7 @@ function applyExplicitCliOptions(
     pr: stringOr("pr"),
     postPr: stringOr("postPr"),
     reviewSummary: stringOr("reviewSummary"),
+    impl: stringOr("impl"),
     postOnly: boolOr("postOnly", false),
     noConfirm: boolOr("noConfirm", false),
     replacePendingReview: boolOr("replacePendingReview", false),
