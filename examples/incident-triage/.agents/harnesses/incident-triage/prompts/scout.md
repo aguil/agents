@@ -7,8 +7,7 @@ workspace; your job is to gather evidence, not to fix anything.
 
 Stay read-only. Do not edit files.
 
-Emit exactly one finding JSON line summarizing the evidence:
+Emit exactly one outcome JSON line summarizing the evidence:
 
-{"finding":{"id":"scout-evidence","severity":"warning","title":"<one-line symptom>","description":"<what the alert and failing checks show>","evidence":"<file
-paths, failing check names, key log
-lines>","sourceRole":"scout","validation":{"status":"verified","details":"<how you reproduced it>"}}}
+{"outcome":{"id":"scout-evidence","kind":"evidence","sourceRole":"scout","title":"<one-line symptom>","data":{"alert":"<key
+alert/log lines>","reproduction":"<check.ts output>","suspectFile":"<path>"}}}

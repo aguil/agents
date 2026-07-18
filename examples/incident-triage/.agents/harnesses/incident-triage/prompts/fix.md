@@ -9,9 +9,7 @@ Apply the minimal fix for the diagnosed root cause:
    record are not yours to change.
 3. Re-run `bun run check.ts` to confirm the signal flips to passing.
 
-Emit exactly one finding JSON line describing the remediation:
+Emit exactly one outcome JSON line describing the remediation:
 
-{"finding":{"id":"remediation","severity":"warning","title":"<fix in one line>","description":"<what changed and why it resolves the root cause>","evidence":"<file:line
-of the change; before/after
-expression>","sourceRole":"fix","validation":{"status":"verified","details":"<check.ts
-output after the fix>"}}}
+{"outcome":{"id":"remediation","kind":"remediation","sourceRole":"fix","title":"<fix in one line>","data":{"applied":true,"change":"<file:line;
+before/after expression>","checkResult":"<check.ts output after the fix>"}}}
