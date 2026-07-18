@@ -26,6 +26,9 @@
       "@aguil/agents-workflow": ["packages/workflow/src/index.ts"],
       "@aguil/agents-workspace": ["packages/workspace/src/index.ts"],
       "@aguil/agents-code-review": ["harnesses/code-review/src/index.ts"],
+      "@aguil/agents-code-review/replay-parity": [
+        "harnesses/code-review/src/replay-parity.ts"
+      ],
       "@aguil/agents-code-review-post": [
         "packages/code-review-post/src/index.ts"
       ],
