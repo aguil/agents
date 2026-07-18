@@ -5,7 +5,11 @@ import {
   resolveContextProvider,
   writeContextBundle,
 } from "@aguil/agents-context";
-import { createRunId, writeJsonFile } from "@aguil/agents-core";
+import {
+  createRunId,
+  isReviewTriageTier,
+  writeJsonFile,
+} from "@aguil/agents-core";
 import type { AgentAdapter } from "@aguil/agents-execution";
 import {
   ClaudeCodeAdapter,
@@ -14,7 +18,7 @@ import {
   OpenCodeAdapter,
 } from "@aguil/agents-execution";
 import type { LoadedHarness } from "@aguil/agents-harness-config";
-import { loadHarness } from "@aguil/agents-harness-config";
+import { filterEnabledRoles, loadHarness } from "@aguil/agents-harness-config";
 import {
   generateCursorHooksConfig,
   renderCursorHooksConfig,
@@ -206,6 +210,24 @@ export async function setUpHookEnforcement(
 }
 
 /**
+ * Bind `tier` for enablement expressions from a collected `triage`
+ * artifact (the git-diff builtin emits one; any provider producing an
+ * artifact with id "triage" and a bare tier as content works, which is
+ * also the deterministic-test seam). No artifact or an unrecognized value
+ * → no binding, so expressions referencing tier fail loud downstream.
+ */
+function triageTierFromArtifacts(
+  artifacts: ReadonlyArray<{ readonly id: string; readonly content: string }>,
+): string | undefined {
+  const content = artifacts
+    .find((artifact) => artifact.id === "triage")
+    ?.content.trim();
+  return content !== undefined && isReviewTriageTier(content)
+    ? content
+    : undefined;
+}
+
+/**
  * Build the orchestrator pass gate from `execution.pass_check`: run the
  * command in the workspace after roles complete; exit 0 => passed. Runtime-
  * evaluated so agent output cannot decide status. Undefined when the harness
@@ -284,6 +306,7 @@ export async function runHarnessRunCli(
   const scratchpadPath = join(workspacePath, ".agents-harness", "runs", runId);
   await mkdir(scratchpadPath, { recursive: true });
   let contextBundlePath: string;
+  const enablementEnv: Record<string, string | number | boolean> = {};
   if (loaded.contextProviders !== undefined) {
     // Declared providers resolve against the builtin registry; resolution
     // errors (unknown name, bad params) abort before any role runs.
@@ -301,6 +324,10 @@ export async function runHarnessRunCli(
       );
       const written = await writeContextBundle(bundle, scratchpadPath);
       contextBundlePath = written.jsonPath;
+      const tier = triageTierFromArtifacts(bundle.artifacts);
+      if (tier !== undefined) {
+        enablementEnv.tier = tier;
+      }
     } catch (error) {
       console.error(
         `harness run: context collection failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -321,10 +348,30 @@ export async function runHarnessRunCli(
     });
   }
 
+  // Role enablement is decided from collected context, fail closed: a
+  // broken expression (or one referencing a binding no provider produced,
+  // e.g. tier without a triage artifact) aborts the run rather than
+  // guessing which way the author meant to gate the role.
+  let definition = loaded.definition;
+  try {
+    const enablement = filterEnabledRoles(loaded.definition, enablementEnv);
+    definition = enablement.definition;
+    if (enablement.disabledRoleIds.length > 0) {
+      console.warn(
+        `harness run: roles disabled by enablement expressions: ${enablement.disabledRoleIds.join(", ")}`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `harness run: role enablement failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 1;
+  }
+
   const passGate = makePassGate(loaded, workspacePath);
 
   const orchestrator = new NativeBunOrchestrator({
-    definition: loaded.definition,
+    definition,
     adapter: constructAdapter(parsed.adapter),
     contextBundlePath,
     ...(onRoleStart === undefined ? {} : { onRoleStart }),

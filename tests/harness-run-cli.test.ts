@@ -413,6 +413,105 @@ test("unknown context provider names abort before any role runs", async () => {
   }
 });
 
+test("enablement expressions gate roles on the collected triage tier", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-enable-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-enable-agents-"));
+  try {
+    const { mkdir: mkdirP, writeFile: writeFileP } = await import(
+      "node:fs/promises"
+    );
+    const dir = join(agentsDir, "harnesses", "gated");
+    await mkdirP(dir, { recursive: true });
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: gated }",
+        "context:",
+        "  providers:",
+        "    - use: shell-command",
+        "      id: triage",
+        '      cmd: ["echo", "lite"]',
+        "roles:",
+        "  quality:",
+        "    description: Always runs",
+        '    prompt: "q"',
+        "  performance:",
+        "    description: Full tier only",
+        '    prompt: "p"',
+        '    enabled: tier == "full"',
+        "  security:",
+        "    description: Non-trivial tiers",
+        '    prompt: "s"',
+        '    enabled: tier != "trivial"',
+        "execution: { mode: chain, order: [security, performance, quality] }",
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "gated",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    // tier=lite: performance is gated out, chain order keeps the rest.
+    expect(result.stderr).toContain(
+      "roles disabled by enablement expressions: performance",
+    );
+    expect(result.stdout).toContain("roles completed: security,quality");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});
+
+test("enablement referencing an unavailable binding aborts fail-closed", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-enable-bad-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-enable-bad-agents-"));
+  try {
+    const { mkdir: mkdirP, writeFile: writeFileP } = await import(
+      "node:fs/promises"
+    );
+    const dir = join(agentsDir, "harnesses", "ungated");
+    await mkdirP(dir, { recursive: true });
+    // No context providers => no triage artifact => no tier binding.
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: ungated }",
+        "roles:",
+        "  a:",
+        "    description: Gated on a binding nothing provides",
+        '    prompt: "p"',
+        '    enabled: tier == "full"',
+        "  b:",
+        "    description: Ungated",
+        '    prompt: "p"',
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "ungated",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("role enablement failed");
+    expect(result.stdout).not.toContain("roles completed");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});
+
 test("harness run surfaces loader errors with a nonzero exit", async () => {
   const result = await runHarnessCli([
     "no-such-harness",

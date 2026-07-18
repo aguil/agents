@@ -13,7 +13,13 @@ export {
 export type HarnessStatus = "passed" | "warnings" | "failed" | "error";
 export type FindingSeverity = "critical" | "warning";
 export type ValidationStatus = "verified" | "not_reproduced" | "not_run";
-export type ReviewTriageTier = "trivial" | "lite" | "full";
+export const REVIEW_TRIAGE_TIERS = ["trivial", "lite", "full"] as const;
+
+export type ReviewTriageTier = (typeof REVIEW_TRIAGE_TIERS)[number];
+
+export function isReviewTriageTier(value: string): value is ReviewTriageTier {
+  return (REVIEW_TRIAGE_TIERS as readonly string[]).includes(value);
+}
 
 export type JsonValue =
   | string
