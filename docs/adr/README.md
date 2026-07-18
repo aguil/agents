@@ -41,3 +41,6 @@ shared package boundaries.
   `context.providers` declarative context collection (spec v0.2) — builtin
   registry, YAML-unreachable build-time seams, shell-command trust model and
   bounds.
+- [0011-cel-role-enablement.md](0011-cel-role-enablement.md) — ADR 0011: CEL
+  role enablement (spec v0.2) — load-time compile checks, fail-closed
+  evaluation, structural consistency, context-derived bindings.
