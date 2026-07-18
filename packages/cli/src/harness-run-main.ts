@@ -26,11 +26,13 @@ interface HarnessRunArgs {
   readonly adapter: AdapterName;
   readonly agentsCli?: string;
   readonly strict: boolean;
+  readonly allowUnenforcedPolicy: boolean;
 }
 
 const USAGE = `Usage: agents harness run <id> --agents-dir <dir> --workspace <path>
                         [--adapter cursor|claude|opencode|fake]
-                        [--agents-cli <cmd>] [--strict]`;
+                        [--agents-cli <cmd>] [--strict]
+                        [--allow-unenforced-policy]`;
 
 function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
   const [harnessId, ...rest] = argv;
@@ -42,6 +44,7 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
   let adapter: AdapterName = "cursor";
   let agentsCli: string | undefined;
   let strict = false;
+  let allowUnenforcedPolicy = false;
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === "--agents-dir") {
@@ -58,6 +61,8 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
       agentsCli = rest[++index];
     } else if (arg === "--strict") {
       strict = true;
+    } else if (arg === "--allow-unenforced-policy") {
+      allowUnenforcedPolicy = true;
     } else {
       return `harness run: unknown argument "${arg}"\n${USAGE}`;
     }
@@ -65,7 +70,15 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
   if (agentsDir === undefined || workspace === undefined) {
     return `harness run: --agents-dir and --workspace are required\n${USAGE}`;
   }
-  return { harnessId, agentsDir, workspace, adapter, agentsCli, strict };
+  return {
+    harnessId,
+    agentsDir,
+    workspace,
+    adapter,
+    agentsCli,
+    strict,
+    allowUnenforcedPolicy,
+  };
 }
 
 function constructAdapter(name: AdapterName): AgentAdapter {
@@ -119,18 +132,32 @@ async function writeRoleHooks(
 async function setUpHookEnforcement(
   loaded: LoadedHarness,
   args: HarnessRunArgs,
-): Promise<((roleId: string) => Promise<void>) | undefined> {
+): Promise<
+  | { readonly onRoleStart?: (roleId: string) => Promise<void> }
+  | { readonly error: string }
+> {
   const hasHooks = Object.keys(loaded.hooks).length > 0;
   const hasAnyPolicy =
     loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0;
   if (!hasHooks && !hasAnyPolicy) {
-    return undefined;
+    return {};
   }
   if (args.adapter !== "cursor") {
+    // Hook config generation is cursor-only in v1, so a declared policy
+    // cannot be enforced on other adapters. Fail closed unless the operator
+    // explicitly accepts an unenforced run.
+    if (hasAnyPolicy && !args.allowUnenforcedPolicy) {
+      return {
+        error:
+          `harness run: harness declares a policy but adapter "${args.adapter}" cannot enforce it ` +
+          "(hook config generation is cursor-only in v1). Re-run with --adapter cursor, " +
+          "or pass --allow-unenforced-policy to run WITHOUT policy enforcement.",
+      };
+    }
     console.warn(
-      `harness run: hook/policy config generation targets the cursor adapter; adapter "${args.adapter}" runs WITHOUT generated hook enforcement`,
+      `harness run: adapter "${args.adapter}" runs WITHOUT generated hook enforcement (--allow-unenforced-policy)`,
     );
-    return undefined;
+    return {};
   }
 
   const mode = loaded.definition.execution?.mode ?? "parallel";
@@ -139,16 +166,18 @@ async function setUpHookEnforcement(
     // rewrite when consecutive roles share an effective policy.
     let lastPolicyId: string | undefined;
     let wroteOnce = false;
-    return async (roleId: string) => {
-      const policyId = roleEffectivePolicyId(loaded, roleId);
-      if (!wroteOnce || policyId !== lastPolicyId) {
-        await writeRoleHooks(loaded, args, policyId);
-        lastPolicyId = policyId;
-        wroteOnce = true;
-      }
-      console.warn(
-        `harness run: role "${roleId}" enforced under policy "${policyId ?? "(none)"}"`,
-      );
+    return {
+      onRoleStart: async (roleId: string) => {
+        const policyId = roleEffectivePolicyId(loaded, roleId);
+        if (!wroteOnce || policyId !== lastPolicyId) {
+          await writeRoleHooks(loaded, args, policyId);
+          lastPolicyId = policyId;
+          wroteOnce = true;
+        }
+        console.warn(
+          `harness run: role "${roleId}" enforced under policy "${policyId ?? "(none)"}"`,
+        );
+      },
     };
   }
 
@@ -163,7 +192,7 @@ async function setUpHookEnforcement(
       `harness run: ${mode} mode enforces the harness-level policy "${loaded.policy?.id ?? "(none)"}" for all roles; per-role policies for [${coarsened.join(", ")}] require chain mode`,
     );
   }
-  return undefined;
+  return {};
 }
 
 /** Effective policy id for a role: role override, else harness default. */
@@ -196,7 +225,12 @@ export async function runHarnessRunCli(
     return 1;
   }
 
-  const onRoleStart = await setUpHookEnforcement(loaded, parsed);
+  const enforcement = await setUpHookEnforcement(loaded, parsed);
+  if ("error" in enforcement) {
+    console.error(enforcement.error);
+    return 1;
+  }
+  const onRoleStart = enforcement.onRoleStart;
 
   const workspacePath = resolve(parsed.workspace);
   const runId = createRunId(`harness-${parsed.harnessId}`);

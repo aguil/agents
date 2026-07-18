@@ -72,6 +72,7 @@ test("harness run executes the incident-triage example chain with the fake adapt
       workspace,
       "--adapter",
       "fake",
+      "--allow-unenforced-policy",
     ]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("execution: chain");
@@ -80,6 +81,32 @@ test("harness run executes the incident-triage example chain with the fake adapt
     );
     // Non-cursor adapters must loudly report missing hook enforcement.
     expect(result.stderr).toContain("WITHOUT generated hook enforcement");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("a policy-declaring harness fails closed on a non-cursor adapter", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-run-failclosed-"));
+  try {
+    await cp(
+      join(repoRoot, "examples", "incident-triage", "fixture"),
+      workspace,
+      { recursive: true },
+    );
+    const result = await runHarnessCli([
+      "incident-triage",
+      "--agents-dir",
+      join(repoRoot, "examples", "incident-triage", ".agents"),
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+      // No --allow-unenforced-policy: must refuse rather than run unenforced.
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("cannot enforce it");
+    expect(result.stderr).toContain("--allow-unenforced-policy");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
