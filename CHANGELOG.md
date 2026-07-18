@@ -10,6 +10,13 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.7](https://github.com/aguil/agents/compare/v0.4.6...v0.4.7) (2026-07-18)
+
+
+### Added
+
+* ReplayAgentAdapter for recorded-run replay ([#73](https://github.com/aguil/agents/issues/73) Tier 2 groundwork) ([32b7a87](https://github.com/aguil/agents/commit/32b7a871ff9ab3f9159dbf340cee2ab34cfa83f5))
+
 ## [0.4.6](https://github.com/aguil/agents/compare/v0.4.5...v0.4.6) (2026-07-18)
 
 
