@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import type { Finding, HarnessRunResult } from "@aguil/agents-core";
 import { ReplayAgentAdapter } from "@aguil/agents-execution";
 import { findingFingerprint } from "@aguil/agents-reporting";
+import { runCodeReviewFromConfig } from "./config-runner";
 import { runCodeReview } from "./index";
 
 export interface FindingKey {
@@ -240,6 +241,56 @@ export async function judgeEntry(
     };
   }
   return { kind: "delta", delta, deltaHash: hash };
+}
+
+/**
+ * Tier 2 differential: replay the same corpus entry through the imperative
+ * package pipeline AND the config-declared pipeline
+ * (runCodeReviewFromConfig against agentsDir), then diff the two replays'
+ * deterministic fields directly. Both replays run under current code on
+ * identical inputs, so — unlike the recorded-baseline comparison — the
+ * expectation is exact match with no adjudications: any delta is a real
+ * behavioral divergence between the pipelines.
+ */
+export async function judgeEntryDifferential(
+  corpusDir: string,
+  entryName: string,
+  agentsDir: string,
+): Promise<EntryVerdict> {
+  const entryDir = resolveEntryDir(corpusDir, entryName);
+  const bundlePath = join(entryDir, "context", "bundle.json");
+  const packageScratch = await mkdtemp(join(tmpdir(), "diff-package-"));
+  const configScratch = await mkdtemp(join(tmpdir(), "diff-config-"));
+  try {
+    const packageResult = await runCodeReview({
+      workspacePath: packageScratch,
+      scratchpadRoot: join(packageScratch, "runs"),
+      contextBundlePath: bundlePath,
+      adapter: new ReplayAgentAdapter({ runDir: entryDir }),
+    });
+    const configResult = await runCodeReviewFromConfig({
+      agentsDir,
+      workspacePath: configScratch,
+      scratchpadRoot: join(configScratch, "runs"),
+      contextBundlePath: bundlePath,
+      adapter: new ReplayAgentAdapter({ runDir: entryDir }),
+    });
+    const delta = computeDelta(
+      {
+        status: packageResult.status,
+        findings: packageResult.findings,
+        metadata: packageResult.metadata,
+      },
+      configResult,
+    );
+    if (delta === undefined) {
+      return { kind: "match" };
+    }
+    return { kind: "delta", delta, deltaHash: deltaHash(delta) };
+  } finally {
+    await rm(packageScratch, { recursive: true, force: true });
+    await rm(configScratch, { recursive: true, force: true });
+  }
 }
 
 export async function loadAdjudications(
