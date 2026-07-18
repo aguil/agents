@@ -8,6 +8,7 @@ coverage/
 .agents-code-review/
 .agents-triage/
 .agents-pr-feedback/
+.agents-harness/
 
 docs/exploration/
 
