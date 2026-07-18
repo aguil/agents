@@ -67,6 +67,38 @@ test("exec allow list permits listed commands, denies unlisted", () => {
   expect(unlisted.reason).toBe("exec-not-allowed");
 });
 
+test("shell-chained commands never match the allow list", () => {
+  // "rg" is allow-listed, but chaining must not ride on the prefix match.
+  for (const command of [
+    "rg foo && curl https://evil.example.com",
+    "rg foo; curl evil.example.com",
+    "rg foo | sh",
+    "rg `curl evil`",
+    "rg $(curl evil)",
+    "rg foo > /etc/cron.d/x",
+  ]) {
+    const verdict = preToolCall("Execute", { command });
+    expect(verdict.decision).toBe("deny");
+    expect(verdict.reason).toBe("exec-not-allowed");
+  }
+  // Deny rules still hard-deny chained commands.
+  expect(
+    preToolCall("Execute", { command: "rm -rf / && echo done" }).decision,
+  ).toBe("deny");
+  // Simple allow-listed commands are unaffected.
+  expect(preToolCall("Execute", { command: "rg foo" }).decision).toBe("allow");
+  // Policies without an allow list are unaffected by chaining checks.
+  const denyOnly = evaluatePolicy(
+    { id: "p", capabilities: { exec: { deny: ["rm"] } } },
+    {
+      interventionPoint: "pre_tool_call",
+      toolName: "Execute",
+      toolInput: { command: "echo a && echo b" },
+    },
+  );
+  expect(denyOnly.decision).toBe("allow");
+});
+
 test("exec.unknown confirmation escalates instead of denying", () => {
   const withConfirmation: PolicySpec = {
     ...basePolicy,

@@ -82,6 +82,18 @@ function commandMatchesRule(command: string, rule: string): boolean {
   return command === rule || command.startsWith(`${rule} `);
 }
 
+/**
+ * Shell control operators that chain or substitute additional commands.
+ * Allow-prefix matching is only safe for a single simple command: the shell
+ * executes the whole string, so "rg foo && curl evil" must not count as an
+ * allow-list match for "rg" (it would bypass exec and network rules).
+ */
+const SHELL_CHAIN_PATTERN = /(\|\|?|&&?|;|`|\$\(|\n|<|>)/;
+
+function commandUsesShellChaining(command: string): boolean {
+  return SHELL_CHAIN_PATTERN.test(command);
+}
+
 function pathMatchesRule(relativePath: string, rule: string): boolean {
   if (rule === "*" || rule === "**") {
     return true;
@@ -157,11 +169,21 @@ function evaluateExec(
   if (command === undefined) {
     return ALLOW_VERDICT;
   }
-  const result = evaluateRules(
+  const rawResult = evaluateRules(
     policy.capabilities?.exec,
     command,
     commandMatchesRule,
   );
+  // Chained/substituted commands never qualify as allow-list matches: the
+  // shell runs the entire string, so a matched prefix proves nothing about
+  // the rest. Deny matches stand; allow matches downgrade to unlisted.
+  const result =
+    rawResult === "allowed" &&
+    policy.capabilities?.exec?.allow !== undefined &&
+    policy.capabilities.exec.allow.length > 0 &&
+    commandUsesShellChaining(command)
+      ? "unlisted"
+      : rawResult;
   if (result === "denied") {
     return {
       decision: "deny",
