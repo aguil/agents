@@ -91,6 +91,11 @@ export interface HarnessManifest {
   readonly enabledHarnesses: readonly string[];
 }
 
+export interface ContextProviderSpec {
+  readonly use: string;
+  readonly params: Readonly<Record<string, unknown>>;
+}
+
 export interface LoadedHarness {
   readonly definition: HarnessDefinition;
   /** Harness-level default policy (when `policy:` is declared). */
@@ -102,6 +107,7 @@ export interface LoadedHarness {
    */
   readonly rolePolicies: Readonly<Record<string, PolicySpec>>;
   readonly hooks: HooksSpec;
+  readonly contextProviders?: readonly ContextProviderSpec[];
   /** Directory containing harness.yaml (prompt paths resolve against it). */
   readonly harnessDir: string;
 }
@@ -531,6 +537,30 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
   return hooks;
 }
 
+function parseContext(
+  value: unknown,
+): readonly ContextProviderSpec[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, "context");
+  const unknownKeys = Object.keys(record).filter((key) => key !== "providers");
+  if (unknownKeys.length > 0) {
+    fail(
+      `context has unsupported fields: ${unknownKeys.join(", ")} (supported: providers)`,
+    );
+  }
+  if (!Array.isArray(record.providers) || record.providers.length === 0) {
+    fail("context.providers must be a non-empty list");
+  }
+  return record.providers.map((value, index) => {
+    const provider = asRecord(value, `context.providers[${index}]`);
+    const use = requiredString(provider.use, `context.providers[${index}].use`);
+    const { use: _use, ...params } = provider;
+    return { use, params };
+  });
+}
+
 /**
  * Policy and harness ids become filesystem path segments (and, for policy
  * ids, shell command arguments), so they are restricted to a conservative
@@ -616,6 +646,7 @@ export async function loadHarness(
 
   const execution = parseExecution(parsed.execution, roleIds);
   const hooks = parseHooks(parsed.hooks, harnessDir);
+  const contextProviders = parseContext(parsed.context);
 
   const policyId = optionalString(parsed.policy, "policy");
   const policy =
@@ -660,6 +691,7 @@ export async function loadHarness(
     ...(policy === undefined ? {} : { policy }),
     rolePolicies,
     hooks,
+    ...(contextProviders === undefined ? {} : { contextProviders }),
     harnessDir,
   };
 }
