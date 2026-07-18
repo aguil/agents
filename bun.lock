@@ -41,6 +41,7 @@
         "@aguil/agents-code-review": "workspace:*",
         "@aguil/agents-code-review-inbox": "workspace:*",
         "@aguil/agents-code-review-post": "workspace:*",
+        "@aguil/agents-context": "workspace:*",
         "@aguil/agents-core": "workspace:*",
         "@aguil/agents-execution": "workspace:*",
         "@aguil/agents-harness-config": "workspace:*",

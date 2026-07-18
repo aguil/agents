@@ -70,6 +70,11 @@ export interface ContextProvider {
   collect(request: ContextRequest): Promise<readonly ContextArtifact[]>;
 }
 
+export type ContextProviderParams = Readonly<Record<string, unknown>>;
+export type ContextProviderFactory = (
+  params: ContextProviderParams,
+) => ContextProvider;
+
 export interface ContextBundle {
   readonly id: string;
   readonly artifacts: readonly ContextArtifact[];
@@ -265,8 +270,17 @@ export interface ShellCommandProviderOptions {
   readonly cmd: readonly string[];
   readonly title?: string;
   readonly maxBytes?: number;
+  /**
+   * Wall-clock bound for the command (default 60s). Context collection
+   * runs before any role executes, so a slow or non-terminating command
+   * with little stdout would otherwise hold the whole run at startup —
+   * the byte cap alone only fires when output flows.
+   */
+  readonly timeoutMs?: number;
   readonly commandRunner?: CommandRunner;
 }
+
+const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 60_000;
 
 /**
  * Generic provider: run a command in the workspace and capture stdout.
@@ -293,6 +307,7 @@ export class ShellCommandProvider implements ContextProvider {
             this.options.cmd,
             request.workspacePath,
             this.options.maxBytes,
+            this.options.timeoutMs ?? DEFAULT_SHELL_COMMAND_TIMEOUT_MS,
           )
         : await this.commandRunner(this.options.cmd, request.workspacePath);
     const content =
@@ -399,6 +414,270 @@ export class FileGlobProvider implements ContextProvider {
   }
 }
 
+export const BUILTIN_CONTEXT_PROVIDER_NAMES: readonly string[] = [
+  "git-diff",
+  "pr-metadata",
+  "pr-referenced-docs",
+  "agents-md",
+  "static-file",
+  "shell-command",
+  "file-glob",
+];
+
+const BUILD_TIME_ONLY_CONTEXT_PARAMS: ReadonlySet<string> = new Set([
+  "allow_workspace_escape",
+  "allowWorkspaceEscape",
+  "allow_outside_workspace",
+  "allowOutsideWorkspace",
+  "command_runner",
+  "commandRunner",
+]);
+
+function contextProviderParamsRecord(
+  use: string,
+  params: ContextProviderParams,
+): Record<string, unknown> {
+  if (typeof params !== "object" || params === null || Array.isArray(params)) {
+    throw new Error(`context provider "${use}" params must be a mapping`);
+  }
+  return params as Record<string, unknown>;
+}
+
+function validateContextProviderParamKeys(
+  use: string,
+  params: Record<string, unknown>,
+  supported: readonly string[],
+): void {
+  const buildTimeOnly = Object.keys(params).filter((key) =>
+    BUILD_TIME_ONLY_CONTEXT_PARAMS.has(key),
+  );
+  if (buildTimeOnly.length > 0) {
+    throw new Error(
+      `context provider "${use}" params ${buildTimeOnly.join(", ")} are build-time-only and cannot be set in YAML`,
+    );
+  }
+  const supportedSet = new Set(supported);
+  const unknown = Object.keys(params).filter((key) => !supportedSet.has(key));
+  if (unknown.length > 0) {
+    throw new Error(
+      `context provider "${use}" has unsupported params: ${unknown.join(", ")} (supported: ${supported.length > 0 ? supported.join(", ") : "none"})`,
+    );
+  }
+}
+
+function requiredContextString(
+  params: Record<string, unknown>,
+  key: string,
+  use: string,
+): string {
+  const value = params[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(
+      `context provider "${use}" param "${key}" must be a non-empty string`,
+    );
+  }
+  return value;
+}
+
+function optionalContextString(
+  params: Record<string, unknown>,
+  key: string,
+  use: string,
+): string | undefined {
+  if (params[key] === undefined) {
+    return undefined;
+  }
+  return requiredContextString(params, key, use);
+}
+
+function optionalContextPositiveInt(
+  params: Record<string, unknown>,
+  key: string,
+  use: string,
+): number | undefined {
+  const value = params[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(
+      `context provider "${use}" param "${key}" must be a positive integer`,
+    );
+  }
+  return value;
+}
+
+function optionalContextBoolean(
+  params: Record<string, unknown>,
+  key: string,
+  use: string,
+): boolean | undefined {
+  const value = params[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(
+      `context provider "${use}" param "${key}" must be a boolean`,
+    );
+  }
+  return value;
+}
+
+function zeroParamProvider(
+  use: string,
+  params: ContextProviderParams,
+  create: () => ContextProvider,
+): ContextProvider {
+  const record = contextProviderParamsRecord(use, params);
+  validateContextProviderParamKeys(use, record, []);
+  return create();
+}
+
+const CONTEXT_PROVIDER_FACTORIES: Readonly<
+  Record<string, ContextProviderFactory>
+> = {
+  "git-diff": (params) =>
+    zeroParamProvider("git-diff", params, () => new RepositoryDiffProvider()),
+  "pr-metadata": (params) =>
+    zeroParamProvider(
+      "pr-metadata",
+      params,
+      () => new PullRequestMetadataProvider(),
+    ),
+  "pr-referenced-docs": (params) =>
+    zeroParamProvider(
+      "pr-referenced-docs",
+      params,
+      () => new PullRequestReferencedDocsProvider(),
+    ),
+  "agents-md": (params) =>
+    zeroParamProvider(
+      "agents-md",
+      params,
+      () => new AgentsInstructionsProvider(),
+    ),
+  "static-file": (params) => {
+    const use = "static-file";
+    const record = contextProviderParamsRecord(use, params);
+    validateContextProviderParamKeys(use, record, [
+      "id",
+      "path",
+      "title",
+      "required",
+      "max_bytes",
+    ]);
+    return new StaticFileProvider({
+      id: requiredContextString(record, "id", use),
+      path: requiredContextString(record, "path", use),
+      ...(optionalContextString(record, "title", use) === undefined
+        ? {}
+        : { title: optionalContextString(record, "title", use) }),
+      ...(optionalContextBoolean(record, "required", use) === undefined
+        ? {}
+        : { required: optionalContextBoolean(record, "required", use) }),
+      ...(optionalContextPositiveInt(record, "max_bytes", use) === undefined
+        ? {}
+        : {
+            maxBytes: optionalContextPositiveInt(record, "max_bytes", use),
+          }),
+    });
+  },
+  "shell-command": (params) => {
+    const use = "shell-command";
+    const record = contextProviderParamsRecord(use, params);
+    validateContextProviderParamKeys(use, record, [
+      "id",
+      "cmd",
+      "title",
+      "max_bytes",
+      "timeout_ms",
+    ]);
+    const cmd = record.cmd;
+    if (
+      !Array.isArray(cmd) ||
+      cmd.length === 0 ||
+      cmd.some((entry) => typeof entry !== "string" || entry.length === 0)
+    ) {
+      throw new Error(
+        `context provider "${use}" param "cmd" must be a non-empty list of non-empty strings`,
+      );
+    }
+    return new ShellCommandProvider({
+      id: requiredContextString(record, "id", use),
+      cmd: cmd as readonly string[],
+      ...(optionalContextString(record, "title", use) === undefined
+        ? {}
+        : { title: optionalContextString(record, "title", use) }),
+      ...(optionalContextPositiveInt(record, "max_bytes", use) === undefined
+        ? {}
+        : {
+            maxBytes: optionalContextPositiveInt(record, "max_bytes", use),
+          }),
+      ...(optionalContextPositiveInt(record, "timeout_ms", use) === undefined
+        ? {}
+        : {
+            timeoutMs: optionalContextPositiveInt(record, "timeout_ms", use),
+          }),
+    });
+  },
+  "file-glob": (params) => {
+    const use = "file-glob";
+    const record = contextProviderParamsRecord(use, params);
+    validateContextProviderParamKeys(use, record, [
+      "id",
+      "pattern",
+      "max_files",
+      "max_bytes_per_file",
+      "max_scanned_matches",
+    ]);
+    return new FileGlobProvider({
+      ...(optionalContextString(record, "id", use) === undefined
+        ? {}
+        : { id: optionalContextString(record, "id", use) }),
+      pattern: requiredContextString(record, "pattern", use),
+      ...(optionalContextPositiveInt(record, "max_files", use) === undefined
+        ? {}
+        : {
+            maxFiles: optionalContextPositiveInt(record, "max_files", use),
+          }),
+      ...(optionalContextPositiveInt(record, "max_bytes_per_file", use) ===
+      undefined
+        ? {}
+        : {
+            maxBytesPerFile: optionalContextPositiveInt(
+              record,
+              "max_bytes_per_file",
+              use,
+            ),
+          }),
+      ...(optionalContextPositiveInt(record, "max_scanned_matches", use) ===
+      undefined
+        ? {}
+        : {
+            maxScannedMatches: optionalContextPositiveInt(
+              record,
+              "max_scanned_matches",
+              use,
+            ),
+          }),
+    });
+  },
+};
+
+export function resolveContextProvider(
+  use: string,
+  params: ContextProviderParams,
+): ContextProvider {
+  const factory = CONTEXT_PROVIDER_FACTORIES[use];
+  if (factory === undefined) {
+    throw new Error(
+      `unknown context provider "${use}" (available: ${BUILTIN_CONTEXT_PROVIDER_NAMES.join(", ")})`,
+    );
+  }
+  return factory(params);
+}
+
 const DEFAULT_ARTIFACT_MAX_BYTES = 50_000;
 
 function truncateArtifactContent(
@@ -434,6 +713,7 @@ async function runBoundedCommand(
   cmd: readonly string[],
   cwd: string,
   maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
+  timeoutMs?: number,
 ): Promise<string | undefined> {
   try {
     const proc = Bun.spawn({
@@ -443,6 +723,7 @@ async function runBoundedCommand(
       stderr: "pipe",
     });
     let hitCap = false;
+    let timedOut = false;
     let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
     const kill = (signal: "SIGTERM" | "SIGKILL"): void => {
       try {
@@ -453,6 +734,13 @@ async function runBoundedCommand(
       kill("SIGTERM");
       hardKillTimer = setTimeout(() => kill("SIGKILL"), 1_000);
     };
+    const timeoutTimer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            terminate();
+          }, timeoutMs);
 
     const stdoutReader = (async (): Promise<string> => {
       if (!(proc.stdout instanceof ReadableStream)) {
@@ -509,8 +797,17 @@ async function runBoundedCommand(
         proc.exited,
         stderrDrainer,
       ]);
+      // A timed-out command is a failure (unlike hitting the byte cap,
+      // which returns the collected prefix): partial output from a command
+      // that never finished is not trustworthy context.
+      if (timedOut) {
+        return undefined;
+      }
       return exitCode === 0 || hitCap ? stdout : undefined;
     } finally {
+      if (timeoutTimer !== undefined) {
+        clearTimeout(timeoutTimer);
+      }
       if (hardKillTimer !== undefined) {
         clearTimeout(hardKillTimer);
       }

@@ -365,3 +365,96 @@ test("loadHarness rejects validation-loop configs with missing role lists", asyn
     await rm(scratch, { recursive: true, force: true });
   }
 });
+
+test("loadHarness passes context provider params through verbatim", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "contextual");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: contextual }",
+        "roles: { a: { description: A } }",
+        "context:",
+        "  providers:",
+        "    - use: static-file",
+        "      id: incident-log",
+        "      path: var/incident.log",
+        "      required: true",
+        "      max_bytes: 2048",
+        "    - use: git-diff",
+      ].join("\n"),
+    );
+
+    const loaded = await loadHarness({
+      agentsDir: scratch,
+      harnessId: "contextual",
+    });
+    expect(loaded.contextProviders).toEqual([
+      {
+        use: "static-file",
+        params: {
+          id: "incident-log",
+          path: "var/incident.log",
+          required: true,
+          max_bytes: 2048,
+        },
+      },
+      { use: "git-diff", params: {} },
+    ]);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("loadHarness rejects malformed context sections", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "contextual");
+    await mkdir(dir, { recursive: true });
+    const writeContext = (lines: readonly string[]) =>
+      writeFile(
+        join(dir, "harness.yaml"),
+        [
+          'spec_version: "0.2"',
+          "kind: harness",
+          "harness: { id: contextual }",
+          "roles: { a: { description: A } }",
+          ...lines,
+        ].join("\n"),
+      );
+
+    await writeContext(["context: []"]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "contextual" }),
+    ).rejects.toThrow("context must be a mapping");
+
+    await writeContext([
+      "context:",
+      "  providers: [{ use: git-diff }]",
+      "  typo: true",
+    ]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "contextual" }),
+    ).rejects.toThrow("context has unsupported fields: typo");
+
+    await writeContext(["context:", "  providers: []"]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "contextual" }),
+    ).rejects.toThrow("context.providers must be a non-empty list");
+
+    await writeContext(["context:", "  providers:", "    - max_bytes: 10"]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "contextual" }),
+    ).rejects.toThrow("context.providers[0].use is required");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});

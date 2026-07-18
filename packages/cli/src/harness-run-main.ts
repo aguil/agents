@@ -1,5 +1,10 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import {
+  collectContextBundle,
+  resolveContextProvider,
+  writeContextBundle,
+} from "@aguil/agents-context";
 import { createRunId, writeJsonFile } from "@aguil/agents-core";
 import type { AgentAdapter } from "@aguil/agents-execution";
 import {
@@ -277,18 +282,44 @@ export async function runHarnessRunCli(
   const workspacePath = resolve(parsed.workspace);
   const runId = createRunId(`harness-${parsed.harnessId}`);
   const scratchpadPath = join(workspacePath, ".agents-harness", "runs", runId);
-  const contextBundlePath = join(scratchpadPath, "context.json");
   await mkdir(scratchpadPath, { recursive: true });
-  await writeJsonFile(contextBundlePath, {
-    id: runId,
-    artifacts: [
-      {
-        id: "workspace",
-        title: "Workspace under triage",
-        content: `Workspace path: ${workspacePath}`,
-      },
-    ],
-  });
+  let contextBundlePath: string;
+  if (loaded.contextProviders !== undefined) {
+    // Declared providers resolve against the builtin registry; resolution
+    // errors (unknown name, bad params) abort before any role runs.
+    // Resolution AND collection failures use the same controlled error
+    // surface: a required-but-missing file or a failing provider must not
+    // escape as a bare stack trace.
+    try {
+      const providers = loaded.contextProviders.map((spec) =>
+        resolveContextProvider(spec.use, spec.params),
+      );
+      const bundle = await collectContextBundle(
+        `${runId}-context`,
+        { workspacePath, scratchpadPath },
+        providers,
+      );
+      const written = await writeContextBundle(bundle, scratchpadPath);
+      contextBundlePath = written.jsonPath;
+    } catch (error) {
+      console.error(
+        `harness run: context collection failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return 1;
+    }
+  } else {
+    contextBundlePath = join(scratchpadPath, "context.json");
+    await writeJsonFile(contextBundlePath, {
+      id: runId,
+      artifacts: [
+        {
+          id: "workspace",
+          title: "Workspace under triage",
+          content: `Workspace path: ${workspacePath}`,
+        },
+      ],
+    });
+  }
 
   const passGate = makePassGate(loaded, workspacePath);
 
