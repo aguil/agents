@@ -22,9 +22,9 @@ test("policy bridge is the first handler on every mapped tool event", () => {
   });
   const shell = config.hooks.beforeShellExecution ?? [];
   const mcp = config.hooks.beforeMCPExecution ?? [];
-  expect(shell[0].command).toContain("policy-eval --policy triage-readonly");
+  expect(shell[0].command).toContain('policy-eval --policy "triage-readonly"');
   expect(shell[0].command).toContain('--agents-dir "/repo/.agents"');
-  expect(mcp[0].command).toContain("policy-eval --policy triage-readonly");
+  expect(mcp[0].command).toContain('policy-eval --policy "triage-readonly"');
   // User hook comes after the bridge.
   expect(shell[1].command).toBe("/h/hooks/validate-shell.sh");
   expect(shell[1].timeout).toBe(10);

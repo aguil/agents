@@ -169,6 +169,21 @@ test("loadHarness rejects missing files, bad versions, and bad role refs", async
   }
 });
 
+test("policy ids with traversal or shell metacharacters are rejected", async () => {
+  const { loadPolicy } = await import("@aguil/agents-harness-config");
+  await expect(loadPolicy(fixturesDir, "../escape")).rejects.toThrow(
+    "is invalid",
+  );
+  await expect(loadPolicy(fixturesDir, "x; id")).rejects.toThrow("is invalid");
+  await expect(loadPolicy(fixturesDir, "a/../../b")).rejects.toThrow(
+    "is invalid",
+  );
+  // Valid grammar but nonexistent file: fails on readability, not grammar.
+  await expect(loadPolicy(fixturesDir, "no-such-policy")).rejects.toThrow(
+    "not readable",
+  );
+});
+
 test("loadHarness rejects validation-loop configs with missing role lists", async () => {
   const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");

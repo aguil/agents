@@ -432,11 +432,27 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
   return hooks;
 }
 
+/**
+ * Policy ids become filesystem path segments and shell command arguments,
+ * so they are restricted to a conservative token grammar: no path
+ * separators, no `..`, no shell metacharacters.
+ */
+const POLICY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function assertValidPolicyId(policyId: string): void {
+  if (!POLICY_ID_PATTERN.test(policyId) || policyId.includes("..")) {
+    fail(
+      `policy id "${policyId}" is invalid (allowed: letters, digits, '.', '_', '-'; must not contain path separators or '..')`,
+    );
+  }
+}
+
 /** Load and parse one policy from `.agents/policies/<id>.yaml`. */
 export async function loadPolicy(
   agentsDir: string,
   policyId: string,
 ): Promise<PolicySpec> {
+  assertValidPolicyId(policyId);
   return parsePolicy(
     await readYamlFile(
       join(resolve(agentsDir), "policies", `${policyId}.yaml`),
@@ -494,15 +510,7 @@ export async function loadHarness(
 
   const policyId = optionalString(parsed.policy, "policy");
   const policy =
-    policyId === undefined
-      ? undefined
-      : parsePolicy(
-          await readYamlFile(
-            join(agentsDir, "policies", `${policyId}.yaml`),
-            `policy "${policyId}"`,
-          ),
-          policyId,
-        );
+    policyId === undefined ? undefined : await loadPolicy(agentsDir, policyId);
 
   const definition: HarnessDefinition = {
     id: declaredId,

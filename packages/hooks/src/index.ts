@@ -61,13 +61,16 @@ function policyBridgeEntry(
   if (options.policyId === undefined) {
     return undefined;
   }
+  // Defense in depth: loadPolicy/loadHarness already reject ids outside the
+  // token grammar, but this command lands in a shell-executed config file,
+  // so quote every interpolated argument regardless.
   const cli = options.agentsCli ?? "agents";
   const agentsDirArg =
     options.agentsDir === undefined
       ? ""
       : ` --agents-dir ${JSON.stringify(options.agentsDir)}`;
   return {
-    command: `${cli} policy-eval --policy ${options.policyId}${agentsDirArg}`,
+    command: `${cli} policy-eval --policy ${JSON.stringify(options.policyId)}${agentsDirArg}`,
   };
 }
 
