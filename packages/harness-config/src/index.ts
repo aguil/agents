@@ -433,18 +433,26 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
 }
 
 /**
- * Policy ids become filesystem path segments and shell command arguments,
- * so they are restricted to a conservative token grammar: no path
- * separators, no `..`, no shell metacharacters.
+ * Policy and harness ids become filesystem path segments (and, for policy
+ * ids, shell command arguments), so they are restricted to a conservative
+ * token grammar: no path separators, no `..`, no shell metacharacters.
  */
-const POLICY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const ID_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export function assertValidPolicyId(policyId: string): void {
-  if (!POLICY_ID_PATTERN.test(policyId) || policyId.includes("..")) {
+function assertValidIdToken(kind: string, id: string): void {
+  if (!ID_TOKEN_PATTERN.test(id) || id.includes("..")) {
     fail(
-      `policy id "${policyId}" is invalid (allowed: letters, digits, '.', '_', '-'; must not contain path separators or '..')`,
+      `${kind} id "${id}" is invalid (allowed: letters, digits, '.', '_', '-'; must not contain path separators or '..')`,
     );
   }
+}
+
+export function assertValidPolicyId(policyId: string): void {
+  assertValidIdToken("policy", policyId);
+}
+
+export function assertValidHarnessId(harnessId: string): void {
+  assertValidIdToken("harness", harnessId);
 }
 
 /** Load and parse one policy from `.agents/policies/<id>.yaml`. */
@@ -470,6 +478,7 @@ export async function loadPolicy(
 export async function loadHarness(
   options: LoadHarnessOptions,
 ): Promise<LoadedHarness> {
+  assertValidHarnessId(options.harnessId);
   const agentsDir = resolve(options.agentsDir);
   const harnessDir = join(agentsDir, "harnesses", options.harnessId);
   const specPath = join(harnessDir, "harness.yaml");

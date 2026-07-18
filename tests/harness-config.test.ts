@@ -169,6 +169,15 @@ test("loadHarness rejects missing files, bad versions, and bad role refs", async
   }
 });
 
+test("harness ids with traversal or separators are rejected before path use", async () => {
+  await expect(
+    loadHarness({ agentsDir: fixturesDir, harnessId: "../escape" }),
+  ).rejects.toThrow('harness id "../escape" is invalid');
+  await expect(
+    loadHarness({ agentsDir: fixturesDir, harnessId: "a/b" }),
+  ).rejects.toThrow("is invalid");
+});
+
 test("policy ids with traversal or shell metacharacters are rejected", async () => {
   const { loadPolicy } = await import("@aguil/agents-harness-config");
   await expect(loadPolicy(fixturesDir, "../escape")).rejects.toThrow(
