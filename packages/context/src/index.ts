@@ -270,8 +270,17 @@ export interface ShellCommandProviderOptions {
   readonly cmd: readonly string[];
   readonly title?: string;
   readonly maxBytes?: number;
+  /**
+   * Wall-clock bound for the command (default 60s). Context collection
+   * runs before any role executes, so a slow or non-terminating command
+   * with little stdout would otherwise hold the whole run at startup —
+   * the byte cap alone only fires when output flows.
+   */
+  readonly timeoutMs?: number;
   readonly commandRunner?: CommandRunner;
 }
+
+const DEFAULT_SHELL_COMMAND_TIMEOUT_MS = 60_000;
 
 /**
  * Generic provider: run a command in the workspace and capture stdout.
@@ -298,6 +307,7 @@ export class ShellCommandProvider implements ContextProvider {
             this.options.cmd,
             request.workspacePath,
             this.options.maxBytes,
+            this.options.timeoutMs ?? DEFAULT_SHELL_COMMAND_TIMEOUT_MS,
           )
         : await this.commandRunner(this.options.cmd, request.workspacePath);
     const content =
@@ -581,6 +591,7 @@ const CONTEXT_PROVIDER_FACTORIES: Readonly<
       "cmd",
       "title",
       "max_bytes",
+      "timeout_ms",
     ]);
     const cmd = record.cmd;
     if (
@@ -602,6 +613,11 @@ const CONTEXT_PROVIDER_FACTORIES: Readonly<
         ? {}
         : {
             maxBytes: optionalContextPositiveInt(record, "max_bytes", use),
+          }),
+      ...(optionalContextPositiveInt(record, "timeout_ms", use) === undefined
+        ? {}
+        : {
+            timeoutMs: optionalContextPositiveInt(record, "timeout_ms", use),
           }),
     });
   },
@@ -697,6 +713,7 @@ async function runBoundedCommand(
   cmd: readonly string[],
   cwd: string,
   maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
+  timeoutMs?: number,
 ): Promise<string | undefined> {
   try {
     const proc = Bun.spawn({
@@ -706,6 +723,7 @@ async function runBoundedCommand(
       stderr: "pipe",
     });
     let hitCap = false;
+    let timedOut = false;
     let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
     const kill = (signal: "SIGTERM" | "SIGKILL"): void => {
       try {
@@ -716,6 +734,13 @@ async function runBoundedCommand(
       kill("SIGTERM");
       hardKillTimer = setTimeout(() => kill("SIGKILL"), 1_000);
     };
+    const timeoutTimer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            terminate();
+          }, timeoutMs);
 
     const stdoutReader = (async (): Promise<string> => {
       if (!(proc.stdout instanceof ReadableStream)) {
@@ -772,8 +797,17 @@ async function runBoundedCommand(
         proc.exited,
         stderrDrainer,
       ]);
+      // A timed-out command is a failure (unlike hitting the byte cap,
+      // which returns the collected prefix): partial output from a command
+      // that never finished is not trustworthy context.
+      if (timedOut) {
+        return undefined;
+      }
       return exitCode === 0 || hitCap ? stdout : undefined;
     } finally {
+      if (timeoutTimer !== undefined) {
+        clearTimeout(timeoutTimer);
+      }
       if (hardKillTimer !== undefined) {
         clearTimeout(hardKillTimer);
       }

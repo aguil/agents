@@ -1,4 +1,32 @@
 import { expect, test } from "bun:test";
+
+test("shell-command enforces a wall-clock timeout as failure", async () => {
+  const { ShellCommandProvider } = await import("@aguil/agents-context");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const workspace = await mkdtemp(join(tmpdir(), "shell-timeout-"));
+  try {
+    const provider = new ShellCommandProvider({
+      id: "slow",
+      cmd: ["sleep", "30"],
+      timeoutMs: 300,
+    });
+    const startedAt = Date.now();
+    const artifacts = await provider.collect({
+      workspacePath: workspace,
+      scratchpadPath: workspace,
+    });
+    // Timed out => failure artifact (partial silence is not trustworthy
+    // context), and collection returns promptly instead of holding the
+    // run at startup.
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(artifacts[0]?.content).toContain("Command failed");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
