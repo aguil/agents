@@ -10,6 +10,27 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.5](https://github.com/aguil/agents/compare/v0.4.4...v0.4.5) (2026-07-18)
+
+
+### Added
+
+* **cli:** agents hooks test — synthetic-event policy probe ([047ceb3](https://github.com/aguil/agents/commit/047ceb3336d4493bda1bf34c6813122efb1f3bd1))
+* **harness-config,hooks:** spec v0.2 applies_to hook event-class scoping ([9e55422](https://github.com/aguil/agents/commit/9e5542261a04b958605da7e16eefc9cee0640742))
+* spec v0.2 applies_to hook scoping, bridge cost measurement, agents hooks test ([#70](https://github.com/aguil/agents/issues/70), [#71](https://github.com/aguil/agents/issues/71)) ([6b868f6](https://github.com/aguil/agents/commit/6b868f646fa9d414d07482043607e8dff9d6bfeb))
+
+
+### Fixed
+
+* **examples:** de-exemplify incident-triage prompts ([#75](https://github.com/aguil/agents/issues/75) placeholder echo) ([620baac](https://github.com/aguil/agents/commit/620baac496f67ea343f7d3c45b14236a88b87137))
+* **orchestration:** dedup role outcomes by id at collection ([#75](https://github.com/aguil/agents/issues/75)) ([5aa3d0d](https://github.com/aguil/agents/commit/5aa3d0db87913a5d06386db64d1684a047fc096f))
+* outcome duplication and prompt-placeholder echo from real adapters ([#75](https://github.com/aguil/agents/issues/75)) ([5bf1e83](https://github.com/aguil/agents/commit/5bf1e8396f3666e9d0e4693673633a17320600f0))
+
+
+### Performance
+
+* **policy:** measure policy-eval bridge cost at code-review scale ([#70](https://github.com/aguil/agents/issues/70)) ([14c410e](https://github.com/aguil/agents/commit/14c410e602691eefef6a7e11d75ece89921835d2))
+
 ## [0.4.4](https://github.com/aguil/agents/compare/v0.4.3...v0.4.4) (2026-07-18)
 
 
