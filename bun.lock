@@ -101,7 +101,10 @@
       "name": "@aguil/agents-harness-config",
       "version": "0.0.0",
       "dependencies": {
+        "@aguil/agents-core": "workspace:*",
+        "@aguil/agents-execution": "workspace:*",
         "@aguil/agents-orchestration": "workspace:*",
+        "@aguil/agents-reporting": "workspace:*",
         "@marcbachmann/cel-js": "^8.0.0",
       },
     },
