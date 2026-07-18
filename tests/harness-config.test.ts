@@ -169,6 +169,71 @@ test("loadHarness rejects missing files, bad versions, and bad role refs", async
   }
 });
 
+test("per-role policy references resolve with harness default fallback", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    await mkdir(join(scratch, "policies"), { recursive: true });
+    await writeFile(
+      join(scratch, "policies", "base.yaml"),
+      "id: base\ncapabilities:\n  network: { deny: ['*'] }\n",
+    );
+    await writeFile(
+      join(scratch, "policies", "writer.yaml"),
+      "id: writer\ncapabilities:\n  exec: { deny: ['rm'] }\n",
+    );
+    const dir = join(scratch, "harnesses", "mixed");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.1"',
+        "kind: harness",
+        "harness: { id: mixed }",
+        "policy: base",
+        "roles:",
+        "  reader: { description: R }",
+        "  writer-role: { description: W, policy: writer }",
+      ].join("\n"),
+    );
+    const loaded = await loadHarness({
+      agentsDir: scratch,
+      harnessId: "mixed",
+    });
+    expect(loaded.rolePolicies.reader?.id).toBe("base");
+    expect(loaded.rolePolicies["writer-role"]?.id).toBe("writer");
+    expect(loaded.policy?.id).toBe("base");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("roles reject unknown fields", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "typo");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.1"',
+        "kind: harness",
+        "harness: { id: typo }",
+        "roles:",
+        "  a: { description: A, timout_ms: 5 }",
+      ].join("\n"),
+    );
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "typo" }),
+    ).rejects.toThrow("role a has unsupported fields: timout_ms");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
 test("harness ids with traversal or separators are rejected before path use", async () => {
   await expect(
     loadHarness({ agentsDir: fixturesDir, harnessId: "../escape" }),
