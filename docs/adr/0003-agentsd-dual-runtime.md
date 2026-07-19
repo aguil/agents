@@ -1,18 +1,16 @@
 # ADR 0003: Dual runtime — harness orchestration and `agentsd` work queue
 
 **Status:** Accepted  
-**Context:**
-[OpenAI Symphony](https://github.com/openai/symphony/blob/main/SPEC.md) defines
-a long-running scheduler (poll, claim, retry, reconcile) over tracker-backed
-work items. This monorepo already has a **one-shot harness** model: parallel
-review roles, structured `Finding` outputs, and GitHub-centric CLIs
-(`agents code-review`, inbox, pr-feedback). We need both without collapsing them
-into one orchestrator type.
+**Context:** [OpenAI Symphony](https://github.com/openai/symphony/blob/main/SPEC.md)
+defines a long-running scheduler (poll, claim, retry, reconcile) over
+tracker-backed work items. This monorepo already has a **one-shot harness**
+model: parallel review roles, structured `Finding` outputs, and GitHub-centric
+CLIs (`agents code-review`, inbox, pr-feedback). We need both without collapsing
+them into one orchestrator type.
 
 **Decision:**
 
 1. **Rename the harness contract**
-
    - `HarnessOrchestrator` — fan-out roles for a single harness run (today’s
      `NativeBunOrchestrator`).
    - `Orchestrator` remains a deprecated alias for `HarnessOrchestrator`.
@@ -20,13 +18,11 @@ into one orchestrator type.
      `WorkItem`s (`packages/work-queue`).
 
 2. **`agentsd` boundary**
-
    - Long-running host binary (`packages/agentsd`); loads repo `WORKFLOW.md`.
    - No `agents symphony` subcommand — Symphony is an internal pattern only.
    - One-shot workflows stay on `agents`.
 
 3. **`WorkItem` model** (`packages/tracker`)
-
    - Superset of Symphony `Issue` with `kind`: `github_issue`,
      `github_pr_review`, `github_pr_feedback`, `mcp_tracker`.
    - **One `WorkItem` per PR** for `github_pr_review` and `github_pr_feedback`
@@ -34,7 +30,6 @@ into one orchestrator type.
    - `identifier` examples: `org/repo#42-review`, `org/repo#42-feedback`.
 
 4. **Work feeds**
-
    - `github_issues` — primary issue tracker adapter (Linear deferred).
    - `github_pr_review` — inbox assignments → code-review worker.
    - `github_pr_feedback` — unresolved threads per PR → pr-feedback worker.
@@ -42,7 +37,6 @@ into one orchestrator type.
      REST adapter required.
 
 5. **Publish policy** (`packages/publish`, `WORKFLOW.md` `publish` block)
-
    - Default: `publish.code_review: off`, `publish.pr_feedback: off`.
    - GitHub writes only when explicitly enabled and gates pass (empty triage,
      status, staleness, dry-run refusal).

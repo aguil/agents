@@ -149,7 +149,7 @@ function makeReport(input: {
 
 async function formatReport(): Promise<void> {
   const subprocess = Bun.spawn(
-    ["bunx", "prettier@3.1.0", "--write", reportPath],
+    ["mise", "exec", "--locked", "--", "prettier", "--write", reportPath],
     {
       cwd: root,
       stdout: "pipe",

@@ -31,7 +31,6 @@ boundaries."
    is never overridable by later verdicts. The evaluator never throws — internal
    failures return `deny` with the reserved `policy-runtime-error` reason (fail
    closed). Enforcement semantics chosen deliberately:
-
    - Exec rules match on word boundaries: deny `rm` blocks `rm -rf` but not
      `rmdir`; equality or `rule + " "` prefix, nothing fuzzier.
    - Deny overrides allow; a non-empty allow list denies unlisted

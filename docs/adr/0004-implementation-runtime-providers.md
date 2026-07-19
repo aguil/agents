@@ -10,7 +10,6 @@ reference profile, not a required dependency.
 **Decision:**
 
 1. **`WORKFLOW.md` runtime config** (neutral names):
-
    - `agent.runtime`: `subprocess` (default) or `app_server`
    - `agent.command`, `agent.protocol`, timeouts — used when `app_server`
    - `execution.implementation`: `{ mode, adapter }` overrides defaults

@@ -28,8 +28,9 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
   breaking (for example `feat(cli)!:`), and spell out specifics in the body or a
   `BREAKING CHANGE:` footer when useful.
 - Before any commit: **`bun run lint`**, **`bun run typecheck`**, and
-  **`pre-commit run --all-files`** must all pass; fix failures first. Canonical
-  wording:
+  **`mise exec --locked -- pre-commit run --all-files`** must all pass (requires
+  [mise](https://mise.jdx.dev/): `mise trust` + `mise install` in this repo).
+  Canonical wording:
   [`.agents/rules/pre-commit-checks.md`](.agents/rules/pre-commit-checks.md).
   Cursor loads **`AGENTS.md`** (and optionally `.cursor/rules/*.mdc`); it does
   not auto-discover `.agents/`—keep the one-line requirement here so IDE agents

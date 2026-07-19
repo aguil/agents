@@ -15,6 +15,8 @@
     "build": "bun build packages/cli/src/index.ts --outfile=dist/index.js --target=bun && bun build packages/agentsd/src/index.ts --outfile=dist/agentsd.js --target=bun",
     "check": "bun run typecheck && bun run lint",
     "format": "biome format --write .",
+    "format:md": "mise exec --locked -- prettier --write '**/*.md'",
+    "format:md:check": "mise exec --locked -- prettier --check '**/*.md'",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "preagents": "bun run prepare-prompts",

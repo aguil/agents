@@ -13,14 +13,21 @@ agents code-review --help
 
 ## Local build (development / day-to-day)
 
-Build once after pulling updates:
+Install pinned tooling and build the CLI:
 
 ```bash
+mise trust
+mise install
 bun install
 bun run build
 ```
 
-This runs three steps:
+`mise.toml` pins bun, pre-commit, and prettier; hooks and `format:md*` scripts
+use `mise exec --locked`. See
+[`.agents/rules/pre-commit-checks.md`](../../.agents/rules/pre-commit-checks.md)
+for the full pre-commit gate list.
+
+`bun run build` runs three steps:
 
 1. `prebuild` — embeds role prompts into
    `harnesses/code-review/src/embedded-prompts.ts`
