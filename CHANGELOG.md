@@ -10,6 +10,16 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.10](https://github.com/aguil/agents/compare/v0.4.9...v0.4.10) (2026-07-19)
+
+
+### Fixed
+
+* **mise:** add missing baseline pre-commit lock entries ([be36c03](https://github.com/aguil/agents/commit/be36c0395981f8923d41944806bd3f97e5ed5dd6))
+* **mise:** pin python for pre-commit zipapp runtime ([a34b6db](https://github.com/aguil/agents/commit/a34b6db6a0706cfefe383f88b58dd701a1115e21))
+* **pre-commit:** align markdown checks with mise toolchain ([c8d4b25](https://github.com/aguil/agents/commit/c8d4b25294b9bea1565e182f168da5354543af7a))
+* **pre-commit:** align markdown checks with mise toolchain ([7c4bf10](https://github.com/aguil/agents/commit/7c4bf10a03af2ed25e84ed5fbb40bae6ff2a4eb8)), closes [#65](https://github.com/aguil/agents/issues/65)
+
 ## [0.4.9](https://github.com/aguil/agents/compare/v0.4.8...v0.4.9) (2026-07-19)
 
 
