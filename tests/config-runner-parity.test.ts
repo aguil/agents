@@ -32,8 +32,14 @@ function finding(id: string, overrides: Partial<Finding> = {}): Finding {
   };
 }
 
+interface RoleScript {
+  readonly findings?: readonly Finding[];
+  readonly fail?: boolean;
+  readonly errorReason?: string;
+}
+
 function scriptedAdapter(
-  findingsByRole: Readonly<Record<string, readonly Finding[]>>,
+  scripts: Readonly<Record<string, RoleScript>>,
 ): AgentAdapter {
   return {
     name: "scripted",
@@ -45,12 +51,21 @@ function scriptedAdapter(
       cancellation: false,
     }),
     async *run(request: AgentRunRequest) {
-      for (const emitted of findingsByRole[request.roleId] ?? []) {
+      const script = scripts[request.roleId] ?? {};
+      for (const emitted of script.findings ?? []) {
         yield createAgentEvent({
           runId: request.runId,
           roleId: request.roleId,
           type: "finding",
           data: emitted,
+        });
+      }
+      if (script.fail === true || script.errorReason !== undefined) {
+        yield createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "error",
+          data: { reason: script.errorReason ?? "boom" },
         });
       }
     },
@@ -89,6 +104,7 @@ async function runBoth(
   workspacePath: string,
   contextBundlePath: string,
   adapter: AgentAdapter,
+  strict = false,
 ): Promise<{
   readonly imperative: CodeReviewRunResult;
   readonly configured: CodeReviewRunResult;
@@ -98,6 +114,7 @@ async function runBoth(
     runId: "code-review-parity",
     contextBundlePath,
     adapter,
+    strict,
   };
   const imperative = await runCodeReview({
     ...shared,
@@ -117,17 +134,19 @@ test("config-driven code review matches deterministic imperative fields", async 
     const contextBundlePath = await writeBundle(workspacePath, "full");
     const duplicate = finding("duplicate-second");
     const adapter = scriptedAdapter({
-      quality: [
-        finding("verified-first"),
-        duplicate,
-        finding("not-reproduced", {
-          title: "Unconfirmed issue",
-          validation: {
-            status: "not_reproduced",
-            details: "Could not reproduce with deterministic test input.",
-          },
-        }),
-      ],
+      quality: {
+        findings: [
+          finding("verified-first"),
+          duplicate,
+          finding("not-reproduced", {
+            title: "Unconfirmed issue",
+            validation: {
+              status: "not_reproduced",
+              details: "Could not reproduce with deterministic test input.",
+            },
+          }),
+        ],
+      },
     });
 
     const { imperative, configured } = await runBoth(
@@ -173,6 +192,69 @@ test("config-driven trivial tier schedules only quality", async () => {
     expect(configured.metadata?.completed_roles).toBe(
       imperative.metadata?.completed_roles,
     );
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("config-driven partial-role failures match imperative status metadata", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-failure-parity-"));
+  try {
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const { imperative, configured } = await runBoth(
+      workspacePath,
+      contextBundlePath,
+      scriptedAdapter({ performance: { fail: true } }),
+    );
+
+    expect(imperative.status).toBe("error");
+    expect(configured.status).toBe(imperative.status);
+    expect(configured.metadata?.failed_roles).toBe(
+      imperative.metadata?.failed_roles,
+    );
+    expect(configured.metadata?.failed_roles).toBe("performance");
+    expect(configured.metadata?.timed_out_roles).toBe(
+      imperative.metadata?.timed_out_roles,
+    );
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("config-driven timeout and strict-mode statuses match imperative behavior", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-timeout-parity-"));
+  try {
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const timeoutScripts = { performance: { errorReason: "timed_out" } };
+    const nonStrict = await runBoth(
+      workspacePath,
+      contextBundlePath,
+      scriptedAdapter(timeoutScripts),
+    );
+    const strict = await runBoth(
+      workspacePath,
+      contextBundlePath,
+      scriptedAdapter(timeoutScripts),
+      true,
+    );
+
+    expect(nonStrict.imperative.status).toBe("warnings");
+    expect(nonStrict.configured.status).toBe(nonStrict.imperative.status);
+    expect(strict.imperative.status).toBe("error");
+    expect(strict.configured.status).toBe(strict.imperative.status);
+    expect(strict.imperative.status).not.toBe(nonStrict.imperative.status);
+    expect(strict.configured.status).not.toBe(nonStrict.configured.status);
+
+    for (const pair of [nonStrict, strict]) {
+      expect(pair.configured.metadata?.timed_out_roles).toBe(
+        pair.imperative.metadata?.timed_out_roles,
+      );
+      expect(pair.configured.metadata?.timed_out_roles).toBe("performance");
+      expect(pair.configured.metadata?.failed_roles).toBe(
+        pair.imperative.metadata?.failed_roles,
+      );
+      expect(pair.configured.metadata?.failed_roles).toBe("");
+    }
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
   }
