@@ -35,10 +35,10 @@ $XDG_CONFIG_HOME/agents/code-review/config.json
 
 Repo-managed JSON **cannot steer where or how reviewers run**. The following
 keys are stripped with a `console.warn` when present in the repo file:
-`workspace`, `reposRoot`, `scratchpad`, `adapter`, adapter host-binary paths
-(`cursor`, `claude`, `opencode`), and argv templates (`cursorArgs`,
-`claudeArgs`) — including inside `presets`. Set these only via the user config
-file, `AGENTS_CODE_REVIEW_*` env vars, or CLI flags.
+`workspace`, `reposRoot`, `scratchpad`, `adapter`, `impl` (execution-path
+selection), adapter host-binary paths (`cursor`, `claude`, `opencode`), and argv
+templates (`cursorArgs`, `claudeArgs`) — including inside `presets`. Set these
+only via the user config file, `AGENTS_CODE_REVIEW_*` env vars, or CLI flags.
 
 Set `AGENTS_CODE_REVIEW_CONFIG_STRICT=true` to make unknown keys a fatal error
 instead of a warning.
@@ -71,6 +71,7 @@ All keys use **camelCase**. Omit any key you don't need.
 | `pr`            | `--pr`             |                                          |
 | `postPr`        | `--post-pr`        |                                          |
 | `reviewSummary` | `--review-summary` | `triage` / `impact` / `evidence`         |
+| `impl`          | `--impl`           | `package` / `config`; user/CLI only      |
 
 **Booleans:**
 

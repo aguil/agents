@@ -223,6 +223,7 @@ Run and replay (shared):
   --dry-run              Write artifacts under <workspace>/.agents-code-review/dry-run
   --context-bundle <path> Reuse captured context bundle JSON
   --consensus <n>        Run n passes and keep recurring findings (default 1 when --pending-review)
+  --impl <name>          package (default) | config — opt-in config-declared harness (.agents/harnesses/code-review); config does not support --consensus > 1
 
 GitHub / posting (during a full run):
 
