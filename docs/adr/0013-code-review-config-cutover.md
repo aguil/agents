@@ -1,10 +1,13 @@
 # ADR 0013: replace the code-review package path with the config-declared harness (flagged cutover)
 
-**Status:** Proposed (accepted = #73 arc complete; default flip is a separate,
-later decision) **Context:** #73 tracks replacing the build-time
-`harnesses/code-review` package behind `agents code-review` with a
-`harness.yaml`-configured harness. The tier gates defined there are now
-evidenced:
+**Status:** Accepted (2026-07-18 — arc final gates passed: live real-adapter
+code-review through `--impl config` on PR #103 and the incident-triage
+regression both green; default flip remains a separate, later decision per the
+staged rollout below)
+
+**Context:** #73 tracks replacing the build-time `harnesses/code-review` package
+behind `agents code-review` with a `harness.yaml`-configured harness. The tier
+gates defined there are now evidenced:
 
 - **Tier 1 (capability)** — `.agents/harnesses/code-review/harness.yaml`
   expresses the package's behavior with zero new TypeScript beyond registered
