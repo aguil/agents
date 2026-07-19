@@ -8,7 +8,7 @@ support multiple specialized harnesses; harness-specific logic belongs in
 
 | Package                  | npm name                      | Owns                                                                                                                                                             |
 | ------------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core`          | `@aguil/agents-core`          | Run/event/finding/scratchpad/JSON contracts; `resolveGitAwarePath` for jj ↔ git                                                                                 |
+| `packages/core`          | `@aguil/agents-core`          | Run/event/finding/scratchpad/JSON contracts; `resolveGitAwarePath` for jj ↔ git                                                                                  |
 | `packages/execution`     | `@aguil/agents-execution`     | `AgentAdapter` interface + `AdapterCapabilities`; fake, opencode, claude, cursor subprocess adapters; `SessionAgentAdapter` for app_server (json_rpc_session_v1) |
 | `packages/orchestration` | `@aguil/agents-orchestration` | `HarnessOrchestrator` contract; `NativeBunOrchestrator` (fan-out roles, collect results, enforce timeouts)                                                       |
 | `packages/context`       | `@aguil/agents-context`       | Diff collection, AGENTS.md ingestion, PR metadata parsing, doc fetching, context bundle assembly; `classifyDiff()` for triage tier selection                     |
