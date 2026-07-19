@@ -10,6 +10,49 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.9](https://github.com/aguil/agents/compare/v0.4.8...v0.4.9) (2026-07-19)
+
+
+### Added
+
+* CEL role enablement + triage-tier gating ([#73](https://github.com/aguil/agents/issues/73) Tier 1.2) ([9e9f21a](https://github.com/aguil/agents/commit/9e9f21a6083b43ef5a4fbad8b4ce6b0c4d289421))
+* **cli:** collect harness context through declared providers ([#73](https://github.com/aguil/agents/issues/73) Tier 1.1) ([955e7b3](https://github.com/aguil/agents/commit/955e7b31439eb91eb8a1ba85db0bb9bf2a9dbb88))
+* **cli:** gate roles on collected context via enablement expressions ([#73](https://github.com/aguil/agents/issues/73) Tier 1.2) ([49fcd9d](https://github.com/aguil/agents/commit/49fcd9d77ba96592321078321c27ad3786a2da64))
+* **cli:** opt-in --impl config dispatch for code-review ([#73](https://github.com/aguil/agents/issues/73) Tier 5 stage 1) ([83b9d7c](https://github.com/aguil/agents/commit/83b9d7c0f760d3aabfe2a134e84fa28e41af903f))
+* **cli:** render declared reporting template after harness run ([ec252b3](https://github.com/aguil/agents/commit/ec252b39e17bde1324cfeeec926a8327a6515cc4))
+* **cli:** wire declared output schemas and finding pipelines into harness run ([b26e449](https://github.com/aguil/agents/commit/b26e449a3183b8d55dd07b9854976b92f57f1c1f))
+* code-review as configuration — Tier 1 pass + Tier 2 differential green ([#73](https://github.com/aguil/agents/issues/73)) ([00305a9](https://github.com/aguil/agents/commit/00305a9f85c2cea3575fc6d4e3db34b7e9bcb204))
+* **code-review:** config-driven runner with exact package parity ([#73](https://github.com/aguil/agents/issues/73) Tier 2) ([184ac2f](https://github.com/aguil/agents/commit/184ac2ff9dddbc8067be07a2b8ba4c1361d9a80c))
+* **code-review:** declarative code-review harness definition ([#73](https://github.com/aguil/agents/issues/73) Tier 1 pass) ([c421cd5](https://github.com/aguil/agents/commit/c421cd53d92d22f0a0623352417fa7066e7d5ce3))
+* **code-review:** package-vs-config differential mode in the parity referee ([#73](https://github.com/aguil/agents/issues/73) Tier 2 gate) ([d625367](https://github.com/aguil/agents/commit/d625367be3652575e0c2ad31a84060b470508190))
+* **code-review:** replay-parity referee for [#73](https://github.com/aguil/agents/issues/73) Tier 2 differential testing ([f96144c](https://github.com/aguil/agents/commit/f96144c106b6d04290b0078aa714952a55db7525))
+* context.providers spec section + builtin provider registry ([#73](https://github.com/aguil/agents/issues/73) Tier 1.1) ([b6bd8fd](https://github.com/aguil/agents/commit/b6bd8fd40497f56b66362c335682e410e40fd9a0))
+* **context:** named builtin provider registry ([#73](https://github.com/aguil/agents/issues/73) Tier 1.1) ([a205156](https://github.com/aguil/agents/commit/a205156bb284ef1fad786ce3f90eb72e3c4648f2))
+* **harness-config:** CEL role enablement with fail-closed filtering ([#73](https://github.com/aguil/agents/issues/73) Tier 1.2) ([e94080b](https://github.com/aguil/agents/commit/e94080b5df629b780f4a180bd378de875aaffb34))
+* **harness-config:** context.providers section in harness.yaml ([#73](https://github.com/aguil/agents/issues/73) Tier 1.1) ([66ab000](https://github.com/aguil/agents/commit/66ab000d222866744c79e7779658818dfd12bceb))
+* **harness-config:** output schemas + finding pipelines ([#73](https://github.com/aguil/agents/issues/73) Tier 1.3/1.4) ([2d8841e](https://github.com/aguil/agents/commit/2d8841e29481e62f41f74f709087ed3bd95f60b9))
+* opt-in config-harness dispatch for agents code-review ([#73](https://github.com/aguil/agents/issues/73) Tier 3 + Tier 5 stage 1) ([6d17285](https://github.com/aguil/agents/commit/6d172852ee7388d89684be7904262d58323435d2))
+* **orchestration:** injected outcome-schema enforcement per role ([b4d82e5](https://github.com/aguil/agents/commit/b4d82e53e51019a9a27358e302c5890b2db2d1dd))
+* outcome schemas + finding pipelines ([#73](https://github.com/aguil/agents/issues/73) Tier 1.3/1.4) ([afd7fd3](https://github.com/aguil/agents/commit/afd7fd3c77568ccae7783746a6514b2b7dc21786))
+* **policies:** code-review-readonly policy + Tier 4 probe suite ([#73](https://github.com/aguil/agents/issues/73)) ([244f4c6](https://github.com/aguil/agents/commit/244f4c6d6bbf2d745e1dc6c0be87b4e39e0f2e8d))
+* replay-parity instrument for [#73](https://github.com/aguil/agents/issues/73) Tier 2 differential testing ([d5ab487](https://github.com/aguil/agents/commit/d5ab4871207a5bef012b83dac5b603b09df59068))
+* **reporting,harness-config:** reporting.template builtin renderers ([#73](https://github.com/aguil/agents/issues/73) Tier 1.5) ([3b0e780](https://github.com/aguil/agents/commit/3b0e780aa49bda52627cc801061caaeace59d237))
+* reporting.template renderers + consensus descope ([#73](https://github.com/aguil/agents/issues/73) Tier 1.5/1.6) ([4b86b64](https://github.com/aguil/agents/commit/4b86b640125e2626199cde90fe9857e3ca14c208))
+* Tier 4 operational gates + cutover ADR ([#73](https://github.com/aguil/agents/issues/73)) ([28084a0](https://github.com/aguil/agents/commit/28084a0329a01bba54ff9237ba2740e1ebc24896))
+
+
+### Fixed
+
+* **code-review:** exclude timeout-derived warnings from replay status parity ([c0e0094](https://github.com/aguil/agents/commit/c0e00944a917d3c23f2fcc04e390409bb5587103))
+* **code-review:** include severity and file in the finding identity key ([0a6f257](https://github.com/aguil/agents/commit/0a6f257cc711769d5ef8a5c5db434189bcdec381))
+* **code-review:** reject corpus entry names that escape runs/ ([1084f8e](https://github.com/aguil/agents/commit/1084f8eaa46a47c334eb91d1ccce092a1a4940f3))
+* **context:** wall-clock timeout for shell-command collection (default 60s) ([9879a56](https://github.com/aguil/agents/commit/9879a561f2ea8c9ca91bf494827a3550024fc662))
+
+
+### Performance
+
+* **code-review:** Tier 4 envelope measurement + failure-mode parity ([#73](https://github.com/aguil/agents/issues/73)) ([9399f82](https://github.com/aguil/agents/commit/9399f82e37399e2d6b1f1d42460f27b452c8e9cb))
+
 ## [0.4.8](https://github.com/aguil/agents/compare/v0.4.7...v0.4.8) (2026-07-18)
 
 
