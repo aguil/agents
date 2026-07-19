@@ -1,0 +1,37 @@
+id: code-review-readonly
+description: >-
+  Read-only policy for code-review roles (#73 Tier 4). Equal-or-stronger
+  than the incumbent's prompt-hint + adapter readOnlyMode model: writes,
+  network egress, and non-allowlisted commands are denied by evaluation,
+  not by instruction. Known shared limit: allowlisted read commands (cat,
+  rg, ...) are not correlated against filesystem deny globs, so shell
+  reads of denied paths are not blocked by either model (#104). Not yet
+  wired into the code-review dispatch path (hook enforcement is the
+  harness-run machinery).
+capabilities:
+  filesystem:
+    allow: ["**"]
+    deny:
+      - ".env"
+      - ".env.*"
+      - "**/secrets/**"
+      - ".cursor/**"
+      - ".agents/**"
+      - ".agents-code-review/**"
+  exec:
+    allow:
+      - "rg"
+      - "grep"
+      - "cat"
+      - "ls"
+      - "bun test"
+      - "npm test"
+      - "git diff"
+      - "git log"
+      - "jj diff"
+      - "jj log"
+    deny: ["rm", "git push", "jj git push", "curl", "wget"]
+  network:
+    deny: ["*"]
+limits:
+  timeout_ms: 1200000
