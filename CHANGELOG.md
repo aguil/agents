@@ -10,6 +10,17 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.11](https://github.com/aguil/agents/compare/v0.4.10...v0.4.11) (2026-07-21)
+
+
+### Fixed
+
+* add packaged code-review harness resolution ([bec1d9f](https://github.com/aguil/agents/commit/bec1d9f9a4b4185e68717228700c3a63340d8741))
+* guard all harness install overwrites ([d542c8c](https://github.com/aguil/agents/commit/d542c8c1ae20d627f8d7c20c04d077e533c45184))
+* prompt before replacing installed harness ([1dcc973](https://github.com/aguil/agents/commit/1dcc9736ea6d0df8adc15f108dbbd8a53dee2be9))
+* remove PR reference from packaged harness ([e1164e0](https://github.com/aguil/agents/commit/e1164e08391bbabeedc64a5eeed268ebf2506a5c))
+* satisfy Biome optional chaining lint ([46afe51](https://github.com/aguil/agents/commit/46afe51067831f2d8e5f2a6adee456c4889d14eb))
+
 ## [0.4.10](https://github.com/aguil/agents/compare/v0.4.9...v0.4.10) (2026-07-19)
 
 
