@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { AGENTS_PACK_ROOT, readAgentsMonorepoVersion } from "./skills-pack";
 
 const CODE_REVIEW_HARNESS_ID = "code-review";
@@ -36,6 +37,31 @@ Install options:
 
 Try: agents harness install code-review --help
 `);
+}
+
+function isYes(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "y" || normalized === "yes";
+}
+
+async function confirmOverwrite(harnessPath: string): Promise<boolean> {
+  const message = `${CODE_REVIEW_HARNESS_ID} harness already exists at ${harnessPath}. Overwrite? [y/N] `;
+  if (process.stdin.isTTY) {
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stderr,
+    });
+    try {
+      return isYes(await rl.question(message));
+    } finally {
+      rl.close();
+    }
+  }
+
+  process.stderr.write(message);
+  const raw = await Bun.stdin.text();
+  process.stderr.write("\n");
+  return isYes(raw.split(/\r?\n/, 1)[0]);
 }
 
 function parseInstallArgs(argv: readonly string[]):
@@ -143,10 +169,24 @@ async function installCodeReviewHarness(
   );
   const destPolicyDir = join(destAgentsDir, "policies");
   const version = readAgentsMonorepoVersion();
+  const harnessDest = join(destHarnessDir, "harness.yaml");
 
   console.log(
     `Installing ${CODE_REVIEW_HARNESS_ID} harness from ${AGENTS_PACK_ROOT} to ${destAgentsDir}`,
   );
+
+  if (await pathExists(harnessDest)) {
+    if (dryRun) {
+      console.log(
+        `Existing code-review harness detected at ${harnessDest}; install would prompt before overwriting.`,
+      );
+    } else if (!(await confirmOverwrite(harnessDest))) {
+      console.error(
+        `Install aborted; existing code-review harness left unchanged at ${harnessDest}.`,
+      );
+      return 1;
+    }
+  }
 
   if (!dryRun) {
     await mkdir(destHarnessDir, { recursive: true });
@@ -173,7 +213,6 @@ async function installCodeReviewHarness(
     "../../../harnesses/code-review/prompts/",
     "prompts/",
   );
-  const harnessDest = join(destHarnessDir, "harness.yaml");
   console.log(`${dryRun ? "Would write" : "Wrote"}: ${harnessDest}`);
   if (!dryRun) {
     await writeFile(harnessDest, installedHarness, "utf8");

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 async function runAgentsCli(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
+  stdin?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn({
     cmd: [
@@ -19,6 +20,7 @@ async function runAgentsCli(
     ],
     cwd: repoRoot,
     env: { ...Bun.env, ...env },
+    ...(stdin === undefined ? {} : { stdin: new TextEncoder().encode(stdin) }),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -141,5 +143,43 @@ test("harness install materializes code-review for explicit --agents-dir runs", 
   } finally {
     await rm(dest, { recursive: true, force: true });
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("harness install prompts before overwriting an existing code-review harness", async () => {
+  const dest = await mkdtemp(join(tmpdir(), "agents-harness-prompt-"));
+  const harnessPath = join(dest, "harnesses", "code-review", "harness.yaml");
+  try {
+    const firstInstall = await runAgentsCli([
+      "harness",
+      "install",
+      "code-review",
+      "--dest",
+      dest,
+    ]);
+    expect(firstInstall.exitCode).toBe(0);
+
+    await writeFile(harnessPath, "custom harness\n", "utf8");
+    const declined = await runAgentsCli(
+      ["harness", "install", "code-review", "--dest", dest],
+      {},
+      "n\n",
+    );
+    expect(declined.exitCode).toBe(1);
+    expect(declined.stderr).toContain("Overwrite?");
+    expect(await readFile(harnessPath, "utf8")).toBe("custom harness\n");
+
+    const accepted = await runAgentsCli(
+      ["harness", "install", "code-review", "--dest", dest],
+      {},
+      "y\n",
+    );
+    expect(accepted.exitCode).toBe(0);
+    expect(accepted.stderr).toContain("Overwrite?");
+    expect(await readFile(harnessPath, "utf8")).toContain(
+      "Config-declared code-review harness:",
+    );
+  } finally {
+    await rm(dest, { recursive: true, force: true });
   }
 });

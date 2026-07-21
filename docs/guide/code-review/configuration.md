@@ -164,8 +164,10 @@ agents code-review --impl config --workspace /path/to/repo
 ```
 
 The install command writes `~/.agents/harnesses/code-review/`, the
-`code-review-readonly` policy, and a package-version marker. Later config runs
-report version drift between that global install and the running CLI package.
+`code-review-readonly` policy, and a package-version marker. If a code-review
+harness is already present at the destination, the installer prompts before
+overwriting it. Later config runs report version drift between that global
+install and the running CLI package.
 
 For a one-off run, bypass layered lookup with an explicit `.agents` directory:
 
