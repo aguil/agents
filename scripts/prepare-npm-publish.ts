@@ -184,6 +184,41 @@ async function main(): Promise<void> {
     return;
   }
 
+  const agentsConfigSource = join(REPO_ROOT, ".agents");
+  if (await pathExists(agentsConfigSource)) {
+    await cp(agentsConfigSource, join(outDir, ".agents"), {
+      recursive: true,
+    });
+  } else {
+    console.error(
+      `Missing .agents at ${agentsConfigSource}; --impl config requires the packaged code-review harness.`,
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const codeReviewPromptsSource = join(
+    REPO_ROOT,
+    "harnesses",
+    "code-review",
+    "prompts",
+  );
+  if (await pathExists(codeReviewPromptsSource)) {
+    await cp(
+      codeReviewPromptsSource,
+      join(outDir, "harnesses", "code-review", "prompts"),
+      {
+        recursive: true,
+      },
+    );
+  } else {
+    console.error(
+      `Missing code-review prompts at ${codeReviewPromptsSource}; packaged harness prompt_path references require this tree.`,
+    );
+    process.exitCode = 2;
+    return;
+  }
+
   console.log(`Prepared npm publish tarball contents at ${outDir}`);
 }
 

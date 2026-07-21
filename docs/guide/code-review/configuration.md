@@ -71,6 +71,7 @@ All keys use **camelCase**. Omit any key you don't need.
 | `pr`            | `--pr`             |                                          |
 | `postPr`        | `--post-pr`        |                                          |
 | `reviewSummary` | `--review-summary` | `triage` / `impact` / `evidence`         |
+| `agentsDir`     | `--agents-dir`     | `--impl config` override; env/CLI only   |
 | `impl`          | `--impl`           | `package` / `config`; user/CLI only      |
 
 **Booleans:**
@@ -135,3 +136,45 @@ bun run agents code-review --preset ci
 ```bash
 bun run agents code-review --adapter fake --dry-run --log summary
 ```
+
+## Config-declared harness (`--impl config`)
+
+`agents code-review --impl config` runs the declarative `harness.yaml`-backed
+implementation instead of the packaged TypeScript implementation. The config
+runner resolves the code-review harness definition in this order:
+
+1. `<workspace>/.agents/harnesses/code-review/`
+2. `~/.agents/harnesses/code-review/`
+3. the `.agents/` tree shipped inside the installed `@aguil/agents` package
+
+The selected layer is recorded in `result.json` metadata as
+`config_harness_source` and printed in summary logs:
+
+```bash
+agents code-review --impl config --adapter fake --dry-run --log summary
+# Config harness source: package (.../.agents)
+```
+
+Install the packaged harness into your user-global `.agents` tree when you want
+one copy to customize or audit across repositories:
+
+```bash
+agents harness install code-review
+agents code-review --impl config --workspace /path/to/repo
+```
+
+The install command writes `~/.agents/harnesses/code-review/`, the
+`code-review-readonly` policy, and a package-version marker. Later config runs
+report version drift between that global install and the running CLI package.
+
+For a one-off run, bypass layered lookup with an explicit `.agents` directory:
+
+```bash
+agents code-review --impl config \
+  --agents-dir /path/to/.agents \
+  --workspace /path/to/repo
+```
+
+The matching environment variable is `AGENTS_CODE_REVIEW_AGENTS_DIR`. Like
+`impl`, `agentsDir` is intentionally ignored from repo JSON so a checkout cannot
+redirect the harness definition used to review itself.

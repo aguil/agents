@@ -87,6 +87,7 @@ export async function runCodeReviewWorker(input: {
       workspacePath: reviewWorkspace,
       scratchpadRoot,
       reviewPrNumber: prNumber,
+      agentsDir: process.env.AGENTS_CODE_REVIEW_AGENTS_DIR,
       adapter: input.adapter,
       metadata: {
         ...input.item.metadata,

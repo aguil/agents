@@ -158,9 +158,13 @@ export async function main(
     return await runPolicyEvalCli(argv.slice(1));
   }
 
-  if (argv[0] === "harness" && argv[1] === "run") {
-    const { runHarnessRunCli } = await import("./harness-run-main");
-    return await runHarnessRunCli(argv.slice(2));
+  if (argv[0] === "harness") {
+    if (argv[1] === "run") {
+      const { runHarnessRunCli } = await import("./harness-run-main");
+      return await runHarnessRunCli(argv.slice(2));
+    }
+    const { runHarnessCli } = await import("./harness-main");
+    return await runHarnessCli(argv.slice(1));
   }
 
   if (argv[0] === "hooks") {
@@ -355,6 +359,7 @@ export async function main(
           options,
           deterministicEnabled,
         ),
+        agentsDir: options.agentsDir,
         adapter,
         onEvent: createRunEventLogger(logLevel),
       };
@@ -364,6 +369,18 @@ export async function main(
           : await runCodeReview({ ...sharedRunInputs, consensusRuns });
       let verbosePrDiffContext: PullRequestDiffContext | undefined;
       if (logShowsSummary(logLevel)) {
+        if (impl === "config") {
+          const source = result.metadata?.config_harness_source;
+          const dir = result.metadata?.config_harness_agents_dir;
+          if (source !== undefined && dir !== undefined) {
+            console.log(`Config harness source: ${source} (${dir})`);
+          }
+          if (result.metadata?.config_harness_version_drift === "true") {
+            console.warn(
+              `Config harness install version ${result.metadata.config_harness_installed_version ?? "unknown"} differs from package version ${result.metadata.config_harness_package_version ?? "unknown"}. Run agents harness install code-review to refresh it.`,
+            );
+          }
+        }
         printVerboseFindingSummary(result.findings);
         const summaryStyle =
           parseReviewSummaryStyle(options.reviewSummary) ?? "impact";

@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-async function runCodeReviewCli(
+async function runAgentsCli(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
@@ -13,7 +15,6 @@ async function runCodeReviewCli(
       "bun",
       "run",
       join(repoRoot, "packages", "cli", "src", "index.ts"),
-      "code-review",
       ...args,
     ],
     cwd: repoRoot,
@@ -27,6 +28,13 @@ async function runCodeReviewCli(
     proc.exited,
   ]);
   return { stdout, stderr, exitCode };
+}
+
+async function runCodeReviewCli(
+  args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return await runAgentsCli(["code-review", ...args], env);
 }
 
 const bundleFixture = join(
@@ -95,4 +103,43 @@ test("AGENTS_CODE_REVIEW_IMPL=config selects the config path without flags", asy
   );
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain("(config-declared harness)");
+});
+
+test("harness install materializes code-review for explicit --agents-dir runs", async () => {
+  const dest = await mkdtemp(join(tmpdir(), "agents-harness-install-"));
+  const workspace = await mkdtemp(join(tmpdir(), "agents-harness-workspace-"));
+  try {
+    const install = await runAgentsCli([
+      "harness",
+      "install",
+      "code-review",
+      "--dest",
+      dest,
+    ]);
+    expect(install.exitCode).toBe(0);
+    expect(install.stdout).toContain("harness.yaml");
+    expect(install.stdout).toContain(".agents-package-version");
+
+    const result = await runCodeReviewCli([
+      "--impl",
+      "config",
+      "--agents-dir",
+      dest,
+      "--adapter",
+      "fake",
+      "--dry-run",
+      "--log",
+      "summary",
+      "--workspace",
+      workspace,
+      "--context-bundle",
+      bundleFixture,
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Config harness source: explicit");
+    expect(result.stdout).toContain("Code review passed.");
+  } finally {
+    await rm(dest, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
