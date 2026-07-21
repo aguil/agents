@@ -53,6 +53,11 @@ const BOOLEAN_FIELDS: readonly (keyof CliOptions & string)[] = [
   "printLogs",
 ];
 
+const ENV_AND_CLI_STRING_FIELDS: readonly (keyof CliOptions & string)[] = [
+  ...STRING_FIELDS,
+  "agentsDir",
+];
+
 /** camelCase CLI option keys accepted at the root of JSON or inside a preset body. */
 const ALLOWED_JSON_FLAT_KEYS: ReadonlySet<string> = new Set([
   ...STRING_FIELDS,
@@ -135,6 +140,7 @@ const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
   PR: "pr",
   POST_PR: "postPr",
   REVIEW_SUMMARY: "reviewSummary",
+  AGENTS_DIR: "agentsDir",
   IMPL: "impl",
   DRY_RUN: "dryRun",
   POST_ONLY: "postOnly",
@@ -247,7 +253,7 @@ export function mergeFlatConfigLayers(
   overlay: CodeReviewMergedPartial,
 ): CodeReviewMergedPartial {
   const next: CodeReviewMergedPartial = { ...base };
-  for (const key of STRING_FIELDS) {
+  for (const key of ENV_AND_CLI_STRING_FIELDS) {
     const v = overlay[key];
     if (typeof v === "string") {
       (next as Record<string, unknown>)[key as string] = v;
@@ -574,6 +580,7 @@ function applyExplicitCliOptions(
     pr: stringOr("pr"),
     postPr: stringOr("postPr"),
     reviewSummary: stringOr("reviewSummary"),
+    agentsDir: stringOr("agentsDir"),
     impl: stringOr("impl"),
     postOnly: boolOr("postOnly", false),
     noConfirm: boolOr("noConfirm", false),

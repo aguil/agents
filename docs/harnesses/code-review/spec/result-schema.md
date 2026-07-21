@@ -63,6 +63,18 @@ in pending-review mode.
 | `context_fingerprint` | Short hash for context-equivalence checks               |
 | `deterministic_mode`  | `"true"` when deterministic profile is enabled          |
 
+### Config harness
+
+Present when the run used the config-declared implementation (`--impl config`).
+
+| Field                              | Description                                                                 |
+| ---------------------------------- | --------------------------------------------------------------------------- |
+| `config_harness_source`            | Resolved source layer: `explicit`, `workspace`, `user-global`, or `package` |
+| `config_harness_agents_dir`        | Absolute `.agents` directory that supplied the harness                      |
+| `config_harness_package_version`   | Version of the running `@aguil/agents` package                              |
+| `config_harness_installed_version` | Version marker from user-global or explicit installs, when present          |
+| `config_harness_version_drift`     | `"true"` when installed version differs from package version                |
+
 ### Consensus
 
 | Field                        | Description                             |

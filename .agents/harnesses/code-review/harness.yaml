@@ -4,10 +4,10 @@ kind: harness
 harness:
   id: code-review
   description: >-
-    Config-declared code-review harness (#73): expresses the
-    harnesses/code-review package behavior with zero TypeScript beyond
-    registered builtins. Differential parity against the package path is
-    enforced by the replay corpus referee.
+    Config-declared code-review harness: expresses the harnesses/code-review
+    package behavior with zero TypeScript beyond registered builtins.
+    Differential parity against the package path is enforced by the replay
+    corpus referee.
 
 # Provider order mirrors runCodeReview exactly — the bundle is fingerprinted,
 # so ordering is part of the parity contract.

@@ -58,9 +58,8 @@ test("extracts an outcome envelope nested in stream-json assistant text", () => 
   const events = normalizeAgentOutputLine(request, JSON.stringify(streamJson));
   const outcomeEvents = events.filter((event) => event.type === "outcome");
   expect(outcomeEvents).toHaveLength(1);
-  expect((outcomeEvents[0]?.data as { kind?: string }).kind).toBe(
-    "remediation",
-  );
+  const outcomeEvent = outcomeEvents[0];
+  expect((outcomeEvent.data as { kind?: string }).kind).toBe("remediation");
 });
 
 test("finding and outcome envelopes remain disjoint", () => {

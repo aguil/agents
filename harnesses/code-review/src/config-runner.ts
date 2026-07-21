@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { existsSync, constants as FsConstants } from "node:fs";
+import { access, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type ContextBundle,
   collectContextBundle,
@@ -40,8 +44,151 @@ import {
   writeLatestCodeReviewDiscoveryPointer,
 } from "./index";
 
+export type ConfigHarnessSourceKind =
+  | "explicit"
+  | "workspace"
+  | "user-global"
+  | "package";
+
+export interface ResolvedConfigHarnessSource {
+  readonly agentsDir: string;
+  readonly source: ConfigHarnessSourceKind;
+  readonly packageVersion: string;
+  readonly installedVersion?: string;
+  readonly versionDrift: boolean;
+}
+
+const CONFIG_HARNESS_ID = "code-review";
+const INSTALL_VERSION_FILE = ".agents-package-version";
+const CONFIG_RUNNER_DIR = dirname(fileURLToPath(import.meta.url));
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, FsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function findAgentsPackRoot(): string {
+  let dir = CONFIG_RUNNER_DIR;
+  for (let index = 0; index < 10; index += 1) {
+    if (
+      existsSync(
+        join(dir, ".agents", "harnesses", CONFIG_HARNESS_ID, "harness.yaml"),
+      )
+    ) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  throw new Error(
+    "Could not locate packaged code-review harness (.agents/harnesses/code-review/harness.yaml).",
+  );
+}
+
+async function readPackageVersion(packRoot: string): Promise<string> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(join(packRoot, "package.json"), "utf8"),
+    ) as { readonly version?: unknown };
+    return typeof parsed.version === "string" && parsed.version.length > 0
+      ? parsed.version
+      : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+async function readInstalledVersion(
+  agentsDir: string,
+): Promise<string | undefined> {
+  try {
+    const version = await readFile(
+      join(agentsDir, "harnesses", CONFIG_HARNESS_ID, INSTALL_VERSION_FILE),
+      "utf8",
+    );
+    const trimmed = version.trim();
+    return trimmed.length === 0 ? undefined : trimmed;
+  } catch {
+    return undefined;
+  }
+}
+
+async function hasCodeReviewHarness(agentsDir: string): Promise<boolean> {
+  return await pathExists(
+    join(resolve(agentsDir), "harnesses", CONFIG_HARNESS_ID, "harness.yaml"),
+  );
+}
+
+function userGlobalAgentsDir(): string {
+  const homeFromEnv = process.env.HOME?.trim();
+  const home =
+    homeFromEnv === undefined || homeFromEnv === "" ? homedir() : homeFromEnv;
+  return join(home, ".agents");
+}
+
+export async function resolveConfigHarnessSource(
+  workspacePath: string,
+  agentsDirOverride?: string,
+): Promise<ResolvedConfigHarnessSource> {
+  const packRoot = findAgentsPackRoot();
+  const packageVersion = await readPackageVersion(packRoot);
+  if (agentsDirOverride !== undefined) {
+    const agentsDir = resolve(agentsDirOverride);
+    const installedVersion = await readInstalledVersion(agentsDir);
+    return {
+      agentsDir,
+      source: "explicit",
+      packageVersion,
+      ...(installedVersion === undefined ? {} : { installedVersion }),
+      versionDrift:
+        installedVersion !== undefined && installedVersion !== packageVersion,
+    };
+  }
+
+  const candidates: readonly {
+    readonly source: ConfigHarnessSourceKind;
+    readonly agentsDir: string;
+  }[] = [
+    { source: "workspace", agentsDir: join(workspacePath, ".agents") },
+    { source: "user-global", agentsDir: userGlobalAgentsDir() },
+    { source: "package", agentsDir: join(packRoot, ".agents") },
+  ];
+
+  for (const candidate of candidates) {
+    if (!(await hasCodeReviewHarness(candidate.agentsDir))) {
+      continue;
+    }
+    const agentsDir = resolve(candidate.agentsDir);
+    const installedVersion =
+      candidate.source === "user-global"
+        ? await readInstalledVersion(agentsDir)
+        : undefined;
+    return {
+      agentsDir,
+      source: candidate.source,
+      packageVersion,
+      ...(installedVersion === undefined ? {} : { installedVersion }),
+      versionDrift:
+        installedVersion !== undefined && installedVersion !== packageVersion,
+    };
+  }
+
+  throw new Error(
+    `code-review config harness not found in ${candidates
+      .map((candidate) => `${candidate.source}:${resolve(candidate.agentsDir)}`)
+      .join(", ")}`,
+  );
+}
+
 export interface ConfigCodeReviewRunOptions {
-  /** `.agents/` directory containing harnesses/code-review/harness.yaml. */
+  /** Explicit `.agents/` directory; bypasses workspace/global/package resolution. */
   readonly agentsDir?: string;
   readonly workspacePath?: string;
   readonly scratchpadRoot?: string;
@@ -68,9 +215,13 @@ export async function runCodeReviewFromConfig(
   options: ConfigCodeReviewRunOptions = {},
 ): Promise<CodeReviewRunResult> {
   const workspacePath = resolve(options.workspacePath ?? process.cwd());
+  const harnessSource = await resolveConfigHarnessSource(
+    workspacePath,
+    options.agentsDir,
+  );
   const loaded: LoadedHarness = await loadHarness({
-    agentsDir: resolve(options.agentsDir ?? join(workspacePath, ".agents")),
-    harnessId: "code-review",
+    agentsDir: harnessSource.agentsDir,
+    harnessId: CONFIG_HARNESS_ID,
   });
   const runId = options.runId ?? createRunId("code-review");
   const scratchpadRoot = resolve(
@@ -152,6 +303,13 @@ export async function runCodeReviewFromConfig(
     triage,
     strict_mode: options.strict === true ? "true" : "false",
     vcs_mode: vcsMode,
+    config_harness_source: harnessSource.source,
+    config_harness_agents_dir: harnessSource.agentsDir,
+    config_harness_package_version: harnessSource.packageVersion,
+    config_harness_version_drift: harnessSource.versionDrift ? "true" : "false",
+    ...(harnessSource.installedVersion === undefined
+      ? {}
+      : { config_harness_installed_version: harnessSource.installedVersion }),
     context_source: options.contextBundlePath === undefined ? "live" : "replay",
     context_fingerprint: contextFingerprint,
     ...(reviewPrMetadata === undefined

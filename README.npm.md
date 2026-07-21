@@ -24,6 +24,15 @@ agents code-review --help
 agents code-review inbox --help
 ```
 
+The npm package includes the config-declared code-review harness, so
+`--impl config` works in repositories that do not commit their own `.agents/`
+tree:
+
+```bash
+agents code-review --impl config --workspace /path/to/repo
+agents harness install code-review   # optional: materialize a ~/.agents copy
+```
+
 Then follow the canonical docs in the upstream repository
 [`README.md`](https://github.com/aguil/agents/blob/main/README.md) for
 harness-specific workflows, adapters, models, and configuration (including

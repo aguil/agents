@@ -26,6 +26,8 @@
   "files": [
     "dist/agents",
     "dist/index.js",
+    ".agents",
+    "harnesses/code-review/prompts",
     "docs/skills",
     "README.md",
     "LICENSE"

@@ -195,6 +195,7 @@ Commands:
   code-review post [options]            Publish pending PR review from result.json
   code-review inbox <cmd> [options]     List/show/draft/submit human PR reviews (GitHub)
   triage [options]                       Build triage-queue files (--from producer; code-review today)
+  harness install code-review            Install packaged config harness into ~/.agents
   doctor                                 Verify agents --version vs docs/skills minAgentsVersion
   skills <command>                       List or install playbooks from docs/skills/`;
 }
@@ -224,6 +225,7 @@ Run and replay (shared):
   --context-bundle <path> Reuse captured context bundle JSON
   --consensus <n>        Run n passes and keep recurring findings (default 1 when --pending-review)
   --impl <name>          package (default) | config — opt-in config-declared harness (.agents/harnesses/code-review); config does not support --consensus > 1
+  --agents-dir <path>    Explicit .agents dir for --impl config (env AGENTS_CODE_REVIEW_AGENTS_DIR); bypasses layered lookup
 
 GitHub / posting (during a full run):
 

@@ -1,12 +1,15 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type CodeReviewRunResult,
   runCodeReview,
 } from "@aguil/agents-code-review";
-import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
+import {
+  resolveConfigHarnessSource,
+  runCodeReviewFromConfig,
+} from "@aguil/agents-code-review/config-runner";
 import type { ContextBundle } from "@aguil/agents-context";
 import type { Finding } from "@aguil/agents-core";
 import { createAgentEvent } from "@aguil/agents-core";
@@ -257,5 +260,91 @@ test("config-driven timeout and strict-mode statuses match imperative behavior",
     }
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("config-driven code review falls back to the packaged harness without workspace .agents", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-package-"));
+  const homePath = await mkdtemp(join(tmpdir(), "config-package-home-"));
+  const previousHome = process.env.HOME;
+  process.env.HOME = homePath;
+  try {
+    const contextBundlePath = await writeBundle(workspacePath, "trivial");
+    const result = await runCodeReviewFromConfig({
+      workspacePath,
+      scratchpadRoot: join(workspacePath, "configured"),
+      runId: "code-review-package-fallback",
+      contextBundlePath,
+      adapter: scriptedAdapter({}),
+    });
+
+    expect(result.metadata?.config_harness_source).toBe("package");
+    expect(result.metadata?.config_harness_agents_dir).toBe(AGENTS_DIR);
+    expect(result.status).toBe("passed");
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+    await rm(workspacePath, { recursive: true, force: true });
+    await rm(homePath, { recursive: true, force: true });
+  }
+});
+
+test("config harness resolver precedence is workspace over global over package", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-precedence-"));
+  const homePath = await mkdtemp(join(tmpdir(), "config-precedence-home-"));
+  const previousHome = process.env.HOME;
+  process.env.HOME = homePath;
+  try {
+    expect((await resolveConfigHarnessSource(workspacePath)).source).toBe(
+      "package",
+    );
+
+    await mkdir(join(homePath, ".agents", "harnesses", "code-review"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(homePath, ".agents", "harnesses", "code-review", "harness.yaml"),
+      "kind: harness\n",
+    );
+    expect((await resolveConfigHarnessSource(workspacePath)).source).toBe(
+      "user-global",
+    );
+
+    await mkdir(join(workspacePath, ".agents", "harnesses", "code-review"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(
+        workspacePath,
+        ".agents",
+        "harnesses",
+        "code-review",
+        "harness.yaml",
+      ),
+      "kind: harness\n",
+    );
+    expect((await resolveConfigHarnessSource(workspacePath)).source).toBe(
+      "workspace",
+    );
+
+    expect(
+      (
+        await resolveConfigHarnessSource(
+          workspacePath,
+          join(homePath, ".agents"),
+        )
+      ).source,
+    ).toBe("explicit");
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+    await rm(workspacePath, { recursive: true, force: true });
+    await rm(homePath, { recursive: true, force: true });
   }
 });
