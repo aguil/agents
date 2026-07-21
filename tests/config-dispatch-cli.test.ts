@@ -183,3 +183,29 @@ test("harness install prompts before overwriting an existing code-review harness
     await rm(dest, { recursive: true, force: true });
   }
 });
+
+test("harness install prompts before overwriting existing global manifest", async () => {
+  const dest = await mkdtemp(join(tmpdir(), "agents-harness-manifest-"));
+  const manifestPath = join(dest, "manifest.yaml");
+  try {
+    await writeFile(manifestPath, "custom manifest\n", "utf8");
+    const declined = await runAgentsCli(
+      ["harness", "install", "code-review", "--dest", dest],
+      {},
+      "n\n",
+    );
+    expect(declined.exitCode).toBe(1);
+    expect(declined.stderr).toContain("Overwrite?");
+    expect(await readFile(manifestPath, "utf8")).toBe("custom manifest\n");
+
+    const accepted = await runAgentsCli(
+      ["harness", "install", "code-review", "--dest", dest],
+      {},
+      "yes\n",
+    );
+    expect(accepted.exitCode).toBe(0);
+    expect(await readFile(manifestPath, "utf8")).toContain("code-review");
+  } finally {
+    await rm(dest, { recursive: true, force: true });
+  }
+});

@@ -44,8 +44,14 @@ function isYes(value: string | undefined): boolean {
   return normalized === "y" || normalized === "yes";
 }
 
-async function confirmOverwrite(harnessPath: string): Promise<boolean> {
-  const message = `${CODE_REVIEW_HARNESS_ID} harness already exists at ${harnessPath}. Overwrite? [y/N] `;
+async function confirmOverwrite(
+  existingPaths: readonly string[],
+): Promise<boolean> {
+  const rendered =
+    existingPaths.length === 1
+      ? existingPaths[0]
+      : `\n${existingPaths.map((path) => `  - ${path}`).join("\n")}`;
+  const message = `${CODE_REVIEW_HARNESS_ID} install would replace existing file${existingPaths.length === 1 ? "" : "s"} at ${rendered}. Overwrite? [y/N] `;
   if (process.stdin.isTTY) {
     const rl = createInterface({
       input: process.stdin,
@@ -62,6 +68,18 @@ async function confirmOverwrite(harnessPath: string): Promise<boolean> {
   const raw = await Bun.stdin.text();
   process.stderr.write("\n");
   return isYes(raw.split(/\r?\n/, 1)[0]);
+}
+
+async function existingPaths(
+  paths: readonly string[],
+): Promise<readonly string[]> {
+  const found: string[] = [];
+  for (const path of paths) {
+    if (await pathExists(path)) {
+      found.push(path);
+    }
+  }
+  return found;
 }
 
 function parseInstallArgs(argv: readonly string[]):
@@ -170,19 +188,39 @@ async function installCodeReviewHarness(
   const destPolicyDir = join(destAgentsDir, "policies");
   const version = readAgentsMonorepoVersion();
   const harnessDest = join(destHarnessDir, "harness.yaml");
+  const manifestDest = join(destAgentsDir, "manifest.yaml");
+  const policyDest = join(destPolicyDir, "code-review-readonly.yaml");
+  const promptDestDir = join(destHarnessDir, "prompts");
+  const promptEntries = (
+    await readdir(promptSourceDir, { withFileTypes: true })
+  )
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .map((entry) => entry.name);
+  const promptDests = promptEntries.map((entryName) =>
+    join(promptDestDir, basename(entryName)),
+  );
+  const versionDest = join(destHarnessDir, INSTALL_VERSION_FILE);
+  const pathsToWrite = [
+    join(destAgentsDir, "manifest.yaml"),
+    policyDest,
+    harnessDest,
+    ...promptDests,
+    versionDest,
+  ];
 
   console.log(
     `Installing ${CODE_REVIEW_HARNESS_ID} harness from ${AGENTS_PACK_ROOT} to ${destAgentsDir}`,
   );
 
-  if (await pathExists(harnessDest)) {
+  const pathsThatWouldBeReplaced = await existingPaths(pathsToWrite);
+  if (pathsThatWouldBeReplaced.length > 0) {
     if (dryRun) {
       console.log(
-        `Existing code-review harness detected at ${harnessDest}; install would prompt before overwriting.`,
+        `Existing code-review harness files detected; install would prompt before overwriting ${pathsThatWouldBeReplaced.length} file${pathsThatWouldBeReplaced.length === 1 ? "" : "s"}.`,
       );
-    } else if (!(await confirmOverwrite(harnessDest))) {
+    } else if (!(await confirmOverwrite(pathsThatWouldBeReplaced))) {
       console.error(
-        `Install aborted; existing code-review harness left unchanged at ${harnessDest}.`,
+        "Install aborted; existing code-review harness files left unchanged.",
       );
       return 1;
     }
@@ -194,16 +232,8 @@ async function installCodeReviewHarness(
     await mkdir(join(destHarnessDir, "prompts"), { recursive: true });
   }
 
-  await copyWithLog(
-    packagedManifestPath,
-    join(destAgentsDir, "manifest.yaml"),
-    dryRun,
-  );
-  await copyWithLog(
-    packagedPolicyPath,
-    join(destPolicyDir, "code-review-readonly.yaml"),
-    dryRun,
-  );
+  await copyWithLog(packagedManifestPath, manifestDest, dryRun);
+  await copyWithLog(packagedPolicyPath, policyDest, dryRun);
 
   const rawHarness = await readFile(
     join(packagedHarnessDir, "harness.yaml"),
@@ -218,18 +248,14 @@ async function installCodeReviewHarness(
     await writeFile(harnessDest, installedHarness, "utf8");
   }
 
-  for (const entry of await readdir(promptSourceDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".md")) {
-      continue;
-    }
+  for (const entryName of promptEntries) {
     await copyWithLog(
-      join(promptSourceDir, entry.name),
-      join(destHarnessDir, "prompts", basename(entry.name)),
+      join(promptSourceDir, entryName),
+      join(promptDestDir, basename(entryName)),
       dryRun,
     );
   }
 
-  const versionDest = join(destHarnessDir, INSTALL_VERSION_FILE);
   console.log(`${dryRun ? "Would write" : "Wrote"}: ${versionDest}`);
   if (!dryRun) {
     await writeFile(versionDest, `${version}\n`, "utf8");
