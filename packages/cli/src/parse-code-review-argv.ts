@@ -25,7 +25,6 @@ const STRING_OPTION_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   "post-pr": "postPr",
   "review-summary": "reviewSummary",
   "agents-dir": "agentsDir",
-  impl: "impl",
 };
 
 const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
@@ -75,6 +74,18 @@ export type PeeledCodeReviewArgv =
       readonly optionArgv: readonly string[];
     }
   | { readonly ok: false; readonly error: string };
+
+/** Reject removed CLI flags with a clear migration message (ADR 0013 stage 4). */
+export function findRemovedCodeReviewCliOption(
+  argv: readonly string[],
+): string | undefined {
+  for (const arg of argv) {
+    if (arg === "--impl" || arg.startsWith("--impl=")) {
+      return "--impl was removed; code-review always uses the config-declared harness.";
+    }
+  }
+  return undefined;
+}
 
 /**
  * `argvTail` is everything after `agents code-review`.
@@ -231,7 +242,6 @@ export function parseCodeReviewArgv(
     postPr: stringOptions["post-pr"],
     reviewSummary: stringOptions["review-summary"],
     agentsDir: stringOptions["agents-dir"],
-    impl: stringOptions.impl,
     postOnly: false,
     noConfirm: flags.has("no-confirm"),
     replacePendingReview: flags.has("replace-pending-review"),

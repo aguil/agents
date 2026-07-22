@@ -15,8 +15,8 @@ This playbook is for **review obligations** on GitHub: pull requests where
 
 - **`agents code-review inbox`** — discover and pick assignments (`list`,
   `show`). It does **not** run reviewers or publish to GitHub.
-- **`agents code-review --pr <n>`** — run the **harness**; writes
-  **`result.json`** (and related artifacts) under
+- **`agents code-review --pr <n>`** — run the **config-declared harness**
+  (`harness.yaml`); writes **`result.json`** (and related artifacts) under
   **`.agents-code-review/runs/`** on your artifact anchor workspace. Uses a
   detached worktree so your main checkout stays unchanged.
 - **Local human review** — you (or an agent assisting you) must review harness
@@ -37,7 +37,9 @@ settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever
 the merged CLI resolution already applies (harness defaults, user
 **`~/.config/agents/code-review/config.json`**, optional repo
 **`.agents-code-review/config.json`**, **`AGENTS_CODE_REVIEW_*`**, and flags the
-operator supplied). Do **not** add or drop **`--dry-run`** on your own.
+operator supplied). Do **not** add or drop **`--dry-run`** on your own. Do
+**not** pass **`--impl`** or set **`AGENTS_CODE_REVIEW_IMPL`** (removed; the
+harness is always config-declared).
 
 ## PR selection (required before harness)
 

@@ -25,11 +25,11 @@ agents code-review inbox --help
 ```
 
 The npm package includes the config-declared code-review harness, so
-`--impl config` works in repositories that do not commit their own `.agents/`
-tree:
+`agents code-review` works in repositories that do not commit their own
+`.agents/` tree:
 
 ```bash
-agents code-review --impl config --workspace /path/to/repo
+agents code-review --workspace /path/to/repo
 agents harness install code-review   # optional: materialize a ~/.agents copy
 ```
 

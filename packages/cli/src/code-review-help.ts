@@ -223,9 +223,8 @@ Run and replay (shared):
   --scratchpad <path>    Scratchpad root (default: <workspace>/.agents-code-review/runs)
   --dry-run              Write artifacts under <workspace>/.agents-code-review/dry-run
   --context-bundle <path> Reuse captured context bundle JSON
-  --consensus <n>        Run n passes and keep recurring findings (default 1 when --pending-review)
-  --impl <name>          package (default) | config — opt-in config-declared harness (.agents/harnesses/code-review); config does not support --consensus > 1
-  --agents-dir <path>    Explicit .agents dir for --impl config (env AGENTS_CODE_REVIEW_AGENTS_DIR); bypasses layered lookup
+  --consensus <n>        Run n passes and keep recurring findings (default 1 when --pending-review); values > 1 are not supported (ADR 0012)
+  --agents-dir <path>    Explicit .agents dir for harness resolution (env AGENTS_CODE_REVIEW_AGENTS_DIR); bypasses layered lookup
 
 GitHub / posting (during a full run):
 

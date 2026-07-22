@@ -1,9 +1,10 @@
 # ADR 0013: replace the code-review package path with the config-declared harness (flagged cutover)
 
-**Status:** Accepted (2026-07-18 — arc final gates passed: live real-adapter
-code-review through `--impl config` on PR #103 and the incident-triage
-regression both green; default flip remains a separate, later decision per the
-staged rollout below)
+**Status:** Accepted — stage 4 complete for the CLI and `agentsd` worker:
+`agents code-review` always uses the config-declared harness; `--impl` and
+`AGENTS_CODE_REVIEW_IMPL` are removed. The imperative `runCodeReview` package
+entry point remains for differential replay/referee tests until those suites are
+retargeted.
 
 **Context:** #73 tracks replacing the build-time `harnesses/code-review` package
 behind `agents code-review` with a `harness.yaml`-configured harness. The tier

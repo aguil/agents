@@ -65,7 +65,7 @@ in pending-review mode.
 
 ### Config harness
 
-Present when the run used the config-declared implementation (`--impl config`).
+Present on every config-declared code-review run.
 
 | Field                              | Description                                                                 |
 | ---------------------------------- | --------------------------------------------------------------------------- |

@@ -38,7 +38,6 @@ const STRING_FIELDS: readonly (keyof CliOptions & string)[] = [
   "pr",
   "postPr",
   "reviewSummary",
-  "impl",
 ];
 
 const BOOLEAN_FIELDS: readonly (keyof CliOptions & string)[] = [
@@ -141,7 +140,6 @@ const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
   POST_PR: "postPr",
   REVIEW_SUMMARY: "reviewSummary",
   AGENTS_DIR: "agentsDir",
-  IMPL: "impl",
   DRY_RUN: "dryRun",
   POST_ONLY: "postOnly",
   NO_CONFIRM: "noConfirm",
@@ -179,9 +177,6 @@ const REPO_BLOCKED_REVIEW_STEERING_KEYS = [
   "scratchpad",
   "workspace",
   "reposRoot",
-  // Switching the review execution path (package vs config harness) is
-  // steering of the same class as adapter selection.
-  "impl",
 ] as const satisfies readonly (keyof CliOptions)[];
 
 /** Strip repo-managed steering from workspace `.agents-code-review` partials before merge (including preset bodies). */
@@ -236,7 +231,7 @@ function sanitizeRepoConfigDocument(
         .sort()
         .join(
           ", ",
-        )}). Repo JSON cannot steer \`workspace\`, \`reposRoot\`, \`scratchpad\`, \`adapter\`, \`impl\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
+        )}). Repo JSON cannot steer \`workspace\`, \`reposRoot\`, \`scratchpad\`, \`adapter\`, adapter host-binary paths (\`cursor\`, \`claude\`, \`opencode\`), or argv templates (\`cursorArgs\`, \`claudeArgs\`). Set those via user ~/.config/agents/code-review/config.json, AGENTS_CODE_REVIEW_*, or CLI flags.`,
     );
   }
 
@@ -581,7 +576,6 @@ function applyExplicitCliOptions(
     postPr: stringOr("postPr"),
     reviewSummary: stringOr("reviewSummary"),
     agentsDir: stringOr("agentsDir"),
-    impl: stringOr("impl"),
     postOnly: boolOr("postOnly", false),
     noConfirm: boolOr("noConfirm", false),
     replacePendingReview: boolOr("replacePendingReview", false),
