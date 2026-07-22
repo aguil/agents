@@ -1,15 +1,8 @@
-import { createHash } from "node:crypto";
 import { access, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  AgentsInstructionsProvider,
   type ContextBundle,
-  collectContextBundle,
-  PullRequestMetadataProvider,
-  PullRequestReferencedDocsProvider,
-  RepositoryDiffProvider,
-  writeContextBundle,
 } from "@aguil/agents-context";
 import type {
   Finding,
@@ -17,13 +10,8 @@ import type {
   ReviewTriageTier,
 } from "@aguil/agents-core";
 import {
-  type AgentEvent,
   agentsCodeReviewDryRunRoot,
   agentsCodeReviewRunsRoot,
-  createRunId,
-  ensureDirectory,
-  writeJsonFile,
-  writeTextFile,
 } from "@aguil/agents-core";
 import type {
   AgentAdapter,
@@ -38,20 +26,9 @@ import {
   OpenCodeAdapter,
 } from "@aguil/agents-execution";
 import type { HarnessDefinition } from "@aguil/agents-orchestration";
-import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
-import {
-  actionableFindings,
-  dedupeFindings,
-  findingFingerprint,
-  renderMarkdownReport,
-  statusForFindings,
-} from "@aguil/agents-reporting";
-import { JsonlFileEventSink } from "@aguil/agents-telemetry";
-import { EMBEDDED_PROMPTS } from "./embedded-prompts";
 import {
   type CodeReviewRoleId,
   expectedRolesForTriageTier,
-  parseMetadataRolesList,
 } from "./review-contract";
 
 const sourceDir = dirname(fileURLToPath(import.meta.url));
@@ -67,10 +44,11 @@ export interface CodeReviewRunOptions {
   readonly strict?: boolean;
   readonly contextBundlePath?: string;
   readonly reviewPrNumber?: number;
-  readonly consensusRuns?: number;
   readonly adapter?: AgentAdapter;
   readonly metadata?: Readonly<Record<string, string>>;
-  readonly onEvent?: (event: AgentEvent) => void | Promise<void>;
+  readonly onEvent?: (
+    event: import("@aguil/agents-core").AgentEvent,
+  ) => void | Promise<void>;
 }
 
 export type CodeReviewAdapterName = "fake" | "opencode" | "claude" | "cursor";
@@ -159,278 +137,6 @@ export async function writeLatestCodeReviewDiscoveryPointer(options: {
   // ADR 0002: temp write + rename by pathname; openat deferred (accepted risk).
   await writeFile(tmp, line, "utf8");
   await rename(tmp, pointerPath);
-}
-
-export async function runCodeReview(
-  options: CodeReviewRunOptions = {},
-): Promise<CodeReviewRunResult> {
-  const workspacePath = resolve(options.workspacePath ?? process.cwd());
-  const runId = options.runId ?? createRunId("code-review");
-  const scratchpadRoot = resolve(
-    options.scratchpadRoot ?? agentsCodeReviewRunsRoot(workspacePath),
-  );
-  const scratchpadPath = join(scratchpadRoot, runId);
-  await ensureDirectory(scratchpadPath);
-  const consensusRuns = normalizeConsensusRuns(options.consensusRuns);
-
-  const context =
-    options.contextBundlePath === undefined
-      ? await collectContextBundle(
-          `${runId}-context`,
-          {
-            workspacePath,
-            scratchpadPath,
-            pullRequestNumber: options.reviewPrNumber,
-          },
-          [
-            new PullRequestMetadataProvider(),
-            new PullRequestReferencedDocsProvider(),
-            new RepositoryDiffProvider(),
-            new AgentsInstructionsProvider(),
-          ],
-        )
-      : await loadContextBundleFromPath(options.contextBundlePath);
-  const writtenContext = await writeContextBundle(context, scratchpadPath);
-  const triage = parseTriageTier(
-    context.artifacts.find((artifact) => artifact.id === "triage")?.content,
-  );
-  const reviewPrMetadata = parseReviewPrMetadataFromContext(
-    context.artifacts.find((artifact) => artifact.id === "diff-strategy")
-      ?.content,
-  );
-  const vcsMode = await detectWorkspaceVcsMode(workspacePath);
-  const defaultAllowedCommands = defaultCommandsForVcsMode(vcsMode);
-  const contextFingerprint = createHash("sha256")
-    .update(JSON.stringify(context))
-    .digest("hex")
-    .slice(0, 12);
-  await writeJsonFile(join(scratchpadPath, "triage.json"), { tier: triage });
-
-  const adapter = options.adapter ?? new FakeAgentAdapter();
-  const perPassResults: HarnessRunResult[] = [];
-  const passFindingSets: Array<readonly Finding[]> = [];
-  const baseMetadata = {
-    run_id: runId,
-    adapter: adapter.name,
-    triage,
-    strict_mode: options.strict === true ? "true" : "false",
-    vcs_mode: vcsMode,
-    context_source: options.contextBundlePath === undefined ? "live" : "replay",
-    context_fingerprint: contextFingerprint,
-    ...(reviewPrMetadata === undefined
-      ? {}
-      : {
-          pr_number: String(reviewPrMetadata.number),
-          pr_reviewed_head_sha: reviewPrMetadata.headSha ?? "",
-          pr_reviewed_at: reviewPrMetadata.reviewedAt,
-        }),
-    ...options.metadata,
-  };
-
-  for (let index = 0; index < consensusRuns; index += 1) {
-    const passNumber = index + 1;
-    const passScratchpadPath =
-      consensusRuns === 1
-        ? scratchpadPath
-        : join(scratchpadPath, "passes", `pass-${passNumber}`);
-    await ensureDirectory(passScratchpadPath);
-    const passRunId =
-      consensusRuns === 1 ? runId : `${runId}-pass${passNumber}`;
-
-    const fileEventSink = new JsonlFileEventSink(
-      join(passScratchpadPath, "events.jsonl"),
-    );
-    const orchestrator = new NativeBunOrchestrator({
-      definition: definitionForTriageWithCommands(
-        triage,
-        defaultAllowedCommands,
-      ),
-      adapter,
-      eventSink:
-        options.onEvent === undefined
-          ? fileEventSink
-          : {
-              async write(event) {
-                await fileEventSink.write(event);
-                await options.onEvent?.(event);
-              },
-            },
-      contextBundlePath: writtenContext.jsonPath,
-      embeddedPrompts: EMBEDDED_PROMPTS,
-    });
-
-    const rawResult = await orchestrator.run({
-      runId: passRunId,
-      harnessId: codeReviewHarnessDefinition.id,
-      workspacePath,
-      scratchpadPath: passScratchpadPath,
-      contextBundlePath: writtenContext.jsonPath,
-      strictMode: options.strict === true,
-      metadata: {
-        ...baseMetadata,
-        consensus_runs: String(consensusRuns),
-        consensus_pass: String(passNumber),
-      },
-    });
-    perPassResults.push(rawResult);
-    passFindingSets.push(
-      dedupeFindings(actionableFindings(rawResult.findings)),
-    );
-  }
-
-  const rawResult = combinePassResults(runId, perPassResults, baseMetadata);
-  const findings =
-    consensusRuns > 1
-      ? intersectFindingsByFingerprint(passFindingSets)
-      : (passFindingSets[0] ?? []);
-  const consensusDropped = countConsensusDroppedFindings(
-    passFindingSets,
-    findings,
-  );
-
-  const rawMetadata = {
-    ...(rawResult.metadata ?? {}),
-    consensus_runs: String(consensusRuns),
-    consensus_mode: consensusRuns > 1 ? "intersection" : "off",
-    consensus_dropped_findings: String(consensusDropped),
-  };
-
-  const findingStatus = statusForFindings(findings);
-  const result: HarnessRunResult = {
-    ...rawResult,
-    status: combineStatuses(rawResult.status, findingStatus),
-    findings,
-    metadata: rawMetadata,
-    artifacts: [
-      ...rawResult.artifacts,
-      writtenContext.jsonPath,
-      writtenContext.markdownPath,
-    ],
-  };
-
-  const reportPath = await writeTextFile(
-    join(scratchpadPath, "report.md"),
-    renderMarkdownReport(result),
-  );
-  const resultPath = await writeJsonFile(join(scratchpadPath, "result.json"), {
-    ...result,
-    reportPath,
-    contextBundlePath: writtenContext.jsonPath,
-  });
-  await writeLatestCodeReviewDiscoveryPointer({
-    workspacePath,
-    scratchpadRoot,
-    resultPath,
-  });
-
-  return {
-    ...result,
-    reportPath,
-    contextBundlePath: writtenContext.jsonPath,
-    artifacts: [...result.artifacts, reportPath, resultPath],
-  };
-}
-
-function combinePassResults(
-  runId: string,
-  passResults: readonly HarnessRunResult[],
-  metadata: Readonly<Record<string, string>>,
-): HarnessRunResult {
-  const findings = passResults.flatMap((result) => result.findings);
-  const artifacts = passResults.flatMap((result) => result.artifacts);
-  const hasError = passResults.some((result) => result.status === "error");
-  const hasFailed = passResults.some((result) => result.status === "failed");
-  const timedOutRoles = joinUniqueMetadataRoleList(
-    passResults,
-    "timed_out_roles",
-  );
-  const failedRoles = joinUniqueMetadataRoleList(passResults, "failed_roles");
-  const completedRoles = joinUniqueMetadataRoleList(
-    passResults,
-    "completed_roles",
-  );
-  const hasTimedOut = timedOutRoles.length > 0;
-
-  return {
-    runId,
-    status: hasError
-      ? "error"
-      : hasFailed
-        ? "failed"
-        : hasTimedOut
-          ? "warnings"
-          : "passed",
-    findings,
-    artifacts,
-    metadata: {
-      ...metadata,
-      timed_out_roles: timedOutRoles,
-      failed_roles: failedRoles,
-      completed_roles: completedRoles,
-    },
-  };
-}
-
-function joinUniqueMetadataRoleList(
-  passResults: readonly HarnessRunResult[],
-  key: "timed_out_roles" | "failed_roles" | "completed_roles",
-): string {
-  const values = new Set<string>();
-  for (const result of passResults) {
-    const raw = result.metadata?.[key] ?? "";
-    for (const role of parseMetadataRolesList(raw)) {
-      values.add(role);
-    }
-  }
-  return [...values].join(",");
-}
-
-function intersectFindingsByFingerprint(
-  perPassFindings: readonly (readonly Finding[])[],
-): readonly Finding[] {
-  if (perPassFindings.length === 0) {
-    return [];
-  }
-  const requiredCount = perPassFindings.length;
-  const counts = new Map<string, { count: number; finding: Finding }>();
-
-  for (const set of perPassFindings) {
-    const seenInPass = new Set<string>();
-    for (const finding of set) {
-      const key = findingFingerprint(finding);
-      if (seenInPass.has(key)) {
-        continue;
-      }
-      seenInPass.add(key);
-      const entry = counts.get(key);
-      if (entry === undefined) {
-        counts.set(key, { count: 1, finding });
-      } else {
-        entry.count += 1;
-      }
-    }
-  }
-
-  return [...counts.values()]
-    .filter((entry) => entry.count === requiredCount)
-    .map((entry) => entry.finding);
-}
-
-function countConsensusDroppedFindings(
-  perPassFindings: readonly (readonly Finding[])[],
-  keptFindings: readonly Finding[],
-): number {
-  const observed = new Set<string>();
-  for (const passFindings of perPassFindings) {
-    for (const finding of passFindings) {
-      observed.add(findingFingerprint(finding));
-    }
-  }
-
-  const kept = new Set(
-    keptFindings.map((finding) => findingFingerprint(finding)),
-  );
-  return [...observed].filter((fingerprint) => !kept.has(fingerprint)).length;
 }
 
 export function createFakeCodeReviewAdapter(
@@ -597,18 +303,6 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function normalizeConsensusRuns(value: number | undefined): number {
-  if (value === undefined) {
-    return 1;
-  }
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(
-      `Invalid consensusRuns value: ${value}. Expected a positive integer.`,
-    );
-  }
-  return value;
 }
 
 export {

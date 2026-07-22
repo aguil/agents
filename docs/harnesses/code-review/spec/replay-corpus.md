@@ -11,8 +11,8 @@ Tracking issue: #73 Tier 2.
 - `manifest.json` — index. The referee reads `entries[]`, using `source` and
   `id` per entry; the entry directory name is `<source>--<id>`.
 - `runs/<source>--<id>/` — one recorded run:
-  - `context/bundle.json` — frozen input context (fed to `runCodeReview` as
-    `contextBundlePath`)
+  - `context/bundle.json` — frozen input context (fed to
+    `runCodeReviewFromConfig` as `contextBundlePath`)
   - `roles/<roleId>/stdout.log` — raw per-role agent output (replayed by
     `ReplayAgentAdapter` through live line normalization)
   - `result.json` — recorded pipeline output; the parity baseline
@@ -25,7 +25,9 @@ arbitrary host paths.
 
 ## Compared fields
 
-Per entry, the referee replays through `runCodeReview` and compares:
+Per entry, the referee replays through the config-declared harness
+(`runCodeReviewFromConfig`, `--agents-dir` / packaged `.agents` default) and
+compares:
 
 - **Findings** as identity keys: `id`, `severity`, `file` (nullable), and the
   canonical fingerprint (`findingFingerprint` from `@aguil/agents-reporting`).

@@ -207,7 +207,8 @@ export interface ConfigCodeReviewRunOptions {
  * behavioral decision — providers, role gating, output schemas, finding
  * pipelines, report template — comes from the loaded harness.yaml and its
  * registered builtins. This driver only composes loaded config with the
- * same shared machinery `runCodeReview` uses; any code-review-specific
+ * Config-declared code-review runner. Shared helpers (status composition, VCS
+ * defaults, discovery pointer) live in `./index.ts`.
  * branching here (beyond runtime inputs like vcs commands) is a parity
  * bug by definition.
  */

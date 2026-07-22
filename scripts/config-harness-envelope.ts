@@ -2,7 +2,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, release, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { runCodeReview } from "@aguil/agents-code-review";
 import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
 import { resolveEntryDir } from "@aguil/agents-code-review/replay-parity";
 import { ReplayAgentAdapter } from "@aguil/agents-execution";
@@ -14,26 +13,22 @@ interface Manifest {
   }>;
 }
 
-interface Measurements {
-  readonly package: number[];
-  readonly config: number[];
-}
-
 const root = resolve(import.meta.dir, "..");
 const agentsDir = join(root, ".agents");
 const reportPath = join(root, "docs", "perf", "config-harness-envelope.md");
 
-function parseArgs(): { corpusDir: string; bound: number } {
+function parseArgs(): { corpusDir: string } {
   const argv = Bun.argv.slice(2);
   let corpusDir: string | undefined;
-  let bound = 10;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--corpus") {
       corpusDir = argv[++index];
     } else if (arg === "--bound") {
-      const rawBound = argv[++index];
-      bound = Number(rawBound);
+      console.warn(
+        "config-harness-envelope: --bound is ignored (package baseline removed with imperative orchestration).",
+      );
+      argv[++index];
     } else {
       throw new Error(`config-harness-envelope: unknown argument "${arg}"`);
     }
@@ -44,12 +39,7 @@ function parseArgs(): { corpusDir: string; bound: number } {
       "config-harness-envelope: --corpus <dir> or AGENTS_REPLAY_CORPUS_DIR is required",
     );
   }
-  if (!Number.isFinite(bound) || bound < 0) {
-    throw new Error(
-      "config-harness-envelope: --bound must be a non-negative number",
-    );
-  }
-  return { corpusDir: resolve(corpusDir), bound };
+  return { corpusDir: resolve(corpusDir) };
 }
 
 function percentile(values: readonly number[], fraction: number): number {
@@ -80,49 +70,31 @@ function machineNote(): string {
 async function measureEntry(
   corpusDir: string,
   entryName: string,
-): Promise<{ packageMs: number; configMs: number }> {
+): Promise<number> {
   const entryDir = resolveEntryDir(corpusDir, entryName);
   const contextBundlePath = join(entryDir, "context", "bundle.json");
-  const packageWorkspace = await mkdtemp(join(tmpdir(), "envelope-package-"));
-  const configWorkspace = await mkdtemp(join(tmpdir(), "envelope-config-"));
+  const workspace = await mkdtemp(join(tmpdir(), "envelope-config-"));
   try {
-    const packageStart = performance.now();
-    await runCodeReview({
-      workspacePath: packageWorkspace,
-      scratchpadRoot: join(packageWorkspace, "runs"),
-      contextBundlePath,
-      adapter: new ReplayAgentAdapter({ runDir: entryDir }),
-    });
-    const packageMs = performance.now() - packageStart;
-
-    const configStart = performance.now();
+    const start = performance.now();
     await runCodeReviewFromConfig({
       agentsDir,
-      workspacePath: configWorkspace,
-      scratchpadRoot: join(configWorkspace, "runs"),
+      workspacePath: workspace,
+      scratchpadRoot: join(workspace, "runs"),
       contextBundlePath,
       adapter: new ReplayAgentAdapter({ runDir: entryDir }),
     });
-    const configMs = performance.now() - configStart;
-    return { packageMs, configMs };
+    return performance.now() - start;
   } finally {
-    await rm(packageWorkspace, { recursive: true, force: true });
-    await rm(configWorkspace, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
   }
 }
 
 function makeReport(input: {
   readonly corpusDir: string;
   readonly entryCount: number;
-  readonly bound: number;
-  readonly packageTotal: number;
   readonly configTotal: number;
-  readonly packageMedian: number;
   readonly configMedian: number;
-  readonly packageP90: number;
   readonly configP90: number;
-  readonly ratio: number;
-  readonly passed: boolean;
 }): string {
   return `# Config harness performance envelope
 
@@ -132,18 +104,14 @@ function makeReport(input: {
 - Corpus: agents-replay-corpus checkout (located via --corpus /
   AGENTS_REPLAY_CORPUS_DIR; see docs/harnesses/code-review/spec/replay-corpus.md)
 - Entries: ${input.entryCount}
-- Warmup: first corpus entry replayed once through both pipelines
-- Bound: config total must not exceed package total by more than ${input.bound.toFixed(2)}%
+- Warmup: first corpus entry replayed once
+- Pipeline: config-declared harness only (imperative package path removed)
 
 ## Summary
 
 | Pipeline | Total | Per-entry median | Per-entry p90 |
 | --- | ---: | ---: | ---: |
-| Package | ${milliseconds(input.packageTotal)} | ${milliseconds(input.packageMedian)} | ${milliseconds(input.packageP90)} |
 | Config | ${milliseconds(input.configTotal)} | ${milliseconds(input.configMedian)} | ${milliseconds(input.configP90)} |
-
-- Config/package total ratio: ${input.ratio.toFixed(4)}x
-- Verdict: **${input.passed ? "PASS" : "FAIL"}**
 `;
 }
 
@@ -169,7 +137,7 @@ async function formatReport(): Promise<void> {
 }
 
 async function main(): Promise<number> {
-  const { corpusDir, bound } = parseArgs();
+  const { corpusDir } = parseArgs();
   const manifest = (await Bun.file(join(corpusDir, "manifest.json")).json()) as
     | Manifest
     | undefined;
@@ -180,34 +148,20 @@ async function main(): Promise<number> {
   }
 
   await measureEntry(corpusDir, entryNames[0] ?? "");
-  const measurements: Measurements = { package: [], config: [] };
+  const configMs: number[] = [];
   for (const entryName of entryNames) {
-    const measured = await measureEntry(corpusDir, entryName);
-    measurements.package.push(measured.packageMs);
-    measurements.config.push(measured.configMs);
+    configMs.push(await measureEntry(corpusDir, entryName));
   }
 
-  const packageTotal = total(measurements.package);
-  const configTotal = total(measurements.config);
-  const ratio = configTotal / packageTotal;
-  const passed = ratio <= 1 + bound / 100;
-  const packageMedian = median(measurements.package);
-  const configMedian = median(measurements.config);
-  const packageP90 = percentile(measurements.package, 0.9);
-  const configP90 = percentile(measurements.config, 0.9);
+  const configTotal = total(configMs);
+  const configMedian = median(configMs);
+  const configP90 = percentile(configMs, 0.9);
 
   console.log(
     "| Pipeline | Total | Per-entry median | Per-entry p90 |\n| --- | ---: | ---: | ---: |",
   );
   console.log(
-    `| Package | ${milliseconds(packageTotal)} | ${milliseconds(packageMedian)} | ${milliseconds(packageP90)} |`,
-  );
-  console.log(
     `| Config | ${milliseconds(configTotal)} | ${milliseconds(configMedian)} | ${milliseconds(configP90)} |`,
-  );
-  console.log(`Config/package total ratio: ${ratio.toFixed(4)}x`);
-  console.log(
-    `Bound: +${bound.toFixed(2)}%; verdict: ${passed ? "PASS" : "FAIL"}`,
   );
 
   await mkdir(join(root, "docs", "perf"), { recursive: true });
@@ -216,20 +170,14 @@ async function main(): Promise<number> {
     makeReport({
       corpusDir,
       entryCount: entryNames.length,
-      bound,
-      packageTotal,
       configTotal,
-      packageMedian,
       configMedian,
-      packageP90,
       configP90,
-      ratio,
-      passed,
     }),
     "utf8",
   );
   await formatReport();
-  return passed ? 0 : 1;
+  return 0;
 }
 
 try {

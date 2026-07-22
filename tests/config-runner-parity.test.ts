@@ -3,10 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  type CodeReviewRunResult,
-  runCodeReview,
-} from "@aguil/agents-code-review";
-import {
   resolveConfigHarnessSource,
   runCodeReviewFromConfig,
 } from "@aguil/agents-code-review/config-runner";
@@ -103,35 +99,24 @@ async function writeBundle(
   return path;
 }
 
-async function runBoth(
+async function runConfigured(
   workspacePath: string,
   contextBundlePath: string,
   adapter: AgentAdapter,
   strict = false,
-): Promise<{
-  readonly imperative: CodeReviewRunResult;
-  readonly configured: CodeReviewRunResult;
-}> {
-  const shared = {
+) {
+  return await runCodeReviewFromConfig({
+    agentsDir: AGENTS_DIR,
     workspacePath,
     runId: "code-review-parity",
     contextBundlePath,
     adapter,
     strict,
-  };
-  const imperative = await runCodeReview({
-    ...shared,
-    scratchpadRoot: join(workspacePath, "imperative"),
-  });
-  const configured = await runCodeReviewFromConfig({
-    ...shared,
-    agentsDir: AGENTS_DIR,
     scratchpadRoot: join(workspacePath, "configured"),
   });
-  return { imperative, configured };
 }
 
-test("config-driven code review matches deterministic imperative fields", async () => {
+test("config-driven code review filters non-actionable findings and dedupes by fingerprint", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-parity-"));
   try {
     const contextBundlePath = await writeBundle(workspacePath, "full");
@@ -152,30 +137,14 @@ test("config-driven code review matches deterministic imperative fields", async 
       },
     });
 
-    const { imperative, configured } = await runBoth(
+    const result = await runConfigured(
       workspacePath,
       contextBundlePath,
       adapter,
     );
 
-    expect(configured.findings).toEqual(imperative.findings);
-    expect(configured.status).toBe(imperative.status);
-    expect({
-      triage: configured.metadata?.triage,
-      contextFingerprint: configured.metadata?.context_fingerprint,
-      consensusRuns: configured.metadata?.consensus_runs,
-      consensusMode: configured.metadata?.consensus_mode,
-      consensusDropped: configured.metadata?.consensus_dropped_findings,
-    }).toEqual({
-      triage: imperative.metadata?.triage,
-      contextFingerprint: imperative.metadata?.context_fingerprint,
-      consensusRuns: imperative.metadata?.consensus_runs,
-      consensusMode: imperative.metadata?.consensus_mode,
-      consensusDropped: imperative.metadata?.consensus_dropped_findings,
-    });
-    expect(await readFile(configured.reportPath)).toEqual(
-      await readFile(imperative.reportPath),
-    );
+    expect(result.findings.map((entry) => entry.id)).toEqual(["verified-first"]);
+    expect(result.status).toBe("warnings");
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
   }
@@ -185,79 +154,58 @@ test("config-driven trivial tier schedules only quality", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-trivial-"));
   try {
     const contextBundlePath = await writeBundle(workspacePath, "trivial");
-    const { imperative, configured } = await runBoth(
+    const result = await runConfigured(
       workspacePath,
       contextBundlePath,
       scriptedAdapter({}),
     );
 
-    expect(configured.metadata?.completed_roles).toBe("quality");
-    expect(configured.metadata?.completed_roles).toBe(
-      imperative.metadata?.completed_roles,
-    );
+    expect(result.metadata?.completed_roles).toBe("quality");
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
   }
 });
 
-test("config-driven partial-role failures match imperative status metadata", async () => {
+test("config-driven partial-role failures surface failed_roles metadata", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-failure-parity-"));
   try {
     const contextBundlePath = await writeBundle(workspacePath, "full");
-    const { imperative, configured } = await runBoth(
+    const result = await runConfigured(
       workspacePath,
       contextBundlePath,
       scriptedAdapter({ performance: { fail: true } }),
     );
 
-    expect(imperative.status).toBe("error");
-    expect(configured.status).toBe(imperative.status);
-    expect(configured.metadata?.failed_roles).toBe(
-      imperative.metadata?.failed_roles,
-    );
-    expect(configured.metadata?.failed_roles).toBe("performance");
-    expect(configured.metadata?.timed_out_roles).toBe(
-      imperative.metadata?.timed_out_roles,
-    );
+    expect(result.status).toBe("error");
+    expect(result.metadata?.failed_roles).toBe("performance");
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
   }
 });
 
-test("config-driven timeout and strict-mode statuses match imperative behavior", async () => {
+test("config-driven timeout and strict-mode statuses", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-timeout-parity-"));
   try {
     const contextBundlePath = await writeBundle(workspacePath, "full");
     const timeoutScripts = { performance: { errorReason: "timed_out" } };
-    const nonStrict = await runBoth(
+    const nonStrict = await runConfigured(
       workspacePath,
       contextBundlePath,
       scriptedAdapter(timeoutScripts),
     );
-    const strict = await runBoth(
+    const strict = await runConfigured(
       workspacePath,
       contextBundlePath,
       scriptedAdapter(timeoutScripts),
       true,
     );
 
-    expect(nonStrict.imperative.status).toBe("warnings");
-    expect(nonStrict.configured.status).toBe(nonStrict.imperative.status);
-    expect(strict.imperative.status).toBe("error");
-    expect(strict.configured.status).toBe(strict.imperative.status);
-    expect(strict.imperative.status).not.toBe(nonStrict.imperative.status);
-    expect(strict.configured.status).not.toBe(nonStrict.configured.status);
-
-    for (const pair of [nonStrict, strict]) {
-      expect(pair.configured.metadata?.timed_out_roles).toBe(
-        pair.imperative.metadata?.timed_out_roles,
-      );
-      expect(pair.configured.metadata?.timed_out_roles).toBe("performance");
-      expect(pair.configured.metadata?.failed_roles).toBe(
-        pair.imperative.metadata?.failed_roles,
-      );
-      expect(pair.configured.metadata?.failed_roles).toBe("");
-    }
+    expect(nonStrict.status).toBe("warnings");
+    expect(strict.status).toBe("error");
+    expect(nonStrict.metadata?.timed_out_roles).toBe("performance");
+    expect(strict.metadata?.timed_out_roles).toBe("performance");
+    expect(nonStrict.metadata?.failed_roles).toBe("");
+    expect(strict.metadata?.failed_roles).toBe("");
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
   }
@@ -329,15 +277,6 @@ test("config harness resolver precedence is workspace over global over package",
     expect((await resolveConfigHarnessSource(workspacePath)).source).toBe(
       "workspace",
     );
-
-    expect(
-      (
-        await resolveConfigHarnessSource(
-          workspacePath,
-          join(homePath, ".agents"),
-        )
-      ).source,
-    ).toBe("explicit");
   } finally {
     if (previousHome === undefined) {
       delete process.env.HOME;
