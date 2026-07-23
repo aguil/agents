@@ -10,6 +10,15 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.4.12](https://github.com/aguil/agents/compare/v0.4.11...v0.4.12) (2026-07-23)
+
+
+### Fixed
+
+* **code-review:** repair runCodeReviewFromConfig module JSDoc ([9536948](https://github.com/aguil/agents/commit/9536948cd020d0c3a2fd8a17f3ed21434cd57168))
+* satisfy biome after config-only cutover ([986c90c](https://github.com/aguil/agents/commit/986c90ccc580dad1b65ad9fdf15458f0a0c73d0a))
+* **test:** remove unused readFile import in config-runner-parity ([2bb654a](https://github.com/aguil/agents/commit/2bb654a07bdeb6b61cb6aa1ed23561c2294ddf4b))
+
 ## [0.4.11](https://github.com/aguil/agents/compare/v0.4.10...v0.4.11) (2026-07-21)
 
 
