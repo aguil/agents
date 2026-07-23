@@ -10,6 +10,14 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.5.1](https://github.com/aguil/agents/compare/v0.5.0...v0.5.1) (2026-07-23)
+
+
+### Fixed
+
+* **context:** spawn gh once for PR API diff fetches ([f2400f9](https://github.com/aguil/agents/commit/f2400f9a3014240b1199aaaccc8c691a7e9a3581))
+* **context:** spawn gh once for PR API diff fetches ([8aff1a4](https://github.com/aguil/agents/commit/8aff1a41a392351a5da6769fe6cab5914dc0368b))
+
 ## [0.5.0](https://github.com/aguil/agents/compare/v0.4.11...v0.5.0) (2026-07-23)
 
 
