@@ -57,10 +57,9 @@ test("--impl is rejected (removed)", async () => {
 });
 
 test("AGENTS_CODE_REVIEW_IMPL is rejected (removed)", async () => {
-  const result = await runCodeReviewCli(
-    ["--adapter", "fake", "--dry-run"],
-    { AGENTS_CODE_REVIEW_IMPL: "config" },
-  );
+  const result = await runCodeReviewCli(["--adapter", "fake", "--dry-run"], {
+    AGENTS_CODE_REVIEW_IMPL: "config",
+  });
   expect(result.exitCode).toBe(1);
   expect(result.stderr).toContain("AGENTS_CODE_REVIEW_IMPL was removed");
 });

@@ -143,7 +143,9 @@ test("config-driven code review filters non-actionable findings and dedupes by f
       adapter,
     );
 
-    expect(result.findings.map((entry) => entry.id)).toEqual(["verified-first"]);
+    expect(result.findings.map((entry) => entry.id)).toEqual([
+      "verified-first",
+    ]);
     expect(result.status).toBe("warnings");
   } finally {
     await rm(workspacePath, { recursive: true, force: true });

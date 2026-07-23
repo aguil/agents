@@ -1,9 +1,7 @@
 import { access, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  type ContextBundle,
-} from "@aguil/agents-context";
+import type { ContextBundle } from "@aguil/agents-context";
 import type {
   Finding,
   HarnessRunResult,
