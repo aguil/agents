@@ -18,4 +18,5 @@
 | Config   | 21989.62 ms |        273.92 ms |     436.73 ms |
 
 Regenerate this file with `bun run scripts/config-harness-envelope.ts --corpus
+
 <dir>` when refreshing timings after harness or runtime changes.

@@ -26,7 +26,7 @@ Boolean variables accept `true` / `false` / `1` / `0` / `yes` / `no`.
 | `AGENTS_CODE_REVIEW_PR`                     | `--pr`                                                                                           |
 | `AGENTS_CODE_REVIEW_POST_PR`                | `--post-pr`                                                                                      |
 | `AGENTS_CODE_REVIEW_REVIEW_SUMMARY`         | `--review-summary`                                                                               |
-| `AGENTS_CODE_REVIEW_AGENTS_DIR`             | `--agents-dir` (explicit `.agents` for harness resolution)                                         |
+| `AGENTS_CODE_REVIEW_AGENTS_DIR`             | `--agents-dir` (explicit `.agents` for harness resolution)                                       |
 | `AGENTS_CODE_REVIEW_DRY_RUN`                | `--dry-run`                                                                                      |
 | `AGENTS_CODE_REVIEW_POST_ONLY`              | Enables post-only mode on the default `code-review` command (omit when using `code-review post`) |
 | `AGENTS_CODE_REVIEW_NO_CONFIRM`             | `--no-confirm`                                                                                   |

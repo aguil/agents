@@ -1,7 +1,8 @@
 # ADR 0013: replace the code-review package path with the config-declared harness (flagged cutover)
 
-**Status:** Accepted — stage 4 complete: `runCodeReview` imperative orchestration
-removed; CLI, workers, and replay referee use the config-declared harness only.
+**Status:** Accepted — stage 4 complete: `runCodeReview` imperative
+orchestration removed; CLI, workers, and replay referee use the config-declared
+harness only.
 
 **Context:** #73 tracks replacing the build-time `harnesses/code-review` package
 behind `agents code-review` with a `harness.yaml`-configured harness. The tier
@@ -45,17 +46,17 @@ gates defined there are now evidenced:
      the corpus referee (baseline + differential) was the regression gate for
      changes touching either pipeline.
    - **Stage 3 — default flip:** `impl` defaulted to `config`; `--impl package`
-     remained rollback for one release; docs/skills migration (#92) landed in the
-     same window.
-   - **Stage 4 — package-path removal (complete):** `runCodeReview` orchestration
-     deleted; `--impl` and `AGENTS_CODE_REVIEW_IMPL` removed; shared helpers
-     (status composition, tier parsing, discovery pointer, vcs defaults) remain
-     on consumers; replay parity and perf envelope target the config pipeline
-     only.
+     remained rollback for one release; docs/skills migration (#92) landed in
+     the same window.
+   - **Stage 4 — package-path removal (complete):** `runCodeReview`
+     orchestration deleted; `--impl` and `AGENTS_CODE_REVIEW_IMPL` removed;
+     shared helpers (status composition, tier parsing, discovery pointer, vcs
+     defaults) remain on consumers; replay parity and perf envelope target the
+     config pipeline only.
 2. **Consensus stays descoped** (ADR 0012). `--consensus > 1` is rejected on the
    config path; consensus left with the removed package path.
-3. **Prompt files** remain under `harnesses/code-review/prompts/` referenced from
-   the harness directory — single source, no drift window.
+3. **Prompt files** remain under `harnesses/code-review/prompts/` referenced
+   from the harness directory — single source, no drift window.
 
 **Consequences:**
 
@@ -64,8 +65,8 @@ gates defined there are now evidenced:
 - Harness resolution prefers `workspace/.agents` when present; PR reviews
   therefore execute the harness material from the checkout under review unless
   the operator pins a trust anchor with `--agents-dir` /
-  `AGENTS_CODE_REVIEW_AGENTS_DIR` (see code-review configuration guide). This
-  is intentional for dogfooding and repo-local harness iteration; untrusted PR
+  `AGENTS_CODE_REVIEW_AGENTS_DIR` (see code-review configuration guide). This is
+  intentional for dogfooding and repo-local harness iteration; untrusted PR
   review flows should pin agents dir explicitly.
 - The `code-review-readonly` policy is expressible but not yet enforced in the
   code-review dispatch (hook enforcement is `agents harness run` machinery);

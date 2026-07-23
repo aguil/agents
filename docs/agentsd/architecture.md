@@ -25,8 +25,8 @@ provider-agnostic `implementation` runtime.
    dispatches the matching worker type.
 3. **Implementation worker:** runs the configured agent runtime (`subprocess` or
    `app_server`) and emits JSONL to stdout.
-4. **Code-review worker:** `runCodeReviewFromConfig` via `AgentAdapter`
-   (same code path as `agents code-review`).
+4. **Code-review worker:** `runCodeReviewFromConfig` via `AgentAdapter` (same
+   code path as `agents code-review`).
 5. **PR-feedback worker:** collect → triage → fix pipeline; multi-round drain
    while triage items or unresolved threads remain.
 6. **Stall detection:** when `agent.stall_timeout_ms` fires, the orchestrator
