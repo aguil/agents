@@ -206,11 +206,10 @@ export interface ConfigCodeReviewRunOptions {
  * Config-driven code-review run (#73 Tier 1 pass condition): every
  * behavioral decision — providers, role gating, output schemas, finding
  * pipelines, report template — comes from the loaded harness.yaml and its
- * registered builtins. This driver only composes loaded config with the
- * Config-declared code-review runner. Shared helpers (status composition, VCS
- * defaults, discovery pointer) live in `./index.ts`.
- * branching here (beyond runtime inputs like vcs commands) is a parity
- * bug by definition.
+ * registered builtins. This driver only composes loaded config with runtime
+ * inputs (workspace, adapter, context bundle). Shared helpers (status
+ * composition, VCS defaults, discovery pointer) live in `./index.ts`.
+ * Branching here (beyond those runtime inputs) is a harness-contract bug.
  */
 export async function runCodeReviewFromConfig(
   options: ConfigCodeReviewRunOptions = {},
