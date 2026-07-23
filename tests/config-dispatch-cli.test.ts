@@ -45,21 +45,27 @@ const bundleFixture = join(
   "config-dispatch-bundle.json",
 );
 
-test("unknown --impl values are rejected", async () => {
+test("--impl is rejected (removed)", async () => {
   const result = await runCodeReviewCli([
     "--impl",
-    "bogus",
+    "config",
     "--adapter",
     "fake",
   ]);
   expect(result.exitCode).toBe(1);
-  expect(result.stderr).toContain("Invalid --impl value: bogus");
+  expect(result.stderr).toContain("--impl was removed");
 });
 
-test("--impl config refuses consensus runs (ADR 0012)", async () => {
+test("AGENTS_CODE_REVIEW_IMPL is rejected (removed)", async () => {
+  const result = await runCodeReviewCli(["--adapter", "fake", "--dry-run"], {
+    AGENTS_CODE_REVIEW_IMPL: "config",
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("AGENTS_CODE_REVIEW_IMPL was removed");
+});
+
+test("--consensus > 1 is rejected (ADR 0012)", async () => {
   const result = await runCodeReviewCli([
-    "--impl",
-    "config",
     "--consensus",
     "2",
     "--adapter",
@@ -69,10 +75,8 @@ test("--impl config refuses consensus runs (ADR 0012)", async () => {
   expect(result.stderr).toContain("ADR 0012");
 });
 
-test("--impl config dispatches to the config-declared harness", async () => {
+test("code-review dispatches to the config-declared harness", async () => {
   const result = await runCodeReviewCli([
-    "--impl",
-    "config",
     "--adapter",
     "fake",
     "--dry-run",
@@ -86,25 +90,6 @@ test("--impl config dispatches to the config-declared harness", async () => {
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain("(config-declared harness)");
   expect(result.stdout).toContain("Code review passed.");
-});
-
-test("AGENTS_CODE_REVIEW_IMPL=config selects the config path without flags", async () => {
-  const result = await runCodeReviewCli(
-    [
-      "--adapter",
-      "fake",
-      "--dry-run",
-      "--log",
-      "summary",
-      "--workspace",
-      repoRoot,
-      "--context-bundle",
-      bundleFixture,
-    ],
-    { AGENTS_CODE_REVIEW_IMPL: "config" },
-  );
-  expect(result.exitCode).toBe(0);
-  expect(result.stdout).toContain("(config-declared harness)");
 });
 
 test("harness install materializes code-review for explicit --agents-dir runs", async () => {
@@ -123,8 +108,6 @@ test("harness install materializes code-review for explicit --agents-dir runs", 
     expect(install.stdout).toContain(".agents-package-version");
 
     const result = await runCodeReviewCli([
-      "--impl",
-      "config",
       "--agents-dir",
       dest,
       "--adapter",

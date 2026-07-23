@@ -45,7 +45,7 @@ them into one orchestrator type.
 6. **Workers**
    - `implementation` — configurable agent runtime (`subprocess` or
      `app_server`); not tied to a single vendor (see ADR 0004).
-   - `code_review` — library call to `runCodeReview` via `AgentAdapter`.
+   - `code_review` — `runCodeReviewFromConfig` via `AgentAdapter`.
    - `pr_feedback` — collect → triage → fix pipeline; submit only when
      `publish.pr_feedback: submit`.
 

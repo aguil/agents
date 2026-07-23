@@ -12,17 +12,17 @@ agents code-review --help
 ```
 
 Published packages also ship the config-declared code-review harness. A bare
-workspace with no `.agents/` tree can run it directly:
+workspace with no `.agents/` tree can run reviews directly:
 
 ```bash
-agents code-review --impl config --workspace /path/to/repo
+agents code-review --workspace /path/to/repo
 ```
 
 To install a user-global copy for customization or audit across repositories:
 
 ```bash
 agents harness install code-review
-agents code-review --impl config --workspace /path/to/repo
+agents code-review --workspace /path/to/repo
 ```
 
 Config harness resolution is workspace `.agents` first, then `~/.agents`, then

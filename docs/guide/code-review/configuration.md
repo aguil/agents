@@ -35,10 +35,10 @@ $XDG_CONFIG_HOME/agents/code-review/config.json
 
 Repo-managed JSON **cannot steer where or how reviewers run**. The following
 keys are stripped with a `console.warn` when present in the repo file:
-`workspace`, `reposRoot`, `scratchpad`, `adapter`, `impl` (execution-path
-selection), adapter host-binary paths (`cursor`, `claude`, `opencode`), and argv
-templates (`cursorArgs`, `claudeArgs`) — including inside `presets`. Set these
-only via the user config file, `AGENTS_CODE_REVIEW_*` env vars, or CLI flags.
+`workspace`, `reposRoot`, `scratchpad`, `adapter`, adapter host-binary paths
+(`cursor`, `claude`, `opencode`), and argv templates (`cursorArgs`,
+`claudeArgs`) — including inside `presets`. Set these only via the user config
+file, `AGENTS_CODE_REVIEW_*` env vars, or CLI flags.
 
 Set `AGENTS_CODE_REVIEW_CONFIG_STRICT=true` to make unknown keys a fatal error
 instead of a warning.
@@ -71,8 +71,7 @@ All keys use **camelCase**. Omit any key you don't need.
 | `pr`            | `--pr`             |                                          |
 | `postPr`        | `--post-pr`        |                                          |
 | `reviewSummary` | `--review-summary` | `triage` / `impact` / `evidence`         |
-| `agentsDir`     | `--agents-dir`     | `--impl config` override; env/CLI only   |
-| `impl`          | `--impl`           | `package` / `config`; user/CLI only      |
+| `agentsDir`     | `--agents-dir`     | Harness `.agents` override; env/CLI only |
 
 **Booleans:**
 
@@ -137,11 +136,11 @@ bun run agents code-review --preset ci
 bun run agents code-review --adapter fake --dry-run --log summary
 ```
 
-## Config-declared harness (`--impl config`)
+## Config-declared harness
 
-`agents code-review --impl config` runs the declarative `harness.yaml`-backed
-implementation instead of the packaged TypeScript implementation. The config
-runner resolves the code-review harness definition in this order:
+`agents code-review` always runs the declarative `harness.yaml`-backed
+implementation. The runner resolves the code-review harness definition in this
+order:
 
 1. `<workspace>/.agents/harnesses/code-review/`
 2. `~/.agents/harnesses/code-review/`
@@ -151,7 +150,7 @@ The selected layer is recorded in `result.json` metadata as
 `config_harness_source` and printed in summary logs:
 
 ```bash
-agents code-review --impl config --adapter fake --dry-run --log summary
+agents code-review --adapter fake --dry-run --log summary
 # Config harness source: package (.../.agents)
 ```
 
@@ -160,7 +159,7 @@ one copy to customize or audit across repositories:
 
 ```bash
 agents harness install code-review
-agents code-review --impl config --workspace /path/to/repo
+agents code-review --workspace /path/to/repo
 ```
 
 The install command writes `~/.agents/harnesses/code-review/`, the
@@ -172,11 +171,11 @@ install and the running CLI package.
 For a one-off run, bypass layered lookup with an explicit `.agents` directory:
 
 ```bash
-agents code-review --impl config \
+agents code-review \
   --agents-dir /path/to/.agents \
   --workspace /path/to/repo
 ```
 
-The matching environment variable is `AGENTS_CODE_REVIEW_AGENTS_DIR`. Like
-`impl`, `agentsDir` is intentionally ignored from repo JSON so a checkout cannot
+The matching environment variable is `AGENTS_CODE_REVIEW_AGENTS_DIR`.
+`agentsDir` is intentionally ignored from repo JSON so a checkout cannot
 redirect the harness definition used to review itself.

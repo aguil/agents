@@ -191,7 +191,7 @@ async function main(): Promise<void> {
     });
   } else {
     console.error(
-      `Missing .agents at ${agentsConfigSource}; --impl config requires the packaged code-review harness.`,
+      `Missing .agents at ${agentsConfigSource}; the packaged code-review harness is required for agents code-review.`,
     );
     process.exitCode = 2;
     return;

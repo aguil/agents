@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { runCodeReview } from "@aguil/agents-code-review";
 import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
 import { agentsCodeReviewRunsRoot } from "@aguil/agents-core";
 import type { AgentAdapter } from "@aguil/agents-execution";
@@ -38,6 +37,15 @@ export async function runCodeReviewWorker(input: {
     return { status: "failed", error: "aborted" };
   }
 
+  const implEnv = process.env.AGENTS_CODE_REVIEW_IMPL?.trim();
+  if (implEnv !== undefined && implEnv.length > 0) {
+    return {
+      status: "failed",
+      error:
+        "AGENTS_CODE_REVIEW_IMPL was removed; code-review always uses the config-declared harness.",
+    };
+  }
+
   const scratchpadRoot = agentsCodeReviewRunsRoot(input.workspacePath);
   let reviewWorkspace = input.hostWorkspacePath;
   let cleanupWorktree: (() => Promise<void>) | undefined;
@@ -65,23 +73,6 @@ export async function runCodeReviewWorker(input: {
     }
   }
 
-  // Same opt-in as the CLI (#73 Tier 5 stage 1): the worker has no argv,
-  // so the environment carries the implementation selection. An invalid
-  // value fails the item rather than silently running the default path —
-  // the operator asked for a specific implementation and did not get it.
-  const implEnv = process.env.AGENTS_CODE_REVIEW_IMPL?.trim();
-  if (
-    implEnv !== undefined &&
-    implEnv !== "" &&
-    implEnv !== "package" &&
-    implEnv !== "config"
-  ) {
-    return {
-      status: "failed",
-      error: `invalid AGENTS_CODE_REVIEW_IMPL value "${implEnv}" (expected package or config)`,
-    };
-  }
-
   try {
     const runInputs = {
       workspacePath: reviewWorkspace,
@@ -95,10 +86,7 @@ export async function runCodeReviewWorker(input: {
         work_item_id: input.item.id,
       },
     };
-    const result =
-      implEnv === "config"
-        ? await runCodeReviewFromConfig(runInputs)
-        : await runCodeReview(runInputs);
+    const result = await runCodeReviewFromConfig(runInputs);
 
     const resultPath = join(scratchpadRoot, result.runId, "result.json");
     const reportPath = join(scratchpadRoot, result.runId, "report.md");

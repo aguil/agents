@@ -3,7 +3,6 @@ import {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   type CodeReviewAdapterName,
   createCodeReviewAdapter,
-  runCodeReview,
 } from "@aguil/agents-code-review";
 import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
 import {
@@ -41,6 +40,7 @@ import {
 } from "./code-review-help";
 import { createDetachedPullRequestWorktree } from "./isolate-git-review-worktree";
 import {
+  findRemovedCodeReviewCliOption,
   parseCodeReviewArgv,
   peelCodeReviewSubcommand,
   resolveEffectivePostOnly,
@@ -195,6 +195,18 @@ export async function main(
       );
       return runCodeReviewInboxCli(peeled.optionArgv);
     }
+    const removedOption = findRemovedCodeReviewCliOption(peeled.optionArgv);
+    if (removedOption !== undefined) {
+      console.error(removedOption);
+      return 1;
+    }
+    const implEnv = process.env.AGENTS_CODE_REVIEW_IMPL?.trim();
+    if (implEnv !== undefined && implEnv.length > 0) {
+      console.error(
+        "AGENTS_CODE_REVIEW_IMPL was removed; code-review always uses the config-declared harness.",
+      );
+      return 1;
+    }
     const parsed = parseCodeReviewArgv(peeled.optionArgv);
     const stabilized = await stabilizeMergedWorkspace(parsed);
     if (!stabilized.ok) {
@@ -269,13 +281,6 @@ export async function main(
       },
     });
 
-    const impl = options.impl ?? "package";
-    if (impl !== "package" && impl !== "config") {
-      console.error(`Invalid --impl value: ${options.impl}`);
-      console.error("Expected one of: package, config.");
-      return 1;
-    }
-
     const requestedConsensusRuns = parseConsensusRuns(options.consensus);
     if (
       options.consensus !== undefined &&
@@ -285,16 +290,13 @@ export async function main(
       console.error("Expected a positive integer greater than 0.");
       return 1;
     }
-    if (impl === "config" && (requestedConsensusRuns ?? 1) > 1) {
-      // ADR 0012: consensus is descoped from the config-declared harness.
+    if ((requestedConsensusRuns ?? 1) > 1) {
       console.error(
-        "--impl config does not support --consensus > 1 (consensus is descoped from the config harness; see ADR 0012). Use the package implementation for consensus runs.",
+        "--consensus > 1 is not supported (consensus is descoped from the config-declared harness; see ADR 0012).",
       );
       return 1;
     }
     const pendingReviewEnabled = options.pendingReview && !options.dryRun;
-    const consensusRuns =
-      requestedConsensusRuns ?? (pendingReviewEnabled ? 1 : undefined);
     const reviewPrNumber = parsePrNumber(options.pr);
     if (options.pr !== undefined && reviewPrNumber === undefined) {
       console.error(`Invalid --pr value: ${options.pr}`);
@@ -324,9 +326,7 @@ export async function main(
     try {
       if (logShowsSummary(logLevel)) {
         console.log(
-          impl === "config"
-            ? `Starting code review with adapter '${adapterName}' (config-declared harness).`
-            : `Starting code review with adapter '${adapterName}'.`,
+          `Starting code review with adapter '${adapterName}' (config-declared harness).`,
         );
         if (requestedConsensusRuns === undefined && pendingReviewEnabled) {
           console.log(
@@ -340,9 +340,6 @@ export async function main(
         }
       }
 
-      // Shared inputs for both implementations; the config path takes the
-      // declarative harness from the review workspace's .agents tree and
-      // structurally has no consensus option (ADR 0012, guarded above).
       const sharedRunInputs = {
         workspacePath: reviewWorkspacePath,
         scratchpadRoot: resolveScratchpadRootForRun(
@@ -363,23 +360,18 @@ export async function main(
         adapter,
         onEvent: createRunEventLogger(logLevel),
       };
-      const result =
-        impl === "config"
-          ? await runCodeReviewFromConfig(sharedRunInputs)
-          : await runCodeReview({ ...sharedRunInputs, consensusRuns });
+      const result = await runCodeReviewFromConfig(sharedRunInputs);
       let verbosePrDiffContext: PullRequestDiffContext | undefined;
       if (logShowsSummary(logLevel)) {
-        if (impl === "config") {
-          const source = result.metadata?.config_harness_source;
-          const dir = result.metadata?.config_harness_agents_dir;
-          if (source !== undefined && dir !== undefined) {
-            console.log(`Config harness source: ${source} (${dir})`);
-          }
-          if (result.metadata?.config_harness_version_drift === "true") {
-            console.warn(
-              `Config harness install version ${result.metadata.config_harness_installed_version ?? "unknown"} differs from package version ${result.metadata.config_harness_package_version ?? "unknown"}. Run agents harness install code-review to refresh it.`,
-            );
-          }
+        const source = result.metadata?.config_harness_source;
+        const dir = result.metadata?.config_harness_agents_dir;
+        if (source !== undefined && dir !== undefined) {
+          console.log(`Config harness source: ${source} (${dir})`);
+        }
+        if (result.metadata?.config_harness_version_drift === "true") {
+          console.warn(
+            `Config harness install version ${result.metadata.config_harness_installed_version ?? "unknown"} differs from package version ${result.metadata.config_harness_package_version ?? "unknown"}. Run agents harness install code-review to refresh it.`,
+          );
         }
         printVerboseFindingSummary(result.findings);
         const summaryStyle =

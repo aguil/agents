@@ -1,7 +1,7 @@
 /**
  * Replay-parity referee (#73 Tier 2).
  *
- * Replays corpus entries through the code-review pipeline via
+ * Replays corpus entries through the config-declared code-review harness via
  * ReplayAgentAdapter and compares deterministic fields against the entry's
  * recorded result.json. Every delta must either match an adjudication in
  * the corpus ledger (adjudications.json, matched by entry name AND exact
@@ -15,7 +15,6 @@ import type { Finding, HarnessRunResult } from "@aguil/agents-core";
 import { ReplayAgentAdapter } from "@aguil/agents-execution";
 import { findingFingerprint } from "@aguil/agents-reporting";
 import { runCodeReviewFromConfig } from "./config-runner";
-import { runCodeReview } from "./index";
 
 export interface FindingKey {
   readonly id: string;
@@ -196,6 +195,7 @@ export function resolveEntryDir(corpusDir: string, entryName: string): string {
 export async function replayEntry(
   corpusDir: string,
   entryName: string,
+  agentsDir: string,
 ): Promise<{ recorded: RecordedResult; replayed: HarnessRunResult }> {
   const entryDir = resolveEntryDir(corpusDir, entryName);
   const recorded = (await Bun.file(
@@ -203,7 +203,8 @@ export async function replayEntry(
   ).json()) as RecordedResult;
   const scratch = await mkdtemp(join(tmpdir(), "replay-parity-"));
   try {
-    const replayed = await runCodeReview({
+    const replayed = await runCodeReviewFromConfig({
+      agentsDir: resolve(agentsDir),
       workspacePath: scratch,
       scratchpadRoot: join(scratch, "runs"),
       contextBundlePath: join(entryDir, "context", "bundle.json"),
@@ -219,8 +220,13 @@ export async function judgeEntry(
   corpusDir: string,
   entryName: string,
   adjudications: readonly Adjudication[],
+  agentsDir: string,
 ): Promise<EntryVerdict> {
-  const { recorded, replayed } = await replayEntry(corpusDir, entryName);
+  const { recorded, replayed } = await replayEntry(
+    corpusDir,
+    entryName,
+    agentsDir,
+  );
   const delta = computeDelta(recorded, replayed);
   if (delta === undefined) {
     return { kind: "match" };
@@ -241,56 +247,6 @@ export async function judgeEntry(
     };
   }
   return { kind: "delta", delta, deltaHash: hash };
-}
-
-/**
- * Tier 2 differential: replay the same corpus entry through the imperative
- * package pipeline AND the config-declared pipeline
- * (runCodeReviewFromConfig against agentsDir), then diff the two replays'
- * deterministic fields directly. Both replays run under current code on
- * identical inputs, so — unlike the recorded-baseline comparison — the
- * expectation is exact match with no adjudications: any delta is a real
- * behavioral divergence between the pipelines.
- */
-export async function judgeEntryDifferential(
-  corpusDir: string,
-  entryName: string,
-  agentsDir: string,
-): Promise<EntryVerdict> {
-  const entryDir = resolveEntryDir(corpusDir, entryName);
-  const bundlePath = join(entryDir, "context", "bundle.json");
-  const packageScratch = await mkdtemp(join(tmpdir(), "diff-package-"));
-  const configScratch = await mkdtemp(join(tmpdir(), "diff-config-"));
-  try {
-    const packageResult = await runCodeReview({
-      workspacePath: packageScratch,
-      scratchpadRoot: join(packageScratch, "runs"),
-      contextBundlePath: bundlePath,
-      adapter: new ReplayAgentAdapter({ runDir: entryDir }),
-    });
-    const configResult = await runCodeReviewFromConfig({
-      agentsDir,
-      workspacePath: configScratch,
-      scratchpadRoot: join(configScratch, "runs"),
-      contextBundlePath: bundlePath,
-      adapter: new ReplayAgentAdapter({ runDir: entryDir }),
-    });
-    const delta = computeDelta(
-      {
-        status: packageResult.status,
-        findings: packageResult.findings,
-        metadata: packageResult.metadata,
-      },
-      configResult,
-    );
-    if (delta === undefined) {
-      return { kind: "match" };
-    }
-    return { kind: "delta", delta, deltaHash: deltaHash(delta) };
-  } finally {
-    await rm(packageScratch, { recursive: true, force: true });
-    await rm(configScratch, { recursive: true, force: true });
-  }
 }
 
 export async function loadAdjudications(

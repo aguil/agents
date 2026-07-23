@@ -24,18 +24,10 @@ export interface CliOptions {
   readonly postPr?: string;
   readonly reviewSummary?: string;
   /**
-   * Explicit `.agents/` directory for `--impl config`; flag/env only.
+   * Explicit `.agents/` directory for harness resolution; flag/env only.
    * Repo JSON must not choose harness definitions for another checkout.
    */
   readonly agentsDir?: string;
-  /**
-   * Review implementation: "package" (default) or "config" (opt-in
-   * config-declared harness, #73 Tier 5 stage 1). Flag/env only —
-   * deliberately NOT steerable from repo JSON config, which must not be
-   * able to switch the execution path (same supply-chain posture as
-   * adapter/binary steering).
-   */
-  readonly impl?: string;
   readonly postOnly: boolean;
   readonly noConfirm: boolean;
   readonly replacePendingReview: boolean;

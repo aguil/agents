@@ -18,8 +18,8 @@ import {
   definitionForTriage,
   expectedRolesForTriageTier,
   roleReviewSectionLabel,
-  runCodeReview,
 } from "@aguil/agents-code-review";
+import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
 import {
   changedFilesFromDiff,
   classifyDiff,
@@ -99,6 +99,16 @@ import { parseTriageArgv } from "../packages/cli/src/parse-triage-argv";
 import { runTriageCli } from "../packages/cli/src/triage-main";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const CODE_REVIEW_AGENTS_DIR = join(REPO_ROOT, ".agents");
+
+function runConfiguredCodeReview(
+  options: Parameters<typeof runCodeReviewFromConfig>[0],
+) {
+  return runCodeReviewFromConfig({
+    agentsDir: CODE_REVIEW_AGENTS_DIR,
+    ...options,
+  });
+}
 
 test("peelCodeReviewSubcommand leaves argv when absent or starts with -", () => {
   expect(peelCodeReviewSubcommand([])).toEqual({
@@ -2301,7 +2311,7 @@ test("runs the code-review harness with a fake adapter", async () => {
   };
   const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-"));
   try {
-    const result = await runCodeReview({
+    const result = await runConfiguredCodeReview({
       workspacePath: tempDir,
       scratchpadRoot: join(tempDir, "scratchpad"),
       runId: "test-run",
@@ -2318,11 +2328,11 @@ test("runs the code-review harness with a fake adapter", async () => {
   }
 });
 
-test("forwards adapter events through runCodeReview onEvent callback", async () => {
+test("forwards adapter events through runCodeReviewFromConfig onEvent callback", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-on-event-"));
   try {
     const eventTypes: string[] = [];
-    const result = await runCodeReview({
+    const result = await runConfiguredCodeReview({
       workspacePath: tempDir,
       scratchpadRoot: join(tempDir, "scratchpad"),
       runId: "test-on-event-run",
@@ -2343,7 +2353,7 @@ test("forwards adapter events through runCodeReview onEvent callback", async () 
 test("preserves adapter errors in final harness status", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-error-"));
   try {
-    const result = await runCodeReview({
+    const result = await runConfiguredCodeReview({
       workspacePath: tempDir,
       scratchpadRoot: join(tempDir, "scratchpad"),
       runId: "test-error-run",
@@ -2378,7 +2388,7 @@ test("preserves adapter errors in final harness status", async () => {
 test("treats timed out roles as warnings with partial coverage metadata", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-timeout-"));
   try {
-    const result = await runCodeReview({
+    const result = await runConfiguredCodeReview({
       workspacePath: tempDir,
       scratchpadRoot: join(tempDir, "scratchpad"),
       runId: "test-timeout-run",
@@ -2435,7 +2445,7 @@ test("replays a run from a provided context bundle", async () => {
       }),
     );
 
-    const result = await runCodeReview({
+    const result = await runConfiguredCodeReview({
       workspacePath: tempDir,
       scratchpadRoot: join(tempDir, "scratchpad"),
       runId: "test-replay-run",
@@ -2451,157 +2461,12 @@ test("replays a run from a provided context bundle", async () => {
   }
 });
 
-test("keeps only recurring findings when consensus mode is enabled", async () => {
-  const tempDir = await mkdtemp(
-    join(tmpdir(), "agents-code-review-consensus-"),
-  );
-  try {
-    const shared: Finding = {
-      id: "shared-finding",
-      severity: "warning",
-      title: "Shared issue",
-      description: "Present in all passes.",
-      evidence: "Detected consistently.",
-      sourceRole: "quality",
-      file: "src/app.ts",
-      line: 42,
-      validation: {
-        status: "verified",
-        details: "Verified by code-path inspection.",
-      },
-    };
-
-    const result = await runCodeReview({
-      workspacePath: tempDir,
-      scratchpadRoot: join(tempDir, "scratchpad"),
-      runId: "test-consensus-run",
-      consensusRuns: 2,
-      adapter: {
-        name: "consensus-test-agent",
-        capabilities: () => ({
-          streaming: true,
-          structuredOutput: true,
-          readOnlyMode: true,
-          mcp: false,
-          cancellation: true,
-        }),
-        async *run(request) {
-          if (request.roleId !== "quality") {
-            return;
-          }
-          const passSpecific: Finding = {
-            ...shared,
-            id: request.runId.endsWith("pass1") ? "pass1-only" : "pass2-only",
-            title: request.runId.endsWith("pass1")
-              ? "Only pass 1"
-              : "Only pass 2",
-            line: request.runId.endsWith("pass1") ? 100 : 101,
-          };
-          yield {
-            timestamp: "2026-05-02T00:00:00.000Z",
-            runId: request.runId,
-            roleId: request.roleId,
-            type: "finding" as const,
-            message: shared.title,
-            data: shared,
-          };
-          yield {
-            timestamp: "2026-05-02T00:00:00.000Z",
-            runId: request.runId,
-            roleId: request.roleId,
-            type: "finding" as const,
-            message: passSpecific.title,
-            data: passSpecific,
-          };
-        },
-      },
-    });
-
-    expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]?.id).toBe("shared-finding");
-    expect(result.metadata?.consensus_mode).toBe("intersection");
-    expect(result.metadata?.consensus_runs).toBe("2");
-    expect(result.metadata?.consensus_dropped_findings).toBe("2");
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
-});
-
-test("consensus run with no recurring findings reports passed and drops findings", async () => {
-  const tempDir = await mkdtemp(
-    join(tmpdir(), "agents-code-review-consensus-none-"),
-  );
-  try {
-    const result = await runCodeReview({
-      workspacePath: tempDir,
-      scratchpadRoot: join(tempDir, "scratchpad"),
-      runId: "test-consensus-none",
-      consensusRuns: 2,
-      adapter: {
-        name: "consensus-none-agent",
-        capabilities: () => ({
-          streaming: true,
-          structuredOutput: true,
-          readOnlyMode: true,
-          mcp: false,
-          cancellation: true,
-        }),
-        async *run(request) {
-          if (request.roleId !== "quality") {
-            return;
-          }
-          const finding: Finding = {
-            id: request.runId.endsWith("pass1") ? "p1" : "p2",
-            severity: "warning",
-            title: request.runId.endsWith("pass1")
-              ? "Only pass 1"
-              : "Only pass 2",
-            description: "Pass-specific finding",
-            evidence: "Only appears in one pass",
-            sourceRole: "quality",
-            file: "src/app.ts",
-            line: request.runId.endsWith("pass1") ? 10 : 11,
-            validation: {
-              status: "verified",
-              details: "Verified by code inspection path trace.",
-            },
-          };
-          yield {
-            timestamp: "2026-05-02T00:00:00.000Z",
-            runId: request.runId,
-            roleId: request.roleId,
-            type: "finding" as const,
-            message: finding.title,
-            data: finding,
-          };
-        },
-      },
-    });
-
-    expect(result.status).toBe("passed");
-    expect(result.findings).toHaveLength(0);
-    expect(result.metadata?.consensus_dropped_findings).toBe("2");
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
-});
-
-test("rejects non-positive consensusRuns from API options", async () => {
-  await expect(async () => {
-    await runCodeReview({
-      workspacePath: "/tmp",
-      consensusRuns: 0,
-      adapter: createFakeCodeReviewAdapter(),
-    });
-  }).toThrow("Invalid consensusRuns value");
-});
-
 test("strict mode fails run on timed out roles", async () => {
   const tempDir = await mkdtemp(
     join(tmpdir(), "agents-code-review-timeout-strict-"),
   );
   try {
-    const result = await runCodeReview({
+    const result = await runConfiguredCodeReview({
       workspacePath: tempDir,
       scratchpadRoot: join(tempDir, "scratchpad"),
       runId: "test-timeout-run-strict",

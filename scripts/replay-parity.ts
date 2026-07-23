@@ -4,17 +4,14 @@
 //
 // Usage:
 //   bun run scripts/replay-parity.ts --corpus <dir> [--entry <name>] [--json]
-//     Recorded-baseline mode: replayed package pipeline vs recorded
-//     result.json; deltas require corpus-ledger adjudication.
-//   bun run scripts/replay-parity.ts --corpus <dir> --differential [--agents-dir <dir>]
-//     Differential mode (#73 Tier 2): package pipeline vs config-declared
-//     pipeline on identical replayed inputs; exact match required, no
-//     adjudications apply.
+//     [--agents-dir <path>]
+// Replays each entry through the config-declared harness (ReplayAgentAdapter)
+// and compares deterministic fields to the recorded result.json; deltas require
+// corpus-ledger adjudication unless they match exactly.
 import { join, resolve } from "node:path";
 import {
   type EntryVerdict,
   judgeEntry,
-  judgeEntryDifferential,
   loadAdjudications,
 } from "@aguil/agents-code-review/replay-parity";
 
@@ -23,7 +20,6 @@ async function main(): Promise<number> {
   let corpusDir: string | undefined;
   let entryFilter: string | undefined;
   let jsonOutput = false;
-  let differential = false;
   let agentsDir = ".agents";
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -33,10 +29,13 @@ async function main(): Promise<number> {
       entryFilter = argv[++index];
     } else if (arg === "--json") {
       jsonOutput = true;
-    } else if (arg === "--differential") {
-      differential = true;
     } else if (arg === "--agents-dir") {
       agentsDir = argv[++index] ?? agentsDir;
+    } else if (arg === "--differential") {
+      console.error(
+        "replay-parity: --differential was removed (package pipeline retired); use recorded-baseline mode only.",
+      );
+      return 1;
     } else {
       console.error(`replay-parity: unknown argument "${arg}"`);
       return 1;
@@ -50,6 +49,7 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  const resolvedAgentsDir = resolve(agentsDir);
   const manifest = (await Bun.file(
     join(corpusDir, "manifest.json"),
   ).json()) as {
@@ -69,9 +69,12 @@ async function main(): Promise<number> {
   let adjudicated = 0;
   let failures = 0;
   for (const entryName of entryNames) {
-    const verdict = differential
-      ? await judgeEntryDifferential(corpusDir, entryName, resolve(agentsDir))
-      : await judgeEntry(corpusDir, entryName, adjudications);
+    const verdict = await judgeEntry(
+      corpusDir,
+      entryName,
+      adjudications,
+      resolvedAgentsDir,
+    );
     rows.push({ entry: entryName, verdict });
     if (verdict.kind === "match") {
       matches += 1;
@@ -88,11 +91,8 @@ async function main(): Promise<number> {
   if (jsonOutput) {
     console.log(JSON.stringify({ matches, adjudicated, failures, rows }));
   } else {
-    const mode = differential
-      ? "differential (package vs config)"
-      : "recorded-baseline";
     console.log(
-      `replay-parity[${mode}]: ${entryNames.length} entries — ${matches} match, ${adjudicated} adjudicated, ${failures} ${differential ? "deltas" : "unadjudicated deltas"}`,
+      `replay-parity[config replay]: ${entryNames.length} entries — ${matches} match, ${adjudicated} adjudicated, ${failures} unadjudicated deltas`,
     );
   }
   return failures === 0 ? 0 : 1;

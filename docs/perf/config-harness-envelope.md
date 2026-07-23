@@ -8,15 +8,15 @@
   AGENTS_REPLAY_CORPUS_DIR; see
   docs/harnesses/code-review/spec/replay-corpus.md)
 - Entries: 74
-- Warmup: first corpus entry replayed once through both pipelines
-- Bound: config total must not exceed package total by more than 10.00%
+- Warmup: first corpus entry replayed once
+- Pipeline: config-declared harness only (imperative package path removed)
 
 ## Summary
 
 | Pipeline |       Total | Per-entry median | Per-entry p90 |
 | -------- | ----------: | ---------------: | ------------: |
-| Package  | 21248.98 ms |        269.23 ms |     438.62 ms |
 | Config   | 21989.62 ms |        273.92 ms |     436.73 ms |
 
-- Config/package total ratio: 1.0349x
-- Verdict: **PASS**
+Regenerate this file with `bun run scripts/config-harness-envelope.ts --corpus
+
+<dir>` when refreshing timings after harness or runtime changes.
