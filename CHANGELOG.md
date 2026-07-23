@@ -10,14 +10,36 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
-## [0.4.12](https://github.com/aguil/agents/compare/v0.4.11...v0.4.12) (2026-07-23)
+## [0.5.0](https://github.com/aguil/agents/compare/v0.4.11...v0.5.0) (2026-07-23)
 
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** `agents code-review` always uses the config-declared harness; `--impl` and `AGENTS_CODE_REVIEW_IMPL` are removed ([478ccb0](https://github.com/aguil/agents/commit/478ccb077c6a08361a8b34b43652c6d0f65c64a9))
+* **code-review:** the `runCodeReview` package entry point is deleted; replay parity and perf envelope use `runCodeReviewFromConfig` only; `scripts/replay-parity.ts --differential` is removed ([42de493](https://github.com/aguil/agents/commit/42de4935189567ea1ded2bd1df5658667336b9e4))
+
+### Added
+
+* **cli:** make config harness the only code-review path ([478ccb0](https://github.com/aguil/agents/commit/478ccb077c6a08361a8b34b43652c6d0f65c64a9))
+
+### Changed
+
+* **code-review:** remove imperative runCodeReview orchestration ([42de493](https://github.com/aguil/agents/commit/42de4935189567ea1ded2bd1df5658667336b9e4))
 
 ### Fixed
 
 * **code-review:** repair runCodeReviewFromConfig module JSDoc ([9536948](https://github.com/aguil/agents/commit/9536948cd020d0c3a2fd8a17f3ed21434cd57168))
 * satisfy biome after config-only cutover ([986c90c](https://github.com/aguil/agents/commit/986c90ccc580dad1b65ad9fdf15458f0a0c73d0a))
 * **test:** remove unused readFile import in config-runner-parity ([2bb654a](https://github.com/aguil/agents/commit/2bb654a07bdeb6b61cb6aa1ed23561c2294ddf4b))
+
+### Documentation
+
+* **adr:** align ADR 0013 with stage 4 completion ([e8c71cf](https://github.com/aguil/agents/commit/e8c71cf3605859fd1db673778c1a1a0d0d67869a))
+* **harness:** drop stale package differential claim in harness.yaml ([25cc6e7](https://github.com/aguil/agents/commit/25cc6e7b1cdf991bf34d855b5c7672d6be051f56))
+* **perf:** update config harness envelope for config-only script ([e35a1be](https://github.com/aguil/agents/commit/e35a1be9a2c6d6401f7efa7a8b5239df9706e19b))
+* **docs:** format markdown for pre-commit prettier hook ([ae8b51a](https://github.com/aguil/agents/commit/ae8b51a30f0cdcaa73960784c1e82982e53490c7))
+
+Shipped in [#117](https://github.com/aguil/agents/pull/117) (ADR 0013 stage 4 config-only cutover).
 
 ## [0.4.11](https://github.com/aguil/agents/compare/v0.4.10...v0.4.11) (2026-07-21)
 
