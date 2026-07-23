@@ -1378,8 +1378,7 @@ async function fetchPullRequestHeadSha(
     return undefined;
   }
 
-  const args = [
-    "gh",
+  const ghApiArgs = [
     "api",
     ...(input.repoScope?.host !== undefined
       ? ["--hostname", input.repoScope.host]
@@ -1389,10 +1388,12 @@ async function fetchPullRequestHeadSha(
     ".head.sha",
   ];
   if (commandRunner !== runCommand) {
-    return commandRunner(args, workspacePath, { gitAware: true });
+    return commandRunner(["gh", ...ghApiArgs], workspacePath, {
+      gitAware: true,
+    });
   }
   try {
-    return await runGhWithRetry(args, workspacePath, { gitAware: true });
+    return await runGhWithRetry(ghApiArgs, workspacePath, { gitAware: true });
   } catch (error) {
     console.warn(
       `Warning: failed to fetch PR head sha via gh (${ownerRepo}#${input.number}): ${String(error)}`,
@@ -1417,8 +1418,7 @@ async function fetchPullRequestPatch(
     return undefined;
   }
 
-  const args = [
-    "gh",
+  const ghApiArgs = [
     "api",
     ...(input.repoScope?.host !== undefined
       ? ["--hostname", input.repoScope.host]
@@ -1428,10 +1428,12 @@ async function fetchPullRequestPatch(
     `repos/${ownerRepo}/pulls/${input.number}`,
   ];
   if (commandRunner !== runCommand) {
-    return commandRunner(args, workspacePath, { gitAware: true });
+    return commandRunner(["gh", ...ghApiArgs], workspacePath, {
+      gitAware: true,
+    });
   }
   try {
-    return await runGhWithRetry(args, workspacePath, { gitAware: true });
+    return await runGhWithRetry(ghApiArgs, workspacePath, { gitAware: true });
   } catch (error) {
     console.warn(
       `Warning: failed to fetch PR patch via gh (${ownerRepo}#${input.number}): ${String(error)}`,
@@ -1440,11 +1442,13 @@ async function fetchPullRequestPatch(
   }
 }
 
+/** `gh` subcommand argv only (no leading `gh`); spawn prepends the binary once. */
 async function runGhWithRetry(
-  cmd: readonly string[],
+  ghArgs: readonly string[],
   workspacePath: string,
   options: { readonly gitAware?: boolean } = {},
 ): Promise<string | undefined> {
+  const spawnCmd = ["gh", ...ghArgs];
   const attempts = 3;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const resolvedCwd =
@@ -1452,7 +1456,7 @@ async function runGhWithRetry(
         ? await resolveGitAwareCwd(workspacePath)
         : workspacePath;
     const proc = Bun.spawn({
-      cmd: [...cmd],
+      cmd: spawnCmd,
       cwd: resolvedCwd,
       stdout: "pipe",
       stderr: "pipe",
@@ -1479,12 +1483,12 @@ async function runGhWithRetry(
       /\bnetwork is unreachable\b/i.test(message);
     if (!isTransientNetwork) {
       throw new Error(
-        `gh ${cmd.join(" ")} failed: ${message.length > 0 ? message : `exit code ${exitCode}`}`,
+        `${spawnCmd.join(" ")} failed: ${message.length > 0 ? message : `exit code ${exitCode}`}`,
       );
     }
     if (attempt === attempts) {
       throw new Error(
-        `gh ${cmd.join(" ")} failed: exhausted retries (last error: ${message.length > 0 ? message : `exit code ${exitCode}`})`,
+        `${spawnCmd.join(" ")} failed: exhausted retries (last error: ${message.length > 0 ? message : `exit code ${exitCode}`})`,
       );
     }
 
@@ -1492,7 +1496,7 @@ async function runGhWithRetry(
       250 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250);
     await Bun.sleep(backoffMs);
   }
-  throw new Error(`gh ${cmd.join(" ")} failed: exhausted retries`);
+  throw new Error(`${spawnCmd.join(" ")} failed: exhausted retries`);
 }
 
 export function filterReviewDiff(diff: string): string {
