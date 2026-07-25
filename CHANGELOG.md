@@ -10,6 +10,13 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.5.3](https://github.com/aguil/agents/compare/v0.5.2...v0.5.3) (2026-07-25)
+
+
+### Added
+
+* **ci:** enforce conventional breaking commit headers ([c3d97a5](https://github.com/aguil/agents/commit/c3d97a52468827bcb2b7e36e8d51343e36d0db8f))
+
 ## [0.5.2](https://github.com/aguil/agents/compare/v0.5.1...v0.5.2) (2026-07-25)
 
 
