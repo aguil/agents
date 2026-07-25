@@ -7,8 +7,11 @@ mechanics (npm tarball, Trusted Publishing) live in [`BUILD.md`](../BUILD.md).
 ## How a release ships
 
 1. Land [Conventional Commits](https://www.conventionalcommits.org/) on
-   **`main`** (`feat:` → minor, `fix:`/`perf:` → patch while pre-1.0 per
-   [`release-please-config.json`](../release-please-config.json)).
+   **`main`**. While pre-1.0 per
+   [`release-please-config.json`](../release-please-config.json): a breaking
+   change (`type(scope)!:` — see
+   [conventional commit headers](../.agents/rules/conventional-commits.md))
+   bumps minor; `feat:` bumps patch; `fix:`/`perf:` bump patch.
 2. [`.github/workflows/release-please.yml`](../.github/workflows/release-please.yml)
    maintains a **release PR** that bumps the root `package.json` version,
    updates [`CHANGELOG.md`](../CHANGELOG.md), and updates
@@ -28,6 +31,11 @@ and merging the release PR when you want to ship.
 ## Before merging a release PR
 
 - [ ] CI is green on **`main`** and on the release PR.
+- [ ] If `main` has breaking commits since the last release tag, the release PR
+      must not be a patch-only bump. Inspect the headers with
+      `jj log -r '<last-tag>..main' -T 'description.first_line() ++ "\n"'` (or
+      `git log <last-tag>..main --oneline` in a git checkout). A commit missing
+      from the changelog entirely is the signature of an unparseable header.
 - [ ] The release PR's version bump and changelog entry look right (fix commit
       types on `main` and let release-please regenerate if not).
 - [ ] Commits reaching GitHub are signed (see

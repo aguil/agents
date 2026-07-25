@@ -24,9 +24,12 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
   playbook only.
 - Prefer deterministic code for lifecycle, logging, scratchpads, validation
   gates, and reporting; reserve LLM calls for review reasoning.
-- Conventional commits: use `!` after the scope in the title when the change is
-  breaking (for example `feat(cli)!:`), and spell out specifics in the body or a
-  `BREAKING CHANGE:` footer when useful.
+- Conventional commits: breaking changes use `type(scope)!:` (for example
+  `feat(cli)!:`), never `type!(scope):` (for example `feat!(cli):`); an invalid
+  header makes release-please drop the commit from the release and changelog
+  entirely. Breaking commits carry both the `!` and a `BREAKING CHANGE:` footer
+  describing the break. Canonical wording:
+  [`.agents/rules/conventional-commits.md`](.agents/rules/conventional-commits.md).
 - Before any commit: **`bun run lint`**, **`bun run typecheck`**, and
   **`mise exec --locked -- pre-commit run --all-files`** must all pass (requires
   [mise](https://mise.jdx.dev/): `mise trust` + `mise install` in this repo).

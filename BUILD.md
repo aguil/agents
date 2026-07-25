@@ -18,7 +18,10 @@ creates the `vX.Y.Z` tag and GitHub Release, then dispatches
 with `GITHUB_TOKEN` do not trigger workflows on their own, so the dispatch is
 explicit). `release.yml` refuses non-tag refs and non-SemVer tag names, and
 skips publish when the version is already on npm, so retries
-(`gh workflow run release.yml --ref vX.Y.Z`) are safe.
+(`gh workflow run release.yml --ref vX.Y.Z`) are safe. Breaking changes must use
+a `type(scope)!:` header (never `type!(scope):`) or release-please will drop the
+commit — see
+[`.agents/rules/conventional-commits.md`](.agents/rules/conventional-commits.md).
 
 Step-by-step: [`docs/release-checklist.md`](docs/release-checklist.md). The
 sections below describe the underlying tarball/publish mechanics.

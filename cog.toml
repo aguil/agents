@@ -1,0 +1,8 @@
+# Commit types recognized by this repository are declared in
+# release-please-config.json "changelog-sections". cocogitto additionally ships
+# the angular types `build` and `style`; an empty entry disables a default type
+# so the commit-headers check accepts only the documented set.
+# See .agents/rules/conventional-commits.md.
+[commit_types]
+build = {}
+style = {}
