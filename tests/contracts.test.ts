@@ -856,6 +856,55 @@ test("discoverPullRequest uses the jj bookmark for implicit lookup", async () =>
   );
 });
 
+test("discoverPullRequest uses one preferred bookmark when several match", async () => {
+  const path = `/agents/pr-jj-multi-bookmark-${Math.random().toString(36).slice(2)}`;
+  const commands: string[] = [];
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "log" &&
+      cmd.includes("-r") &&
+      cmd.includes("@")
+    ) {
+      return "jjcommit55555555555555555555555555555555\n";
+    }
+    if (cmd[0] === "jj" && cmd[1] === "bookmark" && cmd[2] === "list") {
+      return "main\nfeat/zeta\nfeat/alpha\n";
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      return "origin git@github.com:aguil/agents.git\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 55,
+        title: "Preferred",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/55",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(55);
+  const ghViews = commands.filter((c) => c.startsWith("gh pr view "));
+  expect(ghViews).toHaveLength(1);
+  expect(ghViews[0]).toContain("feat/alpha");
+  expect(ghViews[0]).not.toContain("feat/zeta");
+  expect(ghViews[0]).not.toMatch(/\bmain\b/);
+});
+
 test("discoverPullRequest formats enterprise host for --repo scope", async () => {
   const path = `/agents/pr-ghe-scope-${Math.random().toString(36).slice(2)}`;
   const commands: string[] = [];

@@ -1895,16 +1895,20 @@ async function fetchPullRequestJsonWithSelectors(
     return fetchPullRequestJson(workspacePath, commandRunner, { repoScope });
   }
 
-  for (const selector of selectors) {
-    const meta = await fetchPullRequestJson(workspacePath, commandRunner, {
-      selector,
-      repoScope,
-    });
-    if (meta !== undefined) {
-      return meta;
-    }
-  }
-  return undefined;
+  const preferred = preferImplicitPrSelector(selectors);
+  return fetchPullRequestJson(workspacePath, commandRunner, {
+    selector: preferred,
+    repoScope,
+  });
+}
+
+/** One gh call: prefer non-default bookmarks, else a stable lexicographic pick. */
+function preferImplicitPrSelector(selectors: readonly string[]): string {
+  const nonDefault = selectors.filter(
+    (name) => name !== "main" && name !== "master",
+  );
+  const pool = nonDefault.length > 0 ? nonDefault : selectors;
+  return [...pool].sort()[0] ?? selectors[0] ?? "";
 }
 
 const preferredRemoteScopeHits = new Map<string, RemoteScope | null>();
