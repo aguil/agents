@@ -720,6 +720,50 @@ test("resolvePreferredRemoteScope memoizes per workspace and runner", async () =
   expect(jjRemoteListCalls).toBe(1);
 });
 
+test("discoverPullRequest skips jj probes in non-jj workspaces when git works", async () => {
+  const path = `/agents/pr-git-no-jj-${Math.random().toString(36).slice(2)}`;
+  const commands: string[] = [];
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "jj") {
+      throw new Error(
+        `jj should not run for non-jj workspace: ${cmd.join(" ")}`,
+      );
+    }
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "cccccccccccccccccccccccccccccccccccccccc\n";
+    }
+    if (
+      cmd[0] === "git" &&
+      cmd[1] === "rev-parse" &&
+      cmd[2] === "--abbrev-ref"
+    ) {
+      return undefined;
+    }
+    if (cmd[0] === "git" && cmd[1] === "remote" && cmd.length === 2) {
+      return "origin\n";
+    }
+    if (cmd[0] === "git" && cmd[1] === "remote" && cmd[2] === "get-url") {
+      return "git@github.com:aguil/agents.git\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 44,
+        title: "Git only",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/44",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner, 44))?.number).toBe(44);
+  expect(commands.some((c) => c.startsWith("jj "))).toBe(false);
+});
+
 test("discoverPullRequest scopes explicit PR lookup in a jj workspace", async () => {
   const path = `/agents/pr-jj-explicit-${Math.random().toString(36).slice(2)}`;
   const commands: string[] = [];

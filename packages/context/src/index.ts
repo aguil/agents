@@ -1622,6 +1622,36 @@ async function workspaceDiscoverRevisionForCacheKey(
   workspacePath: string,
   commandRunner: CommandRunner,
 ): Promise<string> {
+  const preferJj = (await resolveGitAwarePath(workspacePath)).isJjWorkspace;
+  if (preferJj) {
+    const jjOid = await readJjCommitId(workspacePath, commandRunner);
+    if (jjOid !== undefined) {
+      return jjOid;
+    }
+  }
+
+  const oid = (
+    await commandRunner(["git", "rev-parse", "HEAD"], workspacePath, {
+      gitAware: true,
+    })
+  )?.trim();
+  if (oid !== undefined && oid.length > 0) {
+    return oid;
+  }
+
+  if (!preferJj) {
+    const jjOid = await readJjCommitId(workspacePath, commandRunner);
+    if (jjOid !== undefined) {
+      return jjOid;
+    }
+  }
+  return "";
+}
+
+async function readJjCommitId(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): Promise<string | undefined> {
   const jjOid = (
     await commandRunner(
       [
@@ -1642,16 +1672,7 @@ async function workspaceDiscoverRevisionForCacheKey(
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find((line) => line.length > 0);
-  if (jjOid !== undefined && jjOid.length > 0) {
-    return jjOid;
-  }
-
-  const oid = (
-    await commandRunner(["git", "rev-parse", "HEAD"], workspacePath, {
-      gitAware: true,
-    })
-  )?.trim();
-  return oid !== undefined && oid.length > 0 ? oid : "";
+  return jjOid !== undefined && jjOid.length > 0 ? jjOid : undefined;
 }
 
 /**
@@ -1659,6 +1680,38 @@ async function workspaceDiscoverRevisionForCacheKey(
  * else the short Git symbolic HEAD ref. Needed for cache identity and lookup.
  */
 async function workspaceImplicitPrSelectors(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): Promise<readonly string[]> {
+  const preferJj = (await resolveGitAwarePath(workspacePath)).isJjWorkspace;
+  if (preferJj) {
+    const jjBookmarks = await readJjImplicitPrSelectors(
+      workspacePath,
+      commandRunner,
+    );
+    if (jjBookmarks.length > 0) {
+      return jjBookmarks;
+    }
+  }
+
+  const sym = (
+    await commandRunner(
+      ["git", "symbolic-ref", "-q", "--short", "HEAD"],
+      workspacePath,
+      { gitAware: true },
+    )
+  )?.trim();
+  if (sym !== undefined && sym.length > 0) {
+    return [sym];
+  }
+
+  if (!preferJj) {
+    return readJjImplicitPrSelectors(workspacePath, commandRunner);
+  }
+  return [];
+}
+
+async function readJjImplicitPrSelectors(
   workspacePath: string,
   commandRunner: CommandRunner,
 ): Promise<readonly string[]> {
@@ -1679,18 +1732,10 @@ async function workspaceImplicitPrSelectors(
     ?.split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-  if (jjBookmarks !== undefined && jjBookmarks.length > 0) {
-    return [...new Set(jjBookmarks)].sort();
+  if (jjBookmarks === undefined || jjBookmarks.length === 0) {
+    return [];
   }
-
-  const sym = (
-    await commandRunner(
-      ["git", "symbolic-ref", "-q", "--short", "HEAD"],
-      workspacePath,
-      { gitAware: true },
-    )
-  )?.trim();
-  return sym !== undefined && sym.length > 0 ? [sym] : [];
+  return [...new Set(jjBookmarks)].sort();
 }
 
 function formatGhRepoScope(
