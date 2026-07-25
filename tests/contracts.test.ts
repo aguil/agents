@@ -566,11 +566,14 @@ test("discoverPullRequest refetches GH metadata when workspace HEAD changes", as
 test("discoverPullRequest refetches implicit branch PR when symbolic HEAD ref changes", async () => {
   const path = "/agents/pr-implicit-branch-pin";
   const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-  let symbolicHead = "refs/heads/feature-a";
+  let symbolicHead = "feature-a";
   let ghCalls = 0;
   const commandRunner = async (
     cmd: readonly string[],
   ): Promise<string | undefined> => {
+    if (cmd[0] === "jj") {
+      return undefined;
+    }
     if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
       return `${head}\n`;
     }
@@ -578,11 +581,28 @@ test("discoverPullRequest refetches implicit branch PR when symbolic HEAD ref ch
       cmd[0] === "git" &&
       cmd[1] === "symbolic-ref" &&
       cmd[2] === "-q" &&
-      cmd[3] === "HEAD"
+      cmd[3] === "--short" &&
+      cmd[4] === "HEAD"
     ) {
       return `${symbolicHead}\n`;
     }
+    if (
+      cmd[0] === "git" &&
+      cmd[1] === "rev-parse" &&
+      cmd[2] === "--abbrev-ref"
+    ) {
+      return undefined;
+    }
+    if (cmd[0] === "git" && cmd[1] === "remote" && cmd.length === 2) {
+      return "origin\n";
+    }
+    if (cmd[0] === "git" && cmd[1] === "remote" && cmd[2] === "get-url") {
+      return "git@github.com:aguil/agents.git\n";
+    }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      expect(cmd).toContain(symbolicHead);
+      expect(cmd).toContain("--repo");
+      expect(cmd).toContain("aguil/agents");
       ghCalls += 1;
       const n = ghCalls;
       return JSON.stringify({
@@ -601,7 +621,7 @@ test("discoverPullRequest refetches implicit branch PR when symbolic HEAD ref ch
   expect((await discoverPullRequest(path, commandRunner))?.number).toBe(1);
   expect(ghCalls).toBe(1);
 
-  symbolicHead = "refs/heads/feature-b";
+  symbolicHead = "feature-b";
   expect((await discoverPullRequest(path, commandRunner))?.number).toBe(2);
   expect(ghCalls).toBe(2);
 });
@@ -700,12 +720,16 @@ test("collectReviewDiff attaches reviewPr when PR is discovered implicitly", asy
       cmd[0] === "git" &&
       cmd[1] === "symbolic-ref" &&
       cmd[2] === "-q" &&
-      cmd[3] === "HEAD"
+      cmd[3] === "--short" &&
+      cmd[4] === "HEAD"
     ) {
-      return "refs/heads/feat/cli-code-review-inbox\n";
+      return "feat/cli-code-review-inbox\n";
     }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
       expect(cmd.includes("--json")).toBe(true);
+      expect(cmd).toContain("feat/cli-code-review-inbox");
+      expect(cmd).toContain("--repo");
+      expect(cmd).toContain("aguil/agents");
       expect(cmd.some((t) => /^\d+$/.test(t))).toBe(false);
       return JSON.stringify({
         number: 27,
