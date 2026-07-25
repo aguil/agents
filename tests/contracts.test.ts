@@ -1560,10 +1560,12 @@ test("rejects echoed prompt templates only when the finding id contains a token"
     sourceRole: "quality",
     validation: { status: "verified" as const, details: "ok" },
   };
+  // Build without a quoted `${...}` so biome noTemplateCurlyInString stays quiet.
+  const echoedRoleToken = "$" + "{request.roleId}";
 
   const templateEcho = validateFinding({
     ...base,
-    id: "${request.roleId}-duplicate-calls",
+    id: `${echoedRoleToken}-duplicate-calls`,
   });
   expect(templateEcho.valid).toBe(false);
   expect(templateEcho.errors).toContain(
@@ -1573,7 +1575,7 @@ test("rejects echoed prompt templates only when the finding id contains a token"
   const quotedCode = validateFinding({
     ...base,
     id: "quality-template-literal",
-    description: "The code interpolates ${request.roleId} in this path.",
+    description: `The code interpolates ${echoedRoleToken} in this path.`,
   });
   expect(quotedCode.valid).toBe(true);
 });
