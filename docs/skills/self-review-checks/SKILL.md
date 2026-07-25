@@ -167,6 +167,11 @@ treat that finding as a unit of work:
   commit conventions when applicable), and when rewriting or refining a fix
   commit message include the finding `id` or title, what is being addressed, how
   it is being addressed, and the full text of the finding in the body.
+- When a remediation is a **breaking** change and the checkout uses Conventional
+  Commits, the header must be `type(scope)!:` with `!` immediately before `:`
+  (never `type!(scope):`), and the body should include a `BREAKING CHANGE:`
+  footer describing the break. Release tooling that parses conventional commits
+  can silently drop a commit whose header is malformed.
 - Version control particulars (`jj`, `git`, bookmarks, describe flags) follow
   the **checkout’s** `AGENTS.md` and your usual workflow; the rule above is
   independent of tooling.
