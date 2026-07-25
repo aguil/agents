@@ -10,6 +10,18 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.5.2](https://github.com/aguil/agents/compare/v0.5.1...v0.5.2) (2026-07-25)
+
+
+### Fixed
+
+* **context:** discover PRs in non-colocated jj workspaces ([989a044](https://github.com/aguil/agents/commit/989a044014901b15ae511681a9d5981e77cceac4))
+* **context:** discover PRs in non-colocated jj workspaces ([742a729](https://github.com/aguil/agents/commit/742a72942990e5ac4d05ac15f2c81460f6bd277f))
+* **context:** do not memoize failed remote-scope lookups ([952cbc8](https://github.com/aguil/agents/commit/952cbc8caa6032cd8e760861b4a6872100b3d35e))
+* **context:** memoize preferred remote scope resolution ([7665db4](https://github.com/aguil/agents/commit/7665db4e1bdbabaa05e0cf89eed9391282990cba))
+* **context:** pick one implicit PR selector instead of sequential gh ([956c9d7](https://github.com/aguil/agents/commit/956c9d7deb0ab00032f0fbb0ab1fc8e1fa773e29))
+* **context:** probe jj only in jj workspaces for PR cache keys ([c308abc](https://github.com/aguil/agents/commit/c308abc58248414f20ba5a79c8ab20a34368764a))
+
 ## [0.5.1](https://github.com/aguil/agents/compare/v0.5.0...v0.5.1) (2026-07-23)
 
 
