@@ -103,6 +103,11 @@ mise exec --locked -- cog verify "$(jj log --no-graph -r @ -T description)"
 workspace with no colocated git directory. cocogitto is pinned in
 [`mise.toml`](../../mise.toml).
 
+It checks header form only. `verify` does not read `[commit_types]` from
+[`cog.toml`](../../cog.toml), so `build:` and `style:` pass locally and are then
+rejected by CI. In a colocated git checkout, `cog check` applies the type list
+as well.
+
 CI runs `cog check --ignore-merge-commits` over every commit a pull request adds
 (see
 [`.github/workflows/commit-headers.yml`](../../.github/workflows/commit-headers.yml)).
