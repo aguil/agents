@@ -687,6 +687,39 @@ test("resolvePreferredRemoteScope falls back to jj remotes", async () => {
   });
 });
 
+test("resolvePreferredRemoteScope memoizes per workspace and runner", async () => {
+  const path = `/agents/remote-scope-memo-${Math.random().toString(36).slice(2)}`;
+  let jjRemoteListCalls = 0;
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      jjRemoteListCalls += 1;
+      return "origin git@github.com:aguil/agents.git\n";
+    }
+    return undefined;
+  };
+
+  const first = await resolvePreferredRemoteScope(path, commandRunner);
+  const second = await resolvePreferredRemoteScope(path, commandRunner);
+  expect(first).toEqual({
+    remoteName: "origin",
+    host: "github.com",
+    owner: "aguil",
+    repo: "agents",
+  });
+  expect(second).toEqual(first);
+  expect(jjRemoteListCalls).toBe(1);
+});
+
 test("discoverPullRequest scopes explicit PR lookup in a jj workspace", async () => {
   const path = `/agents/pr-jj-explicit-${Math.random().toString(36).slice(2)}`;
   const commands: string[] = [];
@@ -934,13 +967,15 @@ test("discoverPullRequest refetches when jj bookmark selector changes", async ()
   expect(ghCalls).toBe(2);
 });
 
-test("discoverPullRequest refetches when remote scope changes", async () => {
-  const path = `/agents/pr-scope-cache-${Math.random().toString(36).slice(2)}`;
-  let remoteUrl = "git@github.com:aguil/agents.git";
-  let ghCalls = 0;
+test("discoverPullRequest includes memoized remote scope in gh --repo", async () => {
+  const pathA = `/agents/pr-scope-a-${Math.random().toString(36).slice(2)}`;
+  const pathB = `/agents/pr-scope-b-${Math.random().toString(36).slice(2)}`;
+  const commands: string[] = [];
   const commandRunner = async (
     cmd: readonly string[],
+    cwd: string,
   ): Promise<string | undefined> => {
+    commands.push(`${cwd} :: ${cmd.join(" ")}`);
     if (cmd[0] === "git") {
       return undefined;
     }
@@ -958,14 +993,15 @@ test("discoverPullRequest refetches when remote scope changes", async () => {
       cmd[2] === "remote" &&
       cmd[3] === "list"
     ) {
-      return `origin ${remoteUrl}\n`;
+      if (cwd === pathA) {
+        return "origin git@github.com:aguil/agents.git\n";
+      }
+      return "origin git@github.com:other/agents.git\n";
     }
     if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
-      ghCalls += 1;
-      const title = ghCalls === 1 ? "First" : "Second";
       return JSON.stringify({
         number: 15,
-        title,
+        title: "Scoped",
         body: "Body",
         url: "https://github.com/aguil/agents/pull/15",
         baseRefName: "main",
@@ -974,16 +1010,26 @@ test("discoverPullRequest refetches when remote scope changes", async () => {
     return undefined;
   };
 
-  expect((await discoverPullRequest(path, commandRunner, 15))?.title).toBe(
-    "First",
+  expect((await discoverPullRequest(pathA, commandRunner, 15))?.number).toBe(
+    15,
   );
-  expect(ghCalls).toBe(1);
-
-  remoteUrl = "git@github.com:other/agents.git";
-  expect((await discoverPullRequest(path, commandRunner, 15))?.title).toBe(
-    "Second",
+  expect((await discoverPullRequest(pathB, commandRunner, 15))?.number).toBe(
+    15,
   );
-  expect(ghCalls).toBe(2);
+  expect(
+    commands.some((c) =>
+      c.includes(
+        "gh pr view 15 --repo aguil/agents --json number,title,body,url,baseRefName,headRefOid",
+      ),
+    ),
+  ).toBe(true);
+  expect(
+    commands.some((c) =>
+      c.includes(
+        "gh pr view 15 --repo other/agents --json number,title,body,url,baseRefName,headRefOid",
+      ),
+    ),
+  ).toBe(true);
 });
 
 test("prefers explicit PR patch diff when review PR is provided", async () => {

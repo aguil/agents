@@ -1862,9 +1862,53 @@ async function fetchPullRequestJsonWithSelectors(
   return undefined;
 }
 
+const preferredRemoteScopeHits = new Map<string, RemoteScope | null>();
+const preferredRemoteScopeInFlight = new Map<
+  string,
+  Promise<RemoteScope | undefined>
+>();
+
+function preferredRemoteScopeCacheKey(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): string {
+  return `${resolve(workspacePath)}|${commandRunnerCacheSlot(commandRunner)}`;
+}
+
 export async function resolvePreferredRemoteScope(
   workspacePath: string,
   commandRunner: CommandRunner = runCommand,
+): Promise<RemoteScope | undefined> {
+  const key = preferredRemoteScopeCacheKey(workspacePath, commandRunner);
+  if (preferredRemoteScopeHits.has(key)) {
+    return preferredRemoteScopeHits.get(key) ?? undefined;
+  }
+
+  let inflight = preferredRemoteScopeInFlight.get(key);
+  if (inflight !== undefined) {
+    return inflight;
+  }
+
+  inflight = (async (): Promise<RemoteScope | undefined> => {
+    try {
+      const scope = await resolvePreferredRemoteScopeUncached(
+        workspacePath,
+        commandRunner,
+      );
+      preferredRemoteScopeHits.set(key, scope ?? null);
+      return scope;
+    } finally {
+      preferredRemoteScopeInFlight.delete(key);
+    }
+  })();
+
+  preferredRemoteScopeInFlight.set(key, inflight);
+  return inflight;
+}
+
+async function resolvePreferredRemoteScopeUncached(
+  workspacePath: string,
+  commandRunner: CommandRunner,
 ): Promise<RemoteScope | undefined> {
   const trackingRemote = await resolveTrackingRemoteName(
     workspacePath,
