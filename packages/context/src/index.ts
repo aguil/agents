@@ -1911,7 +1911,7 @@ function preferImplicitPrSelector(selectors: readonly string[]): string {
   return [...pool].sort()[0] ?? selectors[0] ?? "";
 }
 
-const preferredRemoteScopeHits = new Map<string, RemoteScope | null>();
+const preferredRemoteScopeHits = new Map<string, RemoteScope>();
 const preferredRemoteScopeInFlight = new Map<
   string,
   Promise<RemoteScope | undefined>
@@ -1929,8 +1929,9 @@ export async function resolvePreferredRemoteScope(
   commandRunner: CommandRunner = runCommand,
 ): Promise<RemoteScope | undefined> {
   const key = preferredRemoteScopeCacheKey(workspacePath, commandRunner);
-  if (preferredRemoteScopeHits.has(key)) {
-    return preferredRemoteScopeHits.get(key) ?? undefined;
+  const hit = preferredRemoteScopeHits.get(key);
+  if (hit !== undefined) {
+    return hit;
   }
 
   let inflight = preferredRemoteScopeInFlight.get(key);
@@ -1944,7 +1945,9 @@ export async function resolvePreferredRemoteScope(
         workspacePath,
         commandRunner,
       );
-      preferredRemoteScopeHits.set(key, scope ?? null);
+      if (scope !== undefined) {
+        preferredRemoteScopeHits.set(key, scope);
+      }
       return scope;
     } finally {
       preferredRemoteScopeInFlight.delete(key);

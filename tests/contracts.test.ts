@@ -720,6 +720,43 @@ test("resolvePreferredRemoteScope memoizes per workspace and runner", async () =
   expect(jjRemoteListCalls).toBe(1);
 });
 
+test("resolvePreferredRemoteScope does not memoize resolution misses", async () => {
+  const path = `/agents/remote-scope-miss-${Math.random().toString(36).slice(2)}`;
+  let jjRemoteListCalls = 0;
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      jjRemoteListCalls += 1;
+      if (jjRemoteListCalls === 1) {
+        return undefined;
+      }
+      return "origin git@github.com:aguil/agents.git\n";
+    }
+    return undefined;
+  };
+
+  expect(
+    await resolvePreferredRemoteScope(path, commandRunner),
+  ).toBeUndefined();
+  expect(jjRemoteListCalls).toBe(1);
+  expect(await resolvePreferredRemoteScope(path, commandRunner)).toEqual({
+    remoteName: "origin",
+    host: "github.com",
+    owner: "aguil",
+    repo: "agents",
+  });
+  expect(jjRemoteListCalls).toBe(2);
+});
+
 test("discoverPullRequest skips jj probes in non-jj workspaces when git works", async () => {
   const path = `/agents/pr-git-no-jj-${Math.random().toString(36).slice(2)}`;
   const commands: string[] = [];
