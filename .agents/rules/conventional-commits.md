@@ -66,8 +66,19 @@ With `bump-minor-pre-major` and `bump-patch-for-minor-pre-major` in
 ## `BREAKING CHANGE:` footer
 
 Use a `BREAKING CHANGE:` footer in the body to describe the break for the
-changelog. It does **not** substitute for `!` in the header, and it cannot
-rescue a commit whose header fails to parse.
+changelog. It cannot rescue a commit whose header fails to parse.
+
+The Conventional Commits spec treats the footer as a breaking indicator in its
+own right, so a footer without `!` is well-formed and release-please versions it
+correctly. This repository requires the `!` anyway: the header is what reviewers
+and `git log` show. Write both.
+
+## What CI enforces
+
+The `commit-headers` job rejects headers that fail to parse — the `#117` failure
+mode. It cannot tell that a change is breaking, so it cannot require `!` on a
+commit that omits it, whether or not a footer is present. That half of the rule
+is convention, upheld in review.
 
 ## Every commit on a PR
 
