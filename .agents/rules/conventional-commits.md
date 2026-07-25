@@ -53,6 +53,11 @@ manually.
 
 Hidden from the changelog but valid: **docs**, **chore**, **test**, **ci**.
 
+These nine are the only types CI accepts. cocogitto also ships the angular types
+`build` and `style`; [`cog.toml`](../../cog.toml) disables them, so a commit
+using either is rejected rather than landing with no changelog entry. Use
+`chore:`, `ci:`, or `refactor:` instead.
+
 ## Version impact while pre-1.0
 
 With `bump-minor-pre-major` and `bump-patch-for-minor-pre-major` in
