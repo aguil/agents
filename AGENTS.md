@@ -27,8 +27,8 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
 - Conventional commits: breaking changes use `type(scope)!:` (for example
   `feat(cli)!:`), never `type!(scope):` (for example `feat!(cli):`); an invalid
   header makes release-please drop the commit from the release and changelog
-  entirely. Add a `BREAKING CHANGE:` footer in the body when useful. Canonical
-  wording:
+  entirely. Breaking commits carry both the `!` and a `BREAKING CHANGE:` footer
+  describing the break. Canonical wording:
   [`.agents/rules/conventional-commits.md`](.agents/rules/conventional-commits.md).
 - Before any commit: **`bun run lint`**, **`bun run typecheck`**, and
   **`mise exec --locked -- pre-commit run --all-files`** must all pass (requires
