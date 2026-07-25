@@ -33,6 +33,7 @@ import {
   parseRemoteHeadBranch,
   RepositoryDiffProvider,
   resolvePreferredBaseBranch,
+  resolvePreferredRemoteScope,
   selectPreferredRemoteName,
   shouldFetchReferencedUrl,
 } from "@aguil/agents-context";
@@ -658,6 +659,331 @@ test("discoverPullRequest does not indefinitely memoize GH PR metadata misses", 
     (await discoverPullRequest(isolationPath, transientRunner, 8))?.number,
   ).toBe(8);
   expect(invocationCount).toBe(2);
+});
+
+test("resolvePreferredRemoteScope falls back to jj remotes", async () => {
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      return "origin git@github.com:aguil/agents.git\n";
+    }
+    throw new Error(`unexpected command: ${cmd.join(" ")}`);
+  };
+
+  expect(await resolvePreferredRemoteScope("/jj-repo", commandRunner)).toEqual({
+    remoteName: "origin",
+    host: "github.com",
+    owner: "aguil",
+    repo: "agents",
+  });
+});
+
+test("discoverPullRequest scopes explicit PR lookup in a jj workspace", async () => {
+  const path = `/agents/pr-jj-explicit-${Math.random().toString(36).slice(2)}`;
+  const commands: string[] = [];
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "log" &&
+      cmd.includes("-r") &&
+      cmd.includes("@")
+    ) {
+      return "jjcommit11111111111111111111111111111111\n";
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      return "origin git@github.com:aguil/agents.git\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 122,
+        title: "feat(ci): enforce conventional breaking commit headers",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/122",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  const discovered = await discoverPullRequest(path, commandRunner, 122);
+  expect(discovered?.number).toBe(122);
+  expect(commands).toContain(
+    "gh pr view 122 --repo aguil/agents --json number,title,body,url,baseRefName,headRefOid",
+  );
+});
+
+test("discoverPullRequest uses the jj bookmark for implicit lookup", async () => {
+  const path = `/agents/pr-jj-implicit-${Math.random().toString(36).slice(2)}`;
+  const commands: string[] = [];
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "log" &&
+      cmd.includes("-r") &&
+      cmd.includes("@")
+    ) {
+      return "jjcommit22222222222222222222222222222222\n";
+    }
+    if (cmd[0] === "jj" && cmd[1] === "bookmark" && cmd[2] === "list") {
+      return "feat/conventional-commit-enforcement\n";
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      return "origin git@github.com:aguil/agents.git\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 122,
+        title: "PR",
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/122",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(122);
+  expect(commands).toContain(
+    "gh pr view feat/conventional-commit-enforcement --repo aguil/agents --json number,title,body,url,baseRefName,headRefOid",
+  );
+});
+
+test("discoverPullRequest formats enterprise host for --repo scope", async () => {
+  const path = `/agents/pr-ghe-scope-${Math.random().toString(36).slice(2)}`;
+  const commands: string[] = [];
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    commands.push(cmd.join(" "));
+    if (cmd[0] === "jj") {
+      return undefined;
+    }
+    if (cmd[0] === "git" && cmd[1] === "rev-parse" && cmd[2] === "HEAD") {
+      return "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n";
+    }
+    if (
+      cmd[0] === "git" &&
+      cmd[1] === "rev-parse" &&
+      cmd[2] === "--abbrev-ref"
+    ) {
+      return undefined;
+    }
+    if (cmd[0] === "git" && cmd[1] === "remote" && cmd.length === 2) {
+      return "origin\n";
+    }
+    if (cmd[0] === "git" && cmd[1] === "remote" && cmd[2] === "get-url") {
+      return "git@github.example.com:acme/widgets.git\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      return JSON.stringify({
+        number: 9,
+        title: "Enterprise PR",
+        body: "Body",
+        url: "https://github.example.com/acme/widgets/pull/9",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner, 9))?.number).toBe(9);
+  expect(commands).toContain(
+    "gh pr view 9 --repo github.example.com/acme/widgets --json number,title,body,url,baseRefName,headRefOid",
+  );
+});
+
+test("discoverPullRequest refetches when jj commit id changes", async () => {
+  const path = `/agents/pr-jj-rev-cache-${Math.random().toString(36).slice(2)}`;
+  let commitId = "jjrev1111111111111111111111111111111111";
+  let ghCalls = 0;
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "log" &&
+      cmd.includes("-r") &&
+      cmd.includes("@")
+    ) {
+      return `${commitId}\n`;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      return "origin git@github.com:aguil/agents.git\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      ghCalls += 1;
+      const title = ghCalls === 1 ? "First" : "Second";
+      return JSON.stringify({
+        number: 11,
+        title,
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/11",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner, 11))?.title).toBe(
+    "First",
+  );
+  expect(ghCalls).toBe(1);
+  expect((await discoverPullRequest(path, commandRunner, 11))?.title).toBe(
+    "First",
+  );
+  expect(ghCalls).toBe(1);
+
+  commitId = "jjrev2222222222222222222222222222222222";
+  expect((await discoverPullRequest(path, commandRunner, 11))?.title).toBe(
+    "Second",
+  );
+  expect(ghCalls).toBe(2);
+});
+
+test("discoverPullRequest refetches when jj bookmark selector changes", async () => {
+  const path = `/agents/pr-jj-bookmark-cache-${Math.random().toString(36).slice(2)}`;
+  const commitId = "jjrev3333333333333333333333333333333333";
+  let bookmark = "feat/alpha";
+  let ghCalls = 0;
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "log" &&
+      cmd.includes("-r") &&
+      cmd.includes("@")
+    ) {
+      return `${commitId}\n`;
+    }
+    if (cmd[0] === "jj" && cmd[1] === "bookmark" && cmd[2] === "list") {
+      return `${bookmark}\n`;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      return "origin git@github.com:aguil/agents.git\n";
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      expect(cmd).toContain(bookmark);
+      ghCalls += 1;
+      const n = ghCalls;
+      return JSON.stringify({
+        number: n,
+        title: `PR ${n}`,
+        body: "Body",
+        url: `https://github.com/aguil/agents/pull/${n}`,
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(1);
+  expect(ghCalls).toBe(1);
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(1);
+  expect(ghCalls).toBe(1);
+
+  bookmark = "feat/beta";
+  expect((await discoverPullRequest(path, commandRunner))?.number).toBe(2);
+  expect(ghCalls).toBe(2);
+});
+
+test("discoverPullRequest refetches when remote scope changes", async () => {
+  const path = `/agents/pr-scope-cache-${Math.random().toString(36).slice(2)}`;
+  let remoteUrl = "git@github.com:aguil/agents.git";
+  let ghCalls = 0;
+  const commandRunner = async (
+    cmd: readonly string[],
+  ): Promise<string | undefined> => {
+    if (cmd[0] === "git") {
+      return undefined;
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "log" &&
+      cmd.includes("-r") &&
+      cmd.includes("@")
+    ) {
+      return "jjrev4444444444444444444444444444444444\n";
+    }
+    if (
+      cmd[0] === "jj" &&
+      cmd[1] === "git" &&
+      cmd[2] === "remote" &&
+      cmd[3] === "list"
+    ) {
+      return `origin ${remoteUrl}\n`;
+    }
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") {
+      ghCalls += 1;
+      const title = ghCalls === 1 ? "First" : "Second";
+      return JSON.stringify({
+        number: 15,
+        title,
+        body: "Body",
+        url: "https://github.com/aguil/agents/pull/15",
+        baseRefName: "main",
+      });
+    }
+    return undefined;
+  };
+
+  expect((await discoverPullRequest(path, commandRunner, 15))?.title).toBe(
+    "First",
+  );
+  expect(ghCalls).toBe(1);
+
+  remoteUrl = "git@github.com:other/agents.git";
+  expect((await discoverPullRequest(path, commandRunner, 15))?.title).toBe(
+    "Second",
+  );
+  expect(ghCalls).toBe(2);
 });
 
 test("prefers explicit PR patch diff when review PR is provided", async () => {
