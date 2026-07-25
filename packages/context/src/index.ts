@@ -838,7 +838,7 @@ export class PullRequestMetadataProvider implements ContextProvider {
           id: "pr-metadata",
           title: "Pull Request Metadata",
           content:
-            "No related pull request discovered for the current branch. Continuing with repository context only.",
+            "Could not resolve pull request metadata for this workspace. Continuing with repository context only.",
         },
       ];
     }
@@ -879,7 +879,7 @@ export class PullRequestReferencedDocsProvider implements ContextProvider {
           id: "pr-referenced-docs",
           title: "PR Referenced Documentation",
           content:
-            "PR discovery unavailable, so no PR-referenced documents were fetched.",
+            "PR metadata could not be resolved, so no PR-referenced documents were fetched.",
         },
       ];
     }
@@ -1622,25 +1622,129 @@ async function workspaceDiscoverRevisionForCacheKey(
   workspacePath: string,
   commandRunner: CommandRunner,
 ): Promise<string> {
+  const preferJj = (await resolveGitAwarePath(workspacePath)).isJjWorkspace;
+  if (preferJj) {
+    const jjOid = await readJjCommitId(workspacePath, commandRunner);
+    if (jjOid !== undefined) {
+      return jjOid;
+    }
+  }
+
   const oid = (
     await commandRunner(["git", "rev-parse", "HEAD"], workspacePath, {
       gitAware: true,
     })
   )?.trim();
-  return oid !== undefined && oid.length > 0 ? oid : "";
+  if (oid !== undefined && oid.length > 0) {
+    return oid;
+  }
+
+  if (!preferJj) {
+    const jjOid = await readJjCommitId(workspacePath, commandRunner);
+    if (jjOid !== undefined) {
+      return jjOid;
+    }
+  }
+  return "";
 }
 
-/** Needed for implicit `gh pr view` caches: branch selection is keyed by HEAD, not commit oid alone. */
-async function workspaceSymbolicHeadRefForCacheKey(
+async function readJjCommitId(
   workspacePath: string,
   commandRunner: CommandRunner,
-): Promise<string> {
+): Promise<string | undefined> {
+  const jjOid = (
+    await commandRunner(
+      [
+        "jj",
+        "log",
+        "-r",
+        "@",
+        "--no-graph",
+        "-T",
+        'commit_id ++ "\\n"',
+        "--limit",
+        "1",
+      ],
+      workspacePath,
+    )
+  )
+    ?.trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  return jjOid !== undefined && jjOid.length > 0 ? jjOid : undefined;
+}
+
+/**
+ * Implicit `gh pr view` selectors: nearest local jj bookmarks reachable from `@`,
+ * else the short Git symbolic HEAD ref. Needed for cache identity and lookup.
+ */
+async function workspaceImplicitPrSelectors(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): Promise<readonly string[]> {
+  const preferJj = (await resolveGitAwarePath(workspacePath)).isJjWorkspace;
+  if (preferJj) {
+    const jjBookmarks = await readJjImplicitPrSelectors(
+      workspacePath,
+      commandRunner,
+    );
+    if (jjBookmarks.length > 0) {
+      return jjBookmarks;
+    }
+  }
+
   const sym = (
-    await commandRunner(["git", "symbolic-ref", "-q", "HEAD"], workspacePath, {
-      gitAware: true,
-    })
+    await commandRunner(
+      ["git", "symbolic-ref", "-q", "--short", "HEAD"],
+      workspacePath,
+      { gitAware: true },
+    )
   )?.trim();
-  return sym !== undefined && sym.length > 0 ? sym : "";
+  if (sym !== undefined && sym.length > 0) {
+    return [sym];
+  }
+
+  if (!preferJj) {
+    return readJjImplicitPrSelectors(workspacePath, commandRunner);
+  }
+  return [];
+}
+
+async function readJjImplicitPrSelectors(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): Promise<readonly string[]> {
+  const jjBookmarks = (
+    await commandRunner(
+      [
+        "jj",
+        "bookmark",
+        "list",
+        "-r",
+        "heads(::@ & bookmarks())",
+        "-T",
+        'name ++ "\\n"',
+      ],
+      workspacePath,
+    )
+  )
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (jjBookmarks === undefined || jjBookmarks.length === 0) {
+    return [];
+  }
+  return [...new Set(jjBookmarks)].sort();
+}
+
+function formatGhRepoScope(
+  scope: Pick<RemoteScope, "host" | "owner" | "repo">,
+): string {
+  if (scope.host === "github.com") {
+    return `${scope.owner}/${scope.repo}`;
+  }
+  return `${scope.host}/${scope.owner}/${scope.repo}`;
 }
 
 function pullRequestDiscoverCacheKey(
@@ -1648,24 +1752,38 @@ function pullRequestDiscoverCacheKey(
   pullRequestNumber: number | undefined,
   commandRunner: CommandRunner,
   workspaceRevisionForCacheKey: string,
-  implicitBranchRefToken: string,
+  implicitSelectorToken: string,
+  remoteScopeToken: string,
 ): string {
   const prSlot =
     pullRequestNumber === undefined ? "" : String(pullRequestNumber);
-  return `${resolve(workspacePath)}|${prSlot}|${commandRunnerCacheSlot(commandRunner)}|${workspaceRevisionForCacheKey}|${implicitBranchRefToken}`;
+  return `${resolve(workspacePath)}|${prSlot}|${commandRunnerCacheSlot(commandRunner)}|${workspaceRevisionForCacheKey}|${implicitSelectorToken}|${remoteScopeToken}`;
 }
 
 async function fetchPullRequestJson(
   workspacePath: string,
   commandRunner: CommandRunner,
-  pullRequestNumber?: number,
+  input: {
+    readonly pullRequestNumber?: number;
+    readonly selector?: string;
+    readonly repoScope?: string;
+  } = {},
 ): Promise<PullRequestMetadata | undefined> {
+  const selectorArg =
+    input.pullRequestNumber !== undefined
+      ? String(input.pullRequestNumber)
+      : input.selector;
   const json = await commandRunner(
     [
       "gh",
       "pr",
       "view",
-      ...(pullRequestNumber !== undefined ? [String(pullRequestNumber)] : []),
+      ...(selectorArg !== undefined && selectorArg.length > 0
+        ? [selectorArg]
+        : []),
+      ...(input.repoScope !== undefined && input.repoScope.length > 0
+        ? ["--repo", input.repoScope]
+        : []),
       "--json",
       "number,title,body,url,baseRefName,headRefOid",
     ],
@@ -1711,16 +1829,23 @@ export async function discoverPullRequest(
     workspacePath,
     commandRunner,
   );
-  const implicitBranchRefToken =
+  const implicitSelectors =
     pullRequestNumber === undefined
-      ? await workspaceSymbolicHeadRefForCacheKey(workspacePath, commandRunner)
-      : "";
+      ? await workspaceImplicitPrSelectors(workspacePath, commandRunner)
+      : [];
+  const remoteScope = await resolvePreferredRemoteScope(
+    workspacePath,
+    commandRunner,
+  );
+  const repoScope =
+    remoteScope === undefined ? undefined : formatGhRepoScope(remoteScope);
   const key = pullRequestDiscoverCacheKey(
     workspacePath,
     pullRequestNumber,
     commandRunner,
     revision,
-    implicitBranchRefToken,
+    implicitSelectors.join(","),
+    repoScope ?? "",
   );
   const hit = discoverPullRequestHits.get(key);
   if (hit !== undefined) {
@@ -1734,11 +1859,18 @@ export async function discoverPullRequest(
 
   inflight = (async (): Promise<PullRequestMetadata | undefined> => {
     try {
-      const meta = await fetchPullRequestJson(
-        workspacePath,
-        commandRunner,
-        pullRequestNumber,
-      );
+      const meta =
+        pullRequestNumber !== undefined
+          ? await fetchPullRequestJson(workspacePath, commandRunner, {
+              pullRequestNumber,
+              repoScope,
+            })
+          : await fetchPullRequestJsonWithSelectors(
+              workspacePath,
+              commandRunner,
+              implicitSelectors,
+              repoScope,
+            );
       if (meta !== undefined) {
         discoverPullRequestHits.set(key, meta);
       }
@@ -1753,15 +1885,96 @@ export async function discoverPullRequest(
   return inflight;
 }
 
+async function fetchPullRequestJsonWithSelectors(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+  selectors: readonly string[],
+  repoScope: string | undefined,
+): Promise<PullRequestMetadata | undefined> {
+  if (selectors.length === 0) {
+    return fetchPullRequestJson(workspacePath, commandRunner, { repoScope });
+  }
+
+  const preferred = preferImplicitPrSelector(selectors);
+  return fetchPullRequestJson(workspacePath, commandRunner, {
+    selector: preferred,
+    repoScope,
+  });
+}
+
+/** One gh call: prefer non-default bookmarks, else a stable lexicographic pick. */
+function preferImplicitPrSelector(selectors: readonly string[]): string {
+  const nonDefault = selectors.filter(
+    (name) => name !== "main" && name !== "master",
+  );
+  const pool = nonDefault.length > 0 ? nonDefault : selectors;
+  return [...pool].sort()[0] ?? selectors[0] ?? "";
+}
+
+const preferredRemoteScopeHits = new Map<string, RemoteScope>();
+const preferredRemoteScopeInFlight = new Map<
+  string,
+  Promise<RemoteScope | undefined>
+>();
+
+function preferredRemoteScopeCacheKey(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): string {
+  return `${resolve(workspacePath)}|${commandRunnerCacheSlot(commandRunner)}`;
+}
+
 export async function resolvePreferredRemoteScope(
   workspacePath: string,
   commandRunner: CommandRunner = runCommand,
+): Promise<RemoteScope | undefined> {
+  const key = preferredRemoteScopeCacheKey(workspacePath, commandRunner);
+  const hit = preferredRemoteScopeHits.get(key);
+  if (hit !== undefined) {
+    return hit;
+  }
+
+  let inflight = preferredRemoteScopeInFlight.get(key);
+  if (inflight !== undefined) {
+    return inflight;
+  }
+
+  inflight = (async (): Promise<RemoteScope | undefined> => {
+    try {
+      const scope = await resolvePreferredRemoteScopeUncached(
+        workspacePath,
+        commandRunner,
+      );
+      if (scope !== undefined) {
+        preferredRemoteScopeHits.set(key, scope);
+      }
+      return scope;
+    } finally {
+      preferredRemoteScopeInFlight.delete(key);
+    }
+  })();
+
+  preferredRemoteScopeInFlight.set(key, inflight);
+  return inflight;
+}
+
+async function resolvePreferredRemoteScopeUncached(
+  workspacePath: string,
+  commandRunner: CommandRunner,
 ): Promise<RemoteScope | undefined> {
   const trackingRemote = await resolveTrackingRemoteName(
     workspacePath,
     commandRunner,
   );
-  const names = await listRemoteNames(workspacePath, commandRunner);
+  let names = await listRemoteNames(workspacePath, commandRunner);
+  let jjUrlByName: ReadonlyMap<string, string> | undefined;
+  if (names.length === 0) {
+    const jjRemotes = await listJjRemoteEntries(workspacePath, commandRunner);
+    names = jjRemotes.map((remote) => remote.name);
+    jjUrlByName = new Map(
+      jjRemotes.map((remote) => [remote.name, remote.url] as const),
+    );
+  }
   const selected = selectPreferredRemoteName({
     trackingRemote,
     remoteNames: names,
@@ -1770,12 +1983,18 @@ export async function resolvePreferredRemoteScope(
     return undefined;
   }
 
-  const remoteUrl = await commandRunner(
-    ["git", "remote", "get-url", selected],
-    workspacePath,
-    { gitAware: true },
-  );
-  if (remoteUrl === undefined) {
+  const remoteUrl =
+    jjUrlByName?.get(selected) ??
+    (
+      await commandRunner(
+        ["git", "remote", "get-url", selected],
+        workspacePath,
+        {
+          gitAware: true,
+        },
+      )
+    )?.trim();
+  if (remoteUrl === undefined || remoteUrl.length === 0) {
     return undefined;
   }
   const parsed = parseGitRemoteUrl(remoteUrl.trim());
@@ -1789,6 +2008,35 @@ export async function resolvePreferredRemoteScope(
     owner: parsed.owner,
     repo: parsed.repo,
   };
+}
+
+async function listJjRemoteEntries(
+  workspacePath: string,
+  commandRunner: CommandRunner,
+): Promise<readonly { readonly name: string; readonly url: string }[]> {
+  const output = await commandRunner(
+    ["jj", "git", "remote", "list"],
+    workspacePath,
+  );
+  if (output === undefined) {
+    return [];
+  }
+
+  const remotes: { name: string; url: string }[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const match = /^(\S+)\s+(\S+)$/.exec(trimmed);
+    if (match === null) {
+      continue;
+    }
+    remotes.push({ name: match[1] ?? "", url: match[2] ?? "" });
+  }
+  return remotes.filter(
+    (remote) => remote.name.length > 0 && remote.url.length > 0,
+  );
 }
 
 export async function resolveTrackingRemoteName(
