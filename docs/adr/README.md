@@ -98,3 +98,9 @@ so it is upheld in review.
   `WorkflowDefinition`, but reject `.agents/policies/` and `x.harness` as
   destinations — harnesses parse their own config from `definition.config`;
   scheduled for a later pass.
+- [0017-knowledge-governance.md](0017-knowledge-governance.md) — ADR 0017:
+  knowledge governance answers — required staged-note schema with
+  runtime-written provenance, no builtin extractor, a reserved machine
+  identifier namespace that makes human collisions impossible, and an enforced
+  auto-context budget that degrades visibly. Decisions only; implementation
+  stays blocked on run-level hook dispatch.
