@@ -1017,7 +1017,7 @@ test("loadHarness rejects malformed refs and role files", async () => {
     await expect(
       loadHarness({ agentsDir: scratch, harnessId: "refs" }),
     ).rejects.toThrow(
-      'role auditor references unknown role file "nope" (available: none)',
+      'role file "nope" not found at agents/nope/agent.md (available: none)',
     );
 
     const roleDir = join(scratch, "agents", "auditor");
@@ -1061,6 +1061,38 @@ test("loadHarness rejects malformed refs and role files", async () => {
     await expect(
       loadHarness({ agentsDir: scratch, harnessId: "refs" }),
     ).rejects.toThrow("role auditor description is required");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("a malformed unreferenced role file does not break harness loading", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const brokenDir = join(scratch, "agents", "broken");
+    await mkdir(brokenDir, { recursive: true });
+    await writeFile(join(brokenDir, "agent.md"), "no frontmatter at all\n");
+
+    const harnessDir = join(scratch, "harnesses", "refs");
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: refs }",
+        "roles:",
+        "  auditor:",
+        "    description: Declared inline.",
+        "    prompt: Inline prompt.",
+      ].join("\n"),
+    );
+
+    // Resolution is by reference only, so an unreferenced file is never read.
+    const loaded = await loadHarness({ agentsDir: scratch, harnessId: "refs" });
+    expect(loaded.definition.roles[0].description).toBe("Declared inline.");
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

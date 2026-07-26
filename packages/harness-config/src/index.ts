@@ -409,13 +409,10 @@ function resolveRoleRef(
     return declared;
   }
   const ref = requiredString(declared.ref, `role ${roleId} ref`);
-  assertValidIdToken("role", ref);
   const roleFile = roleFiles.get(ref);
   if (roleFile === undefined) {
-    const available = [...roleFiles.keys()].sort();
-    fail(
-      `role ${roleId} references unknown role file "${ref}" (available: ${available.length === 0 ? "none" : available.join(", ")})`,
-    );
+    // Unreachable: every declared ref is loaded before roles are parsed.
+    fail(`role ${roleId} references unresolved role file "${ref}"`);
   }
   const { ref: _ref, ...overrides } = declared;
   const merged: Record<string, unknown> = {
@@ -467,33 +464,54 @@ function parseRoleFile(source: string, label: string): RoleFile {
   return { frontMatter, prompt };
 }
 
+/** Role file ids present under `.agents/agents/`, for error messages only. */
+async function listRoleFileIds(rolesDir: string): Promise<readonly string[]> {
+  try {
+    return [...(await readdir(rolesDir))].sort();
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Discover repo-scoped role definitions under `.agents/agents/<id>/agent.md`.
- * A missing directory is not an error — role files are opt-in.
+ * Load the repo-scoped role files a harness actually references, from
+ * `.agents/agents/<id>/agent.md`. Resolution is by reference only, so an
+ * unreferenced role file is never read and cannot break an unrelated harness.
  */
-export async function loadRoleFiles(
+export async function loadReferencedRoleFiles(
   agentsDir: string,
+  refs: Iterable<string>,
 ): Promise<ReadonlyMap<string, RoleFile>> {
   const rolesDir = join(resolve(agentsDir), "agents");
-  let entries: string[];
-  try {
-    entries = await readdir(rolesDir);
-  } catch {
-    return new Map();
-  }
   const roleFiles = new Map<string, RoleFile>();
-  for (const id of [...entries].sort()) {
-    const path = join(rolesDir, id, "agent.md");
+  for (const id of new Set(refs)) {
+    assertValidIdToken("role", id);
     let source: string;
     try {
-      source = await readFile(path, "utf8");
+      source = await readFile(join(rolesDir, id, "agent.md"), "utf8");
     } catch {
-      continue;
+      const available = await listRoleFileIds(rolesDir);
+      fail(
+        `role file "${id}" not found at agents/${id}/agent.md (available: ${available.length === 0 ? "none" : available.join(", ")})`,
+      );
     }
-    assertValidIdToken("role", id);
     roleFiles.set(id, parseRoleFile(source, `role file "${id}"`));
   }
   return roleFiles;
+}
+
+/** Collect the `ref:` values a harness `roles:` record declares. */
+function collectRoleRefs(
+  roleEntries: readonly (readonly [string, unknown])[],
+): readonly string[] {
+  const refs: string[] = [];
+  for (const [roleId, value] of roleEntries) {
+    const record = asRecord(value, `role ${roleId}`);
+    if (record.ref !== undefined) {
+      refs.push(requiredString(record.ref, `role ${roleId} ref`));
+    }
+  }
+  return refs;
 }
 
 function parseRole(
@@ -1008,7 +1026,10 @@ export async function loadHarness(
   if (roleEntries.length === 0) {
     fail("roles must define at least one role");
   }
-  const roleFiles = await loadRoleFiles(agentsDir);
+  const roleFiles = await loadReferencedRoleFiles(
+    agentsDir,
+    collectRoleRefs(roleEntries),
+  );
   const parsedRoles = roleEntries.map(([roleId, value]) =>
     parseRole(roleId, value, harnessDir, roleFiles),
   );
