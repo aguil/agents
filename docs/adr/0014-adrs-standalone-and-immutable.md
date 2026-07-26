@@ -1,6 +1,10 @@
 # ADR 0014: ADRs are standalone and immutable
 
-**Status:** Accepted
+**Status:** Proposed
+
+**Status history:**
+
+- 2026-07-26 — Proposed.
 
 **Context:** Several ADRs cited planning and exploration documents maintained
 outside this repository. Two problems followed. First, the cited material is not
@@ -13,6 +17,14 @@ separately-versioned document to be understood.
 
 Separately, no rule stated whether an Accepted ADR could be edited. Practice was
 inconsistent, and the question recurs whenever a reference goes stale.
+
+Status handling was inconsistent too. Only ADR 0002 carries a `**Date:**`, so
+for most ADRs there is no record of when they were accepted. Four different ways
+of qualifying `Accepted` are in use: bare (0003–0006), a parenthetical caveat
+(0001, "tracking item; work not done yet"), a partial-supersession note in prose
+(0007), and a progress note (0013, "stage 4 complete"). ADR 0013's status has
+been rewritten as its stages completed, so the dates of the earlier transitions
+are lost — a mutable field with no audit trail.
 
 **Decision:**
 
@@ -28,18 +40,72 @@ inconsistent, and the question recurs whenever a reference goes stale.
    issue numbers, package names and versions, upstream specifications — are not
    documents in this sense and remain citable.
 
-2. **ADRs are immutable.** Once an ADR is Accepted, its decisions and their
-   recorded reasoning change only through a new ADR that supersedes it, in whole
-   or in part. Do not revise an Accepted ADR to reflect a changed mind; the
-   superseding ADR carries the change and the older record stands as history.
+2. **ADRs are immutable except for status.** Immutability attaches when an ADR
+   merges to `main`. From that point the only editable part is its status — the
+   `**Status:**` line and its `**Status history:**` block, per clause 4.
+   Everything else is frozen: title, context, decision, consequences,
+   references. A changed mind is recorded by a new ADR that supersedes this one,
+   in whole or in part; the older record stands as history.
 
-3. **Reference hygiene is editorial, not decisional.** Removing an outward
-   reference and inlining its substance does not alter what was decided, so it
-   does not require supersession. Supersession would in fact misrepresent the
-   history by implying a decision changed. Such edits are permitted, must
-   preserve the decision exactly, and must be enumerated in an ADR — this one
-   authorizes the sweep below. If an outward reference is introduced in future,
-   removing it falls under this clause.
+   Before merge an ADR is under review and normal revision applies. An unmerged
+   ADR carries `Proposed`, not `Accepted`.
+
+3. **Reference hygiene was a one-time editorial exception, now closed.**
+   Removing an outward reference and inlining its substance does not alter what
+   was decided, so it did not require supersession — supersession would have
+   misrepresented the history by implying a decision changed. This ADR
+   authorized exactly one such sweep, enumerated below. That authorization is
+   **spent**. Clause 1 prevents new outward references from being introduced;
+   should one appear anyway, removing it requires a new ADR authorizing that
+   edit in the same enumerated form, not an appeal to this clause.
+
+4. **Status format.** Every ADR carries two adjacent fields directly beneath its
+   title:
+
+   ```markdown
+   **Status:** <State> [— <short qualifier>]
+
+   **Status history:**
+
+   - <YYYY-MM-DD> — <State>[: <what changed and why>].
+   ```
+
+   `**Status:**` holds the current state and may be rewritten. It is the one
+   mutable line in an ADR. `**Status history:**` is strictly append-only: never
+   edit or delete an existing entry.
+
+   Every change to `**Status:**` appends a dated history entry. The state token
+   comes from a fixed vocabulary, so the field stays greppable:
+
+   | State                              | Meaning                                              |
+   | ---------------------------------- | ---------------------------------------------------- |
+   | `Proposed`                         | Open for review; not yet merged                      |
+   | `Accepted`                         | Merged and in force                                  |
+   | `Rejected`                         | Considered and declined; kept for the reasoning      |
+   | `Deprecated`                       | No longer in force, with nothing replacing it        |
+   | `Superseded by ADR NNNN`           | Wholly replaced                                      |
+   | `Partially superseded by ADR NNNN` | Some clauses replaced; the history entry names which |
+
+   The optional qualifier after an em dash carries a caveat or progress note
+   without changing the state token —
+   `Accepted — tracking item, work not started` or
+   `Accepted — stage 4 complete`. Progress updates append a history entry and
+   may rewrite the qualifier; the state stays `Accepted`.
+
+   Partial supersession is the case worth being explicit about. The state token
+   names the superseding ADR and the history entry names the clauses, so a
+   reader knows what still stands without opening the other ADR:
+
+   ```markdown
+   **Status:** Partially superseded by ADR 0008
+
+   **Status history:**
+
+   - 2026-07-18 — Accepted.
+   - 2026-07-19 — Partially superseded by ADR 0008: §3's
+     regeneration-as-policy-carrier and §5's non-sequential coarsening rule.
+     Regeneration itself remains, demoted from policy carrier to hygiene.
+   ```
 
 **The authorized sweep.** Applied with this ADR:
 
@@ -69,5 +135,12 @@ No decision text was altered in any of the five.
   ADRs; ADRs may not reference them.
 - The `docs/exploration/` entry in `.gitignore` is removed as vestigial — the
   directory it guarded is gone and this ADR removes the last reference to it.
-- Amending an Accepted ADR for any reason other than clause 3 is now a
-  recognizable error rather than a judgment call.
+- Amending a merged ADR outside its status fields is now a recognizable error
+  rather than a judgment call.
+- Status becomes auditable. Because history is append-only, the record of when
+  an ADR was accepted and when each clause was superseded survives instead of
+  being overwritten, which is what makes a mutable `**Status:**` line safe.
+- Existing ADRs predate this format. Retrofitting them touches only status
+  fields, so clause 2 permits it; acceptance dates are recoverable from the
+  first commit that added each file. Until an ADR is retrofitted its status
+  stays in whatever form it already has.
