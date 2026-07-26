@@ -6,9 +6,8 @@
 orchestrator only ran roles in parallel, `ContextRequest` carried PR-specific
 top-level fields, and worker routing hard-coded three kinds. Building a second
 harness (incident triage: scout → diagnose → fix → verify) requires generic
-surfaces that fail loudly if they are secretly code-review-shaped. Exploration
-notes behind this work live in `docs/exploration/` (deliberately untracked
-working notes); this ADR is the durable record of the accepted decisions.
+surfaces that fail loudly if they are secretly code-review-shaped. This ADR is
+the durable record of the accepted decisions.
 
 **Decision:**
 

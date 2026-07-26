@@ -50,3 +50,6 @@ shared package boundaries.
 - [0013-code-review-config-cutover.md](0013-code-review-config-cutover.md) — ADR
   0013: flagged cutover of `agents code-review` to the config-declared harness —
   tier evidence, staged rollout, corpus as permanent referee.
+- [0014-adrs-standalone-and-immutable.md](0014-adrs-standalone-and-immutable.md)
+  — ADR 0014: ADRs are standalone (no references to documents outside this repo)
+  and immutable (changed only by supersession); reference hygiene is editorial.

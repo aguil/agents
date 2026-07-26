@@ -36,4 +36,4 @@ runtime options. `applyCodexAlias` maps only `command`, `runtime` (when
 `command` is set), and stall/turn timeouts — not `codex.protocol` (set
 `agent.protocol` explicitly when needed).
 
-**References:** ADR 0003; provider-agnostic execution review plan.
+**References:** ADR 0003.

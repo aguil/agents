@@ -57,6 +57,5 @@ them into one orchestrator type.
 - Mastra remains optional; daemon scheduling follows Symphony-shaped contracts
   first.
 
-**References:** Plan “Symphony spec fit for agents”;
-[`AGENTS.md`](../../AGENTS.md);
+**References:** [`AGENTS.md`](../../AGENTS.md);
 [`docs/harnesses/code-review/architecture.md`](../harnesses/code-review/architecture.md).
