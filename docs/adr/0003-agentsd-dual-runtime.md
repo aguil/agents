@@ -1,12 +1,18 @@
 # ADR 0003: Dual runtime — harness orchestration and `agentsd` work queue
 
-**Status:** Accepted  
-**Context:** [OpenAI Symphony](https://github.com/openai/symphony/blob/main/SPEC.md)
-defines a long-running scheduler (poll, claim, retry, reconcile) over
-tracker-backed work items. This monorepo already has a **one-shot harness**
-model: parallel review roles, structured `Finding` outputs, and GitHub-centric
-CLIs (`agents code-review`, inbox, pr-feedback). We need both without collapsing
-them into one orchestrator type.
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-05-22 — Accepted.
+
+**Context:**
+[OpenAI Symphony](https://github.com/openai/symphony/blob/main/SPEC.md) defines
+a long-running scheduler (poll, claim, retry, reconcile) over tracker-backed
+work items. This monorepo already has a **one-shot harness** model: parallel
+review roles, structured `Finding` outputs, and GitHub-centric CLIs
+(`agents code-review`, inbox, pr-feedback). We need both without collapsing them
+into one orchestrator type.
 
 **Decision:**
 

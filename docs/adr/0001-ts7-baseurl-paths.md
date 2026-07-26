@@ -1,6 +1,11 @@
 # ADR 0001: Track `baseUrl` + `paths` before TypeScript 7
 
-**Status:** Accepted (tracking item; work not done yet)  
+**Status:** Accepted — tracking item, work not started
+
+**Status history:**
+
+- 2026-05-10 — Accepted.
+
 **Context:** TypeScript 6.0 deprecates `compilerOptions.baseUrl` (TS5101); it
 will stop functioning in TypeScript 7. This monorepo uses `baseUrl` + `paths` in
 the root [`tsconfig.json`](../../tsconfig.json) for `@aguil/agents-*` workspace

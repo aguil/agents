@@ -6,6 +6,41 @@ order.
 Record durable technical decisions here once they affect multiple harnesses or
 shared package boundaries.
 
+## Before writing or editing one
+
+Three requirements, decided in ADR 0014. Canonical wording:
+[`.agents/rules/adr-authoring.md`](../../.agents/rules/adr-authoring.md).
+
+1. **Standalone.** An ADR must be understandable from this repository alone. Do
+   not reference documents held outside it — inline the reasoning instead. Other
+   ADRs, repo-local files, issue numbers, package versions, and upstream specs
+   are all fine.
+
+2. **Immutable except for status.** Immutability attaches at merge to `main`.
+   After that the only editable part is the status fields below; title, context,
+   decision, consequences, and references are frozen. A changed mind is a new
+   ADR that supersedes the old one. Before merge an ADR is under review and
+   carries `Proposed`, not `Accepted`.
+
+3. **Status format.** Two adjacent fields directly beneath the title:
+
+   ```markdown
+   **Status:** <State> [— <short qualifier>]
+
+   **Status history:**
+
+   - <YYYY-MM-DD> — <State>[: <what changed and why>].
+   ```
+
+   `**Status:**` may be rewritten; `**Status history:**` is append-only. Every
+   change to the former appends a dated entry to the latter. States: `Proposed`,
+   `Accepted`, `Rejected`, `Deprecated`, `Superseded by ADR NNNN`,
+   `Partially superseded by ADR NNNN`.
+
+Number the decision clauses, so a later ADR can supersede `§3` precisely, and
+add the new file to the index below. Nothing here is enforced by CI yet (#131),
+so it is upheld in review.
+
 - [0001-ts7-baseurl-paths.md](0001-ts7-baseurl-paths.md) — ADR 0001: remove
   deprecated `baseUrl` / align `paths` before TypeScript 7 (tracking).
 - [0002-triage-pathname-io-accepted-risk.md](0002-triage-pathname-io-accepted-risk.md)

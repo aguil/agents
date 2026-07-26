@@ -1,6 +1,11 @@
 # ADR 0004: Provider-agnostic implementation runtime
 
-**Status:** Accepted  
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-05-22 — Accepted.
+
 **Context:** ADR 0003 introduced `agentsd` with an `implementation` worker.
 Early docs named Codex app-server as the only path. The monorepo already
 standardizes on [`AgentAdapter`](../../packages/execution/src/index.ts) for

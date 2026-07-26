@@ -1,10 +1,15 @@
 # ADR 0011: CEL role enablement (spec v0.2)
 
-**Status:** Accepted **Context:** #73 Tier 1 requires conditional role
-enablement so a config-driven code-review harness can express triage-tier
-scheduling (trivial → quality; lite → security/quality/compliance; full → all)
-declaratively. This ADR records both the expression language selection and how
-it enters the spec.
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-07-18 — Accepted.
+
+**Context:** #73 Tier 1 requires conditional role enablement so a config-driven
+code-review harness can express triage-tier scheduling (trivial → quality; lite
+→ security/quality/compliance; full → all) declaratively. This ADR records both
+the expression language selection and how it enters the spec.
 
 CEL is the expression language because it is side-effect-free and deterministic,
 so an expression is safe to evaluate anywhere in the pipeline and cannot vary

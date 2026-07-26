@@ -1,6 +1,11 @@
 # ADR 0005: Harness generalization Phase 0 — generic core surfaces
 
-**Status:** Accepted  
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-07-17 — Accepted.
+
 **Context:** The monorepo's shared packages were code-review-shaped: `Finding`
 (file/line/severity) was the only outcome type in `packages/core`, the
 orchestrator only ran roles in parallel, `ContextRequest` carried PR-specific

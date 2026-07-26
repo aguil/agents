@@ -142,5 +142,17 @@ No decision text was altered in any of the five.
   being overwritten, which is what makes a mutable `**Status:**` line safe.
 - Existing ADRs predate this format. Retrofitting them touches only status
   fields, so clause 2 permits it; acceptance dates are recoverable from the
-  first commit that added each file. Until an ADR is retrofitted its status
-  stays in whatever form it already has.
+  first commit that added each file. ADRs 0001–0013 were retrofitted with this
+  ADR, so no ADR models the superseded convention to whoever writes 0015.
+- This policy is only as discoverable as its surfaces. It is restated in
+  `.agents/rules/adr-authoring.md` (canonical wording, matching the pattern of
+  the conventional-commits and pre-commit rules), summarized in
+  `docs/adr/README.md` where an author will land, and summarized again in
+  `AGENTS.md` because Cursor and similar IDE agents load that file and do not
+  auto-discover `.agents/`. An ADR alone would not have been found by a session
+  about to write one.
+- Enforcement is deferred, so all of the above is upheld in review. Issue #131
+  tracks a CI check and the tool selection behind it. The precedent is worth
+  heeding: the conventional-commits convention went unenforced until an invalid
+  header caused release-please to silently drop a commit, which is why the
+  `commit-headers` job exists.

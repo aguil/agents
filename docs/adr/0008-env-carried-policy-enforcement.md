@@ -1,14 +1,20 @@
 # ADR 0008: Env-carried per-role policy enforcement (role-invariant hook config)
 
-**Status:** Accepted **Context:** ADR 0007 §3/§5 enforced per-role policy by
-rewriting `<workspace>/.cursor/hooks.json` with the role's effective policy id
-before each role. Because Cursor reads one hook config at a fixed workspace
-path, that mechanism was only race-free for sequential roles: parallel and
-validation-loop modes deliberately coarsened to the harness-level policy (with a
-warning), and two concurrent runs sharing a workspace could make a role execute
-under the other run's policy (#76). The redesign constraints — per-role
-enforcement in all modes, concurrent-run safety, and no re-introduction of the
-mid-run tamper vector — are recorded in #77.
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-07-18 — Accepted.
+
+**Context:** ADR 0007 §3/§5 enforced per-role policy by rewriting
+`<workspace>/.cursor/hooks.json` with the role's effective policy id before each
+role. Because Cursor reads one hook config at a fixed workspace path, that
+mechanism was only race-free for sequential roles: parallel and validation-loop
+modes deliberately coarsened to the harness-level policy (with a warning), and
+two concurrent runs sharing a workspace could make a role execute under the
+other run's policy (#76). The redesign constraints — per-role enforcement in all
+modes, concurrent-run safety, and no re-introduction of the mid-run tamper
+vector — are recorded in #77.
 
 A spike against the real Cursor CLI (2026.07.16) established three facts the
 design relies on:
