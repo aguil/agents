@@ -93,3 +93,8 @@ so it is upheld in review.
   JSON Schema is its normative description, `0.2` current with `0.1` a
   deprecated alias, and `spec_version` is advisory only while increments stay
   additive.
+- [0016-workflow-policy-decoupling.md](0016-workflow-policy-decoupling.md) — ADR
+  0016: remove `prFeedbackPolicy` / `codeReviewPolicy` from
+  `WorkflowDefinition`, but reject `.agents/policies/` and `x.harness` as
+  destinations — harnesses parse their own config from `definition.config`;
+  scheduled for a later pass.
