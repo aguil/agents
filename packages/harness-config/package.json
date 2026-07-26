@@ -11,6 +11,7 @@
     "@aguil/agents-execution": "workspace:*",
     "@aguil/agents-orchestration": "workspace:*",
     "@aguil/agents-reporting": "workspace:*",
-    "@marcbachmann/cel-js": "^8.0.0"
+    "@marcbachmann/cel-js": "^8.0.0",
+    "ajv": "^8.20.0"
   }
 }

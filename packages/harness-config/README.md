@@ -13,6 +13,25 @@ Phase 1 scope (deliberately minimal):
 - Policy files are parsed and carried through for the policy-eval layer; this
   package does not enforce them.
 
+## Schema validation
+
+`harness.yaml` is validated against a JSON Schema before any semantic check
+runs. The schema is hand-authored at `src/harness.schema.json` and published
+verbatim at `.agents/schemas/harness.schema.json`, which ADR 0015 designates the
+normative description of the format; a test pins the two copies together.
+
+The schema describes the whole format, but the loader reports only the problems
+it could not already detect — unknown keys, and valid keys at the wrong nesting
+level. Everything else stays with the existing checks, whose messages name the
+offending value rather than only the rule. Net enforcement is unchanged; the
+message a reader gets is the better of the two.
+
+Nine checks cannot move into a schema at all, because they depend on the
+filesystem (a referenced policy or role file existing), on compiling a CEL
+expression, or on agreement between separate parts of the document (execution
+order naming a declared role, `harness.id` matching its directory). The schema
+is a layer in front of those, not a replacement for them.
+
 ## Role files
 
 A role may be defined once at `agents/<id>/agent.md` and reused across
