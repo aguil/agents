@@ -1,7 +1,11 @@
 # ADR 0002: Accepted risk — pathname-based triage and harness I/O (no openat chain)
 
-**Status:** Accepted  
-**Date:** 2026-05-14  
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-05-14 — Accepted.
+
 **Scope:** `packages/triage` ingest of `result.json`, triage output writes
 (`write-outputs.ts`), the code-review harness pointer writer
 (`writeLatestCodeReviewDiscoveryPointer` in `harnesses/code-review`), and

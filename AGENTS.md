@@ -41,6 +41,15 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
 - With **Jujutsu**, keep **`git.sign-on-push = true`** in jj config and use
   **`jj sign`** on any still-unsigned revisions before **`jj git push`** so
   published commits stay signed (details in the same `.agents` doc).
+- Architecture decisions go in [`docs/adr/`](docs/adr/) as
+  `NNNN-short-title.md`. ADRs are **standalone** — never reference a document
+  outside this repository; inline the reasoning instead. Once merged they are
+  **immutable except for status**: a changed mind is a new superseding ADR, and
+  the only editable parts are the `**Status:**` line (rewritable) and the
+  `**Status history:**` block (append-only, one dated entry per change). Before
+  merge an ADR carries `Proposed`. Canonical wording:
+  [`.agents/rules/adr-authoring.md`](.agents/rules/adr-authoring.md); the
+  requirements are also restated in [`docs/adr/README.md`](docs/adr/README.md).
 - Store design notes and product requirements under `docs/`. Maintainer release
   steps: [`docs/release-checklist.md`](docs/release-checklist.md).
 - Store portable Agent Skills playbooks under `docs/skills/`; verify semver with

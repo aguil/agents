@@ -1,14 +1,18 @@
 # ADR 0005: Harness generalization Phase 0 — generic core surfaces
 
-**Status:** Accepted  
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-07-17 — Accepted.
+
 **Context:** The monorepo's shared packages were code-review-shaped: `Finding`
 (file/line/severity) was the only outcome type in `packages/core`, the
 orchestrator only ran roles in parallel, `ContextRequest` carried PR-specific
 top-level fields, and worker routing hard-coded three kinds. Building a second
 harness (incident triage: scout → diagnose → fix → verify) requires generic
-surfaces that fail loudly if they are secretly code-review-shaped. Exploration
-notes behind this work live in `docs/exploration/` (deliberately untracked
-working notes); this ADR is the durable record of the accepted decisions.
+surfaces that fail loudly if they are secretly code-review-shaped. This ADR is
+the durable record of the accepted decisions.
 
 **Decision:**
 

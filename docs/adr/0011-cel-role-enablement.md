@@ -1,11 +1,35 @@
 # ADR 0011: CEL role enablement (spec v0.2)
 
-**Status:** Accepted **Context:** #73 Tier 1 requires conditional role
-enablement so a config-driven code-review harness can express triage-tier
-scheduling (trivial → quality; lite → security/quality/compliance; full → all)
-declaratively. The expression language decision (CEL via `@marcbachmann/cel-js`)
-was made in the harness-generalization exploration (2026-07-06); this ADR
-records how it enters the spec.
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-07-18 — Accepted.
+
+**Context:** #73 Tier 1 requires conditional role enablement so a config-driven
+code-review harness can express triage-tier scheduling (trivial → quality; lite
+→ security/quality/compliance; full → all) declaratively. This ADR records both
+the expression language selection and how it enters the spec.
+
+CEL is the expression language because it is side-effect-free and deterministic,
+so an expression is safe to evaluate anywhere in the pipeline and cannot vary
+between evaluations of the same input; it has implementations across TypeScript,
+Go, Java and Python, so the spec is not bound to a single runtime; it is compact
+enough to sit inline as a YAML scalar; and it is established as a
+policy-expression language in Google IAM, Kubernetes admission webhooks, and
+Envoy, which means its semantics are well understood by anyone who will author
+these expressions.
+
+`@marcbachmann/cel-js` is the TypeScript runtime. The original `cel-js`
+(ChromeGG) stalled at v0.8.2 in July 2025 and is effectively superseded;
+`@marcbachmann/cel-js` is zero-dependency, MIT-licensed, ships full TypeScript
+definitions, and covers close to the full CEL spec including macros, custom
+functions and types, and optional chaining. Two of its features are load-bearing
+for our use: the Environment API's type checking for declared variables, and
+strict undeclared-variable handling via `unlistedVariablesAre`, which makes an
+expression referencing absent context fail loudly rather than silently
+evaluating against nothing. That second property is what the fail-closed
+evaluation below depends on.
 
 **Decision:**
 

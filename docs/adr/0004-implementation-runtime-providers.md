@@ -1,6 +1,11 @@
 # ADR 0004: Provider-agnostic implementation runtime
 
-**Status:** Accepted  
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-05-22 — Accepted.
+
 **Context:** ADR 0003 introduced `agentsd` with an `implementation` worker.
 Early docs named Codex app-server as the only path. The monorepo already
 standardizes on [`AgentAdapter`](../../packages/execution/src/index.ts) for
@@ -36,4 +41,4 @@ runtime options. `applyCodexAlias` maps only `command`, `runtime` (when
 `command` is set), and stall/turn timeouts — not `codex.protocol` (set
 `agent.protocol` explicitly when needed).
 
-**References:** ADR 0003; provider-agnostic execution review plan.
+**References:** ADR 0003.

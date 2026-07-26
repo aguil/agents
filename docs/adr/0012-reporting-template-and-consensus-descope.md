@@ -1,11 +1,16 @@
 # ADR 0012: `reporting.template` and the consensus descope (spec v0.2)
 
-**Status:** Accepted **Context:** #73 Tier 1 gates 5 and 6. Gate 5 requires
-`harness.yaml` to select report rendering declaratively with `report.md` parity
-against today's code-review output (Tier 3 demands byte-compatibility). Gate 6
-required either an `extensions.post_run` mechanism for consensus or an explicit
-descope decision; the operator chose descope (2026-07-18, plan approval for the
-#73 arc).
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-07-18 — Accepted.
+
+**Context:** #73 Tier 1 gates 5 and 6. Gate 5 requires `harness.yaml` to select
+report rendering declaratively with `report.md` parity against today's
+code-review output (Tier 3 demands byte-compatibility). Gate 6 required either
+an `extensions.post_run` mechanism for consensus or an explicit descope
+decision; the operator chose descope on 2026-07-18.
 
 **Decision:**
 

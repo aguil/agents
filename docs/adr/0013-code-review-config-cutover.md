@@ -1,8 +1,14 @@
 # ADR 0013: replace the code-review package path with the config-declared harness (flagged cutover)
 
-**Status:** Accepted — stage 4 complete: `runCodeReview` imperative
-orchestration removed; CLI, workers, and replay referee use the config-declared
-harness only.
+**Status:** Accepted — stage 4 complete
+
+**Status history:**
+
+- 2026-07-18 — Accepted.
+- 2026-07-18 — Stage 4 complete: `runCodeReview` imperative orchestration
+  removed; CLI, workers, and replay referee use the config-declared harness
+  only. Earlier stage transitions predate this history block and their dates
+  were not recorded.
 
 **Context:** #73 tracks replacing the build-time `harnesses/code-review` package
 behind `agents code-review` with a `harness.yaml`-configured harness. The tier

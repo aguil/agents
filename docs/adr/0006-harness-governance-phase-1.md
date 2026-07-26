@@ -1,6 +1,11 @@
 # ADR 0006: Harness governance Phase 1 — loader, policy evaluation, hook config
 
-**Status:** Accepted  
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-07-17 — Accepted.
+
 **Context:** ADR 0005 generalized the core types and orchestration for
 multi-harness support and forecast a governance layer: configuration loaded from
 `.agents/`, declarative policies enforced before any agent tool call, and

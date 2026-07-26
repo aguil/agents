@@ -1,9 +1,15 @@
 # ADR 0010: `context.providers` — declarative context collection (spec v0.2)
 
-**Status:** Accepted **Context:** #73 Tier 1 requires `harness.yaml` to express
-the code-review harness's context collection declaratively. Until now, providers
-were constructed imperatively (`runCodeReview` hard-codes its four providers)
-and `agents harness run` synthesized a static workspace artifact.
+**Status:** Accepted
+
+**Status history:**
+
+- 2026-07-18 — Accepted.
+
+**Context:** #73 Tier 1 requires `harness.yaml` to express the code-review
+harness's context collection declaratively. Until now, providers were
+constructed imperatively (`runCodeReview` hard-codes its four providers) and
+`agents harness run` synthesized a static workspace artifact.
 
 **Decision:**
 
