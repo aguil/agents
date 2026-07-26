@@ -485,13 +485,24 @@ export async function loadReferencedRoleFiles(
   refs: Iterable<string>,
 ): Promise<ReadonlyMap<string, RoleFile>> {
   const rolesDir = join(resolve(agentsDir), "agents");
-  const roleFiles = new Map<string, RoleFile>();
-  for (const id of new Set(refs)) {
+  const ids = [...new Set(refs)];
+  for (const id of ids) {
     assertValidIdToken("role", id);
-    let source: string;
-    try {
-      source = await readFile(join(rolesDir, id, "agent.md"), "utf8");
-    } catch {
+  }
+  // Independent reads, so latency is one round trip rather than the sum.
+  const sources = await Promise.all(
+    ids.map(async (id) => {
+      try {
+        return await readFile(join(rolesDir, id, "agent.md"), "utf8");
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  const roleFiles = new Map<string, RoleFile>();
+  for (const [index, id] of ids.entries()) {
+    const source = sources[index];
+    if (source === undefined) {
       const available = await listRoleFileIds(rolesDir);
       fail(
         `role file "${id}" not found at agents/${id}/agent.md (available: ${available.length === 0 ? "none" : available.join(", ")})`,
