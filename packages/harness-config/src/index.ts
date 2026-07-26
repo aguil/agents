@@ -490,25 +490,37 @@ export async function loadReferencedRoleFiles(
     assertValidIdToken("role", id);
   }
   // Independent reads, so latency is one round trip rather than the sum.
-  const sources = await Promise.all(
+  const reads = await Promise.all(
     ids.map(async (id) => {
       try {
-        return await readFile(join(rolesDir, id, "agent.md"), "utf8");
-      } catch {
-        return undefined;
+        return {
+          source: await readFile(join(rolesDir, id, "agent.md"), "utf8"),
+        };
+      } catch (error) {
+        return { error };
       }
     }),
   );
   const roleFiles = new Map<string, RoleFile>();
   for (const [index, id] of ids.entries()) {
-    const source = sources[index];
-    if (source === undefined) {
+    const read = reads[index];
+    if (read.source === undefined) {
+      const path = `agents/${id}/agent.md`;
+      // Only a genuinely absent file is a reference mistake; anything else
+      // (permissions, a directory in the way) must report its own cause.
+      if (
+        (read.error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT"
+      ) {
+        fail(
+          `role file "${id}" not readable at ${path}: ${read.error instanceof Error ? read.error.message : String(read.error)}`,
+        );
+      }
       const available = await listRoleFileIds(rolesDir);
       fail(
-        `role file "${id}" not found at agents/${id}/agent.md (available: ${available.length === 0 ? "none" : available.join(", ")})`,
+        `role file "${id}" not found at ${path} (available: ${available.length === 0 ? "none" : available.join(", ")})`,
       );
     }
-    roleFiles.set(id, parseRoleFile(source, `role file "${id}"`));
+    roleFiles.set(id, parseRoleFile(read.source, `role file "${id}"`));
   }
   return roleFiles;
 }
