@@ -1,10 +1,12 @@
 # ADR 0014: ADRs are standalone and immutable
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-07-26 — Proposed.
+- 2026-07-26 — Accepted: merged in #130. From here this ADR is immutable except
+  for these status fields.
 
 **Context:** Several ADRs cited planning and exploration documents maintained
 outside this repository. Two problems followed. First, the cited material is not
