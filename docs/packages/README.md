@@ -19,11 +19,11 @@ support multiple specialized harnesses; harness-specific logic belongs in
 
 Configuration and policy enforcement shared by all harnesses (ADR 0005/0006):
 
-| Package                   | npm name                       | Owns                                                                                                                                                                           |
-| ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/harness-config` | `@aguil/agents-harness-config` | `.agents/` loader: `harness.yaml` spec v0.1 (roles, execution, hooks), `policies/*.yaml` (AGENTS-1 capabilities/limits/confirmations), `manifest.yaml`; single-file resolution |
-| `packages/policy`         | `@aguil/agents-policy`         | Native policy evaluator: ACS 5-verdict model, deny-wins composition, fail-closed semantics, hook-contract adapter                                                              |
-| `packages/hooks`          | `@aguil/agents-hooks`          | Adapter hook config generation (Cursor `.cursor/hooks.json`): canonical event projection with builtin policy-eval bridge first                                                 |
+| Package                   | npm name                       | Owns                                                                                                                                                                  |
+| ------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/harness-config` | `@aguil/agents-harness-config` | `.agents/` loader: `harness.yaml` spec v0.2 (roles, execution, hooks), `policies/*.yaml` (capabilities/limits/confirmations), `manifest.yaml`; single-file resolution |
+| `packages/policy`         | `@aguil/agents-policy`         | Native policy evaluator: ACS 5-verdict model, deny-wins composition, fail-closed semantics, hook-contract adapter                                                     |
+| `packages/hooks`          | `@aguil/agents-hooks`          | Adapter hook config generation (Cursor `.cursor/hooks.json`): canonical event projection with builtin policy-eval bridge first                                        |
 
 ## CLI and tooling packages
 

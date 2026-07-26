@@ -7,8 +7,8 @@ Phase 1 scope (deliberately minimal):
 
 - Single-file resolution: `harnesses/<id>/harness.yaml` plus a `policy: <id>`
   reference resolved to `policies/<id>.yaml`. No scopes, profiles, user
-  overlays, or CLI-flag merging yet (that is the full AGENTS-1 resolution
-  algorithm, planned for a later phase).
+  overlays, or CLI-flag merging — layered resolution is a feature to justify on
+  its own merits if a need appears, not a conformance obligation (ADR 0015).
 - `manifest.yaml` is read only for `enabled.harnesses`.
 - Policy files are parsed and carried through for the policy-eval layer; this
   package does not enforce them.

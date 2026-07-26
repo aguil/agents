@@ -28,7 +28,7 @@ export const HARNESS_SPEC_VERSION = "0.2";
  */
 export const SUPPORTED_SPEC_VERSIONS: readonly string[] = ["0.1", "0.2"];
 
-/** AGENTS-1-style capability constraint lists (carried, not enforced here). */
+/** Capability constraint lists (carried here, enforced by the policy layer). */
 export interface PolicyCapabilityRules {
   readonly allow?: readonly string[];
   readonly deny?: readonly string[];
