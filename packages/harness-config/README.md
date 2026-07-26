@@ -7,8 +7,47 @@ Phase 1 scope (deliberately minimal):
 
 - Single-file resolution: `harnesses/<id>/harness.yaml` plus a `policy: <id>`
   reference resolved to `policies/<id>.yaml`. No scopes, profiles, user
-  overlays, or CLI-flag merging yet (that is the full AGENTS-1 resolution
-  algorithm, planned for a later phase).
+  overlays, or CLI-flag merging — layered resolution is a feature to justify on
+  its own merits if a need appears, not a conformance obligation (ADR 0015).
 - `manifest.yaml` is read only for `enabled.harnesses`.
 - Policy files are parsed and carried through for the policy-eval layer; this
   package does not enforce them.
+
+## Role files
+
+A role may be defined once at `agents/<id>/agent.md` and reused across
+harnesses. The frontmatter carries the role fields and the Markdown body is the
+prompt:
+
+```markdown
+---
+description: Audit the change for licensing problems.
+timeout_ms: 90000
+required_capabilities: [readOnlyMode]
+---
+
+Look for incompatible licenses.
+```
+
+Because the body is the prompt, `prompt` and `prompt_path` are not accepted in
+frontmatter. A harness pulls the role in by reference:
+
+```yaml
+roles:
+  licensing:
+    ref: auditor
+    timeout_ms: 120000
+```
+
+Two precedence rules, both deliberate:
+
+- **Reference is the only way in.** A role file is never merged implicitly, so a
+  file whose id matches a role the harness declares itself contributes nothing.
+  There is no shadowing to reason about.
+- **The harness wins.** Keys on the referencing entry override the file's
+  frontmatter; keys it omits fall through. The referencing key names the role,
+  so one file can back several roles under different ids.
+
+Role files are repo-scoped and shared; the per-harness `harnesses/<id>/prompts/`
+convention is unchanged and remains the right home for a prompt used by exactly
+one harness.

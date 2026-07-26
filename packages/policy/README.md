@@ -1,9 +1,9 @@
 # @aguil/agents-policy
 
 Native policy evaluator for the layered policy-enforcement architecture (ADR
-0005 follow-up): AGENTS-1 policy files are the enforcement source of truth; this
-evaluator runs **before** user hooks at each intervention point, and user hooks
-can tighten but never override a policy deny.
+0005 follow-up): `.agents/policies/*.yaml` are the enforcement source of truth;
+this evaluator runs **before** user hooks at each intervention point, and user
+hooks can tighten but never override a policy deny.
 
 - **5-verdict model:** `allow | warn | deny | escalate | transform`
 - **Composition:** `composeVerdicts` orders deny > escalate > transform > warn >
