@@ -88,3 +88,8 @@ so it is upheld in review.
 - [0014-adrs-standalone-and-immutable.md](0014-adrs-standalone-and-immutable.md)
   — ADR 0014: ADRs are standalone (no references to documents outside this repo)
   and immutable (changed only by supersession); reference hygiene is editorial.
+- [0015-project-local-harness-spec.md](0015-project-local-harness-spec.md) — ADR
+  0015: the harness spec is project-local (AGENTS-1 convergence struck), the
+  JSON Schema is its normative description, `0.2` current with `0.1` a
+  deprecated alias, and `spec_version` is advisory only while increments stay
+  additive.
