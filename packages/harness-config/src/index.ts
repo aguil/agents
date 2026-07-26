@@ -430,16 +430,18 @@ function resolveRoleRef(
  * the role's prompt.
  */
 function parseRoleFile(source: string, label: string): RoleFile {
-  const normalized = source.replace(/\r\n/g, "\n");
-  if (!normalized.startsWith("---\n")) {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  if (lines[0] !== "---") {
     fail(`${label} must begin with a "---" frontmatter delimiter`);
   }
-  const end = normalized.indexOf("\n---", 3);
+  // A delimiter is a line of exactly "---"; "---oops" is a malformed one
+  // rather than a terminator, so it must not close the block.
+  const end = lines.indexOf("---", 1);
   if (end === -1) {
     fail(`${label} frontmatter is not terminated by a closing "---"`);
   }
-  const frontMatterSource = normalized.slice(4, end + 1);
-  const body = normalized.slice(end + 4).replace(/^[^\n]*\n?/, "");
+  const frontMatterSource = lines.slice(1, end).join("\n");
+  const body = lines.slice(end + 1).join("\n");
   let parsed: unknown;
   try {
     parsed = Bun.YAML.parse(frontMatterSource);

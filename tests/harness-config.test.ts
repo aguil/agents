@@ -1053,6 +1053,15 @@ test("loadHarness rejects malformed refs and role files", async () => {
       loadHarness({ agentsDir: scratch, harnessId: "refs" }),
     ).rejects.toThrow("empty body; the body is the role prompt");
 
+    // A near-miss delimiter is malformed, not a terminator.
+    await writeFile(
+      join(roleDir, "agent.md"),
+      ["---", "description: A.", "---oops", "", "Body.", ""].join("\n"),
+    );
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "refs" }),
+    ).rejects.toThrow('not terminated by a closing "---"');
+
     // A role file supplying no description is still an incomplete role.
     await writeFile(
       join(roleDir, "agent.md"),
