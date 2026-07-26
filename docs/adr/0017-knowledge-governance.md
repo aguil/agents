@@ -41,34 +41,21 @@ repository-scoped and durable, surviving any single run; staged notes are
 transient and expire; and both are distinct from per-run working state, which
 does not survive the run at all.
 
-**What exists today: almost none of it.** Verified against the current tree.
-There is no `knowledge:` block in any harness definition, no knowledge directory
-in either `.agents/` tree, and no file in the repository with "knowledge" in its
-name. The context provider registry (`packages/context/src/index.ts:417-424`)
-offers seven providers — `git-diff`, `pr-metadata`, `pr-referenced-docs`,
-`agents-md`, `static-file`, `shell-command`, `file-glob` — and none reads a
-knowledge store, so the read path does not exist either. The per-run working
-state the model contrasts against is likewise unbuilt: the identifier appears
-nowhere in the repository.
+**What exists today, and why the implementation is blocked.** Almost none of the
+model above is built: no `knowledge:` block, no knowledge directory in either
+`.agents/` tree, and no context provider that reads a knowledge store, so the
+read path is absent too. The write path is blocked rather than merely unwritten.
+It was designed to run at the end of a run through a `run_end` hook, and that
+hook cannot fire — the event is declarable and the loader accepts a handler for
+it, but hook generation drops it, a test pins that behavior, and the
+orchestrator dispatches no run-level events of its own. `run_start` and
+`role_start` are inert in the same way.
 
-**Why the implementation is blocked.** The write path was designed to run at the
-end of a run, through a `run_end` hook. That hook cannot fire. `run_end` is a
-valid event in the harness vocabulary (`HOOK_EVENTS`,
-`packages/harness-config/src/index.ts:62-71`) and in the policy intervention
-vocabulary (`packages/policy/src/index.ts:38-44`), and the loader accepts a
-handler declared against it. But projection to the only adapter with a hook
-generator drops it: `CURSOR_EVENT_MAPPING` (`packages/hooks/src/index.ts:20-26`)
-maps `pre_tool_call` to `beforeShellExecution` and `beforeMCPExecution`,
-`post_tool_call` to `afterFileEdit`, and `role_stop` to `stop` — and nothing
-else. `tests/hooks-generation.test.ts:66` pins the resulting behavior with
-`expect(skippedEvents).toEqual(["run_end"])`. The orchestrator does not close
-the gap: its only lifecycle callback is `onRoleStart`
-(`packages/orchestration/src/index.ts:458`), which the CLI uses to rewrite
-adapter hook configuration, and it runs no hook commands itself. Hook execution
-belongs entirely to the adapter. So a declared `run_end` handler is accepted,
-never generated, and never run. `run_start` and `role_start` are inert in
-exactly the same way; `role_stop` is the only lifecycle event that reaches an
-adapter.
+The evidence for that, with file and line references, is
+`docs/design/knowledge-write-back-blockers.md`. It is kept separate
+deliberately: it is a statement about the code at a moment, and this ADR is
+immutable, so freezing line numbers here would guarantee they became wrong. That
+note is maintained; this ADR is not.
 
 The three questions are worth answering despite that, because they are cheap now
 and expensive later. Each constrains an artifact — a note's frontmatter, an
@@ -221,11 +208,12 @@ back-pressure, which is the standard case for an enforced bound.
   Clause 8 is the mitigation — the answers bind an implementation that must
   either conform or supersede, and supersession is the normal mechanism under
   ADR 0014 rather than an admission of failure.
-- The inert-lifecycle-event problem is now documented in an ADR rather than
-  discoverable only by reading `CURSOR_EVENT_MAPPING` against `HOOK_EVENTS`.
-  That the loader accepts handlers for events that can never fire is a trap
-  beyond knowledge write-back, and anyone hitting it will now find this
-  explanation.
+- The inert-lifecycle-event problem is now written down rather than discoverable
+  only by reading hook generation against the declared event list. That the
+  loader accepts handlers for events that can never fire is a trap beyond
+  knowledge write-back, and anyone hitting it will find the explanation.
+- The blockers note may go unmaintained, in which case a reader is no worse off
+  than if the same text had been frozen into this ADR.
 
 **References:**
 
@@ -238,5 +226,8 @@ back-pressure, which is the standard case for an enforced bound.
 - ADR 0010 — the context provider contract that a knowledge read path would
   implement.
 - ADR 0014 — ADRs are standalone; the reason this ADR restates the governance
-  model rather than citing it.
+  model in its own words. Repo-local `docs/` material remains citable, which is
+  what the blockers note below relies on.
+- `docs/design/knowledge-write-back-blockers.md` — the maintained record of what
+  exists and what blocks the write path.
 - Issue #136 (this decision).
