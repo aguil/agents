@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type {
   ExecutionConfig,
@@ -372,23 +372,144 @@ const ROLE_FIELDS: ReadonlySet<string> = new Set([
   "policy",
 ]);
 
+/**
+ * Frontmatter keys accepted in a role file. `prompt` and `prompt_path` are
+ * excluded deliberately: the Markdown body below the frontmatter is the
+ * prompt, so a role file has no need to point elsewhere for one.
+ */
+const ROLE_FILE_FIELDS: ReadonlySet<string> = new Set(
+  [...ROLE_FIELDS].filter(
+    (field) => field !== "prompt" && field !== "prompt_path",
+  ),
+);
+
 interface ParsedRole {
   readonly role: RoleDefinition;
   readonly policyId?: string;
+}
+
+/** A role defined as `.agents/agents/<id>/agent.md`, before harness overrides. */
+export interface RoleFile {
+  readonly frontMatter: Record<string, unknown>;
+  readonly prompt: string;
+}
+
+/**
+ * Apply a `ref:` to a harness role entry. Role files are only consulted when
+ * referenced — a file never shadows a role the harness declares itself — and
+ * sibling keys on the referencing entry override the file's frontmatter, so
+ * the harness always wins where it states an opinion.
+ */
+function resolveRoleRef(
+  roleId: string,
+  declared: Record<string, unknown>,
+  roleFiles: ReadonlyMap<string, RoleFile>,
+): Record<string, unknown> {
+  if (declared.ref === undefined) {
+    return declared;
+  }
+  const ref = requiredString(declared.ref, `role ${roleId} ref`);
+  assertValidIdToken("role", ref);
+  const roleFile = roleFiles.get(ref);
+  if (roleFile === undefined) {
+    const available = [...roleFiles.keys()].sort();
+    fail(
+      `role ${roleId} references unknown role file "${ref}" (available: ${available.length === 0 ? "none" : available.join(", ")})`,
+    );
+  }
+  const { ref: _ref, ...overrides } = declared;
+  const merged: Record<string, unknown> = {
+    ...roleFile.frontMatter,
+    ...overrides,
+  };
+  if (merged.prompt === undefined && merged.prompt_path === undefined) {
+    merged.prompt = roleFile.prompt;
+  }
+  return merged;
+}
+
+/**
+ * Split `---` frontmatter from the Markdown body of a role file. The body is
+ * the role's prompt.
+ */
+function parseRoleFile(source: string, label: string): RoleFile {
+  const normalized = source.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) {
+    fail(`${label} must begin with a "---" frontmatter delimiter`);
+  }
+  const end = normalized.indexOf("\n---", 3);
+  if (end === -1) {
+    fail(`${label} frontmatter is not terminated by a closing "---"`);
+  }
+  const frontMatterSource = normalized.slice(4, end + 1);
+  const body = normalized.slice(end + 4).replace(/^[^\n]*\n?/, "");
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(frontMatterSource);
+  } catch (error) {
+    fail(
+      `${label} frontmatter is not valid YAML: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const frontMatter = asRecord(parsed ?? {}, `${label} frontmatter`);
+  const unknownKeys = Object.keys(frontMatter).filter(
+    (key) => !ROLE_FILE_FIELDS.has(key),
+  );
+  if (unknownKeys.length > 0) {
+    fail(
+      `${label} has unsupported frontmatter fields: ${unknownKeys.join(", ")} (supported: ${[...ROLE_FILE_FIELDS].join(", ")})`,
+    );
+  }
+  const prompt = body.trim();
+  if (prompt.length === 0) {
+    fail(`${label} has an empty body; the body is the role prompt`);
+  }
+  return { frontMatter, prompt };
+}
+
+/**
+ * Discover repo-scoped role definitions under `.agents/agents/<id>/agent.md`.
+ * A missing directory is not an error — role files are opt-in.
+ */
+export async function loadRoleFiles(
+  agentsDir: string,
+): Promise<ReadonlyMap<string, RoleFile>> {
+  const rolesDir = join(resolve(agentsDir), "agents");
+  let entries: string[];
+  try {
+    entries = await readdir(rolesDir);
+  } catch {
+    return new Map();
+  }
+  const roleFiles = new Map<string, RoleFile>();
+  for (const id of [...entries].sort()) {
+    const path = join(rolesDir, id, "agent.md");
+    let source: string;
+    try {
+      source = await readFile(path, "utf8");
+    } catch {
+      continue;
+    }
+    assertValidIdToken("role", id);
+    roleFiles.set(id, parseRoleFile(source, `role file "${id}"`));
+  }
+  return roleFiles;
 }
 
 function parseRole(
   roleId: string,
   value: unknown,
   harnessDir: string,
+  roleFiles: ReadonlyMap<string, RoleFile>,
 ): ParsedRole {
-  const record = asRecord(value, `role ${roleId}`);
+  const declared = asRecord(value, `role ${roleId}`);
+  const record = resolveRoleRef(roleId, declared, roleFiles);
   const unknownKeys = Object.keys(record).filter(
     (key) => !ROLE_FIELDS.has(key),
   );
   if (unknownKeys.length > 0) {
     fail(
-      `role ${roleId} has unsupported fields: ${unknownKeys.join(", ")} (supported: ${[...ROLE_FIELDS].join(", ")})`,
+      `role ${roleId} has unsupported fields: ${unknownKeys.join(", ")} (supported: ${["ref", ...ROLE_FIELDS].join(", ")})`,
     );
   }
   const policyId = optionalString(record.policy, `role ${roleId} policy`);
@@ -849,7 +970,8 @@ export async function loadPolicy(
 
 /**
  * Load one harness definition from `.agents/harnesses/<id>/harness.yaml`,
- * resolving a `policy: <id>` reference against `.agents/policies/<id>.yaml`.
+ * resolving a `policy: <id>` reference against `.agents/policies/<id>.yaml`
+ * and a role `ref: <id>` against `.agents/agents/<id>/agent.md`.
  * Single-file resolution only — no scopes/profiles/overlay merging.
  */
 export async function loadHarness(
@@ -886,8 +1008,9 @@ export async function loadHarness(
   if (roleEntries.length === 0) {
     fail("roles must define at least one role");
   }
+  const roleFiles = await loadRoleFiles(agentsDir);
   const parsedRoles = roleEntries.map(([roleId, value]) =>
-    parseRole(roleId, value, harnessDir),
+    parseRole(roleId, value, harnessDir, roleFiles),
   );
   const roles = parsedRoles.map((parsedRole) => parsedRole.role);
   const roleIds = new Set(roles.map((role) => role.id));
