@@ -24,21 +24,32 @@ const ROOT_LABELS: ReadonlyMap<JsonSchema, string> = new Map([
   [POLICY_SCHEMA, "the policy document"],
 ]);
 
+function compile(schema: JsonSchema): ValidateFunction {
+  // allErrors so a document with several mistakes reports all of them
+  // rather than one per edit-and-retry cycle.
+  // verbose so `parentSchema` is available — it carries the sibling
+  // `properties`, which is how an unknown-key error can name the keys that
+  // would have been accepted.
+  return new Ajv({ allErrors: true, verbose: true, strict: false }).compile(
+    schema,
+  );
+}
+
+/**
+ * Compiled validators, keyed by schema identity and bounded by construction:
+ * only the three schemas this module owns are cached. `findAllSchemaViolations`
+ * is public and takes a schema, so caching whatever it was handed would let a
+ * caller passing freshly built objects grow this map without limit.
+ */
 const compiled = new Map<JsonSchema, ValidateFunction>();
 
 function validatorFor(schema: JsonSchema): ValidateFunction {
+  if (!ROOT_LABELS.has(schema)) {
+    return compile(schema);
+  }
   let validate = compiled.get(schema);
   if (validate === undefined) {
-    // allErrors so a document with several mistakes reports all of them
-    // rather than one per edit-and-retry cycle.
-    // verbose so `parentSchema` is available — it carries the sibling
-    // `properties`, which is how an unknown-key error can name the keys that
-    // would have been accepted.
-    validate = new Ajv({
-      allErrors: true,
-      verbose: true,
-      strict: false,
-    }).compile(schema);
+    validate = compile(schema);
     compiled.set(schema, validate);
   }
   return validate;
