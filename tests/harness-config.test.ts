@@ -3,10 +3,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   filterEnabledRoles,
+  findAllSchemaViolations,
+  HARNESS_SCHEMA,
   loadHarness,
   loadManifest,
+  SUPPORTED_SPEC_VERSIONS,
 } from "@aguil/agents-harness-config";
 import type { HarnessDefinition } from "@aguil/agents-orchestration";
+import { REPORT_TEMPLATE_NAMES } from "@aguil/agents-reporting";
 
 const fixturesDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -79,7 +83,7 @@ test("loadHarness rejects unsupported hook events and handler types", async () =
     );
     await expect(
       loadHarness({ agentsDir: scratch, harnessId: "hooked" }),
-    ).rejects.toThrow('hooks event "mystery_event" is not supported');
+    ).rejects.toThrow('hooks has unknown key "mystery_event"');
 
     await writeFile(
       join(dir, "harness.yaml"),
@@ -316,7 +320,7 @@ test("roles reject unknown fields", async () => {
     );
     await expect(
       loadHarness({ agentsDir: scratch, harnessId: "typo" }),
-    ).rejects.toThrow("role a has unsupported fields: timout_ms");
+    ).rejects.toThrow('roles.a has unknown key "timout_ms"');
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
@@ -634,7 +638,7 @@ test("loadHarness rejects malformed context sections", async () => {
     ]);
     await expect(
       loadHarness({ agentsDir: scratch, harnessId: "contextual" }),
-    ).rejects.toThrow("context has unsupported fields: typo");
+    ).rejects.toThrow('context has unknown key "typo" (supported: providers)');
 
     await writeContext(["context:", "  providers: []"]);
     await expect(
@@ -745,11 +749,11 @@ test("loadHarness rejects malformed output schemas and finding pipelines", async
       },
       {
         lines: ["output:", "  schemas:", "    evidence: { optional: [title] }"],
-        message: "output.schemas.evidence has unsupported fields: optional",
+        message: 'output.schemas.evidence has unknown key "optional"',
       },
       {
         lines: ["filtering:", "  outcomes: [builtin:actionable]"],
-        message: "filtering has unsupported fields: outcomes",
+        message: 'filtering has unknown key "outcomes"',
       },
       {
         lines: ["output:", "  schemas:", "    evidence: { required: title }"],
@@ -840,7 +844,9 @@ test("loadHarness rejects malformed reporting sections", async () => {
     ]);
     await expect(
       loadHarness({ agentsDir: scratch, harnessId: "reported" }),
-    ).rejects.toThrow("reporting has unsupported fields: format");
+    ).rejects.toThrow(
+      'reporting has unknown key "format" (supported: template)',
+    );
 
     await writeReporting(["reporting: []"]);
     await expect(
@@ -1102,6 +1108,173 @@ test("a malformed unreferenced role file does not break harness loading", async 
     // Resolution is by reference only, so an unreferenced file is never read.
     const loaded = await loadHarness({ agentsDir: scratch, harnessId: "refs" });
     expect(loaded.definition.roles[0].description).toBe("Declared inline.");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the schema rejects unknown keys at levels the loader never guarded", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "schema");
+    await mkdir(dir, { recursive: true });
+    const spec = (lines: readonly string[]) =>
+      writeFile(
+        join(dir, "harness.yaml"),
+        [
+          'spec_version: "0.3"',
+          "kind: harness",
+          "harness: { id: schema }",
+          "roles: { a: { description: A } }",
+          ...lines,
+        ].join("\n"),
+      );
+
+    // Document root: previously ignored entirely.
+    await spec(["polciy: something"]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "schema" }),
+    ).rejects.toThrow('harness.yaml has unknown key "polciy"');
+
+    // harness: previously only `id` was read and anything else ignored.
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.3"',
+        "kind: harness",
+        "harness: { id: schema, descriptoin: typo }",
+        "roles: { a: { description: A } }",
+      ].join("\n"),
+    );
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "schema" }),
+    ).rejects.toThrow('harness has unknown key "descriptoin"');
+
+    // execution: mode-irrelevant siblings were ignored.
+    await spec(["execution:", "  mode: chain", "  oder: [a]"]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "schema" }),
+    ).rejects.toThrow('execution has unknown key "oder"');
+
+    // A valid key at the wrong nesting level reads as unknown where it landed.
+    await spec([
+      "context:",
+      "  providers:",
+      "    - use: agents-md",
+      "  roles: {}",
+    ]);
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "schema" }),
+    ).rejects.toThrow('context has unknown key "roles" (supported: providers)');
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("harness.description is accepted, and spec 0.3 loads alongside 0.1 and 0.2", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "described");
+    await mkdir(dir, { recursive: true });
+    for (const version of ["0.1", "0.2", "0.3"]) {
+      await writeFile(
+        join(dir, "harness.yaml"),
+        [
+          `spec_version: "${version}"`,
+          "kind: harness",
+          "harness:",
+          "  id: described",
+          "  description: Documentation the loader does not read.",
+          "roles: { a: { description: A } }",
+        ].join("\n"),
+      );
+      const loaded = await loadHarness({
+        agentsDir: scratch,
+        harnessId: "described",
+      });
+      expect(loaded.definition.id).toBe("described");
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the published schema matches the one the loader enforces", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const published = await readFile(
+    join(repoRoot, ".agents", "schemas", "harness.schema.json"),
+    "utf8",
+  );
+  const enforced = await readFile(
+    join(repoRoot, "packages", "harness-config", "src", "harness.schema.json"),
+    "utf8",
+  );
+  // ADR 0015 designates the published file normative; it is worthless as a
+  // description if it can drift from what actually runs.
+  expect(published).toBe(enforced);
+});
+
+test("schema enums stay in step with the constants they describe", () => {
+  const schema = HARNESS_SCHEMA as {
+    properties: {
+      spec_version: { enum: readonly string[] };
+      reporting: { properties: { template: { enum: readonly string[] } } };
+    };
+  };
+  expect(schema.properties.spec_version.enum).toEqual([
+    ...SUPPORTED_SPEC_VERSIONS,
+  ]);
+  expect(schema.properties.reporting.properties.template.enum).toEqual([
+    ...REPORT_TEMPLATE_NAMES,
+  ]);
+});
+
+test("every harness document in the repository satisfies the schema", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const documents = [
+    ".agents/harnesses/code-review/harness.yaml",
+    "examples/incident-triage/.agents/harnesses/incident-triage/harness.yaml",
+    "tests/fixtures/agents-dir/harnesses/triage-demo/harness.yaml",
+  ];
+  for (const relative of documents) {
+    const parsed = Bun.YAML.parse(
+      await readFile(join(repoRoot, relative), "utf8"),
+    );
+    // Every rule, not just the subset the loader reports: a third party
+    // validating the published file applies all of them, so the schema has to
+    // stay truthful about these documents under the strictest reading.
+    expect([relative, findAllSchemaViolations(parsed)]).toEqual([relative, []]);
+  }
+});
+
+test("role identifiers cannot escape the scratchpad directory", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "traversal");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.3"',
+        "kind: harness",
+        "harness: { id: traversal }",
+        "roles:",
+        '  "../../outside": { description: Escape }',
+      ].join("\n"),
+    );
+    // A role id is joined into the run scratchpad path, so traversal in one
+    // would place a role's directory outside it.
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "traversal" }),
+    ).rejects.toThrow('roles has invalid key "../../outside"');
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

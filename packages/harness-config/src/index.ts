@@ -19,14 +19,22 @@ export {
   applyFindingPipelines,
   validateOutcomesAgainstSchemas,
 } from "./output-pipeline";
+export {
+  findAllSchemaViolations,
+  HARNESS_SCHEMA,
+  validateHarnessDocument,
+} from "./schema-validation";
 
-export const HARNESS_SPEC_VERSION = "0.2";
+import { validateHarnessDocument } from "./schema-validation";
+
+export const HARNESS_SPEC_VERSION = "0.3";
 
 /**
- * Accepted `spec_version` values. v0.2 is additive over v0.1 (per-handler
- * `applies_to` event classes), so v0.1 documents remain loadable unchanged.
+ * Accepted `spec_version` values. Every increment so far is additive — v0.2
+ * added per-handler `applies_to` event classes, v0.3 added role `ref:` — so
+ * documents declaring an older version remain loadable unchanged.
  */
-export const SUPPORTED_SPEC_VERSIONS: readonly string[] = ["0.1", "0.2"];
+export const SUPPORTED_SPEC_VERSIONS: readonly string[] = ["0.1", "0.2", "0.3"];
 
 /** Capability constraint lists (carried here, enforced by the policy layer). */
 export interface PolicyCapabilityRules {
@@ -545,6 +553,10 @@ function parseRole(
   harnessDir: string,
   roleFiles: ReadonlyMap<string, RoleFile>,
 ): ParsedRole {
+  // A role id becomes a path segment under the run scratchpad, so it is
+  // constrained here as well as in the schema — the loader must hold this
+  // regardless of which subset of schema failures the runtime reports.
+  assertValidIdToken("role", roleId);
   const declared = asRecord(value, `role ${roleId}`);
   const record = resolveRoleRef(roleId, declared, roleFiles);
   const unknownKeys = Object.keys(record).filter(
@@ -1028,6 +1040,17 @@ export async function loadHarness(
     await readYamlFile(specPath, `harness "${options.harnessId}"`),
     "harness.yaml",
   );
+
+  // Structural validation first: the schema rejects unknown and misplaced
+  // keys, which the checks below cannot, and its failures are the ones most
+  // likely to explain a document that "parses but does nothing". Semantic
+  // checks the schema cannot express still run afterwards.
+  const schemaProblems = validateHarnessDocument(parsed);
+  if (schemaProblems.length > 0) {
+    fail(
+      `harness "${options.harnessId}" does not match the harness schema:\n  - ${schemaProblems.join("\n  - ")}`,
+    );
+  }
 
   const specVersion = requiredString(parsed.spec_version, "spec_version");
   if (!SUPPORTED_SPEC_VERSIONS.includes(specVersion)) {

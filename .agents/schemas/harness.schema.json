@@ -1,0 +1,340 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/aguil/agents/.agents/schemas/harness.schema.json",
+  "title": "Harness definition",
+  "description": "The normative description of `.agents/harnesses/<id>/harness.yaml` (ADR 0015 §2). Structural validation only: checks that depend on the filesystem, on compiling a CEL expression, or on agreement between separate parts of the document are enforced by the loader after this schema passes.",
+  "type": "object",
+  "required": ["spec_version", "kind", "harness", "roles"],
+  "additionalProperties": false,
+  "properties": {
+    "spec_version": {
+      "description": "Version of this format the document is written against. Advisory: the loader validates the token and does not otherwise branch on it, which is sound only while every increment is additive (ADR 0015 §4).",
+      "enum": ["0.1", "0.2", "0.3"]
+    },
+    "kind": {
+      "description": "Document kind discriminator.",
+      "const": "harness"
+    },
+    "harness": {
+      "description": "Harness identity.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Harness identifier. Must equal the containing directory name.",
+          "$ref": "#/definitions/idToken"
+        },
+        "description": {
+          "description": "Human-facing summary. Documentation only — the loader does not read it.",
+          "$ref": "#/definitions/nonEmptyString"
+        }
+      }
+    },
+    "roles": {
+      "description": "Roles by identifier. At least one is required. Identifiers become path segments in run scratchpads, so they are constrained like every other id in this format.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/definitions/idToken" },
+      "additionalProperties": { "$ref": "#/definitions/role" }
+    },
+    "execution": {
+      "description": "How roles are scheduled. Absent means the runtime's default scheduling.",
+      "$ref": "#/definitions/execution"
+    },
+    "hooks": {
+      "description": "Hook handlers by lifecycle event. Note that only `pre_tool_call`, `post_tool_call` and `role_stop` currently reach an adapter; handlers on the other events are accepted here and never run.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pre_tool_call": { "$ref": "#/definitions/toolCallHandlers" },
+        "post_tool_call": { "$ref": "#/definitions/toolCallHandlers" },
+        "role_start": { "$ref": "#/definitions/lifecycleHandlers" },
+        "role_stop": { "$ref": "#/definitions/lifecycleHandlers" },
+        "run_start": { "$ref": "#/definitions/lifecycleHandlers" },
+        "run_end": { "$ref": "#/definitions/lifecycleHandlers" }
+      }
+    },
+    "context": {
+      "description": "Context collected once, before any role runs.",
+      "type": "object",
+      "required": ["providers"],
+      "additionalProperties": false,
+      "properties": {
+        "providers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/contextProvider" }
+        }
+      }
+    },
+    "output": {
+      "description": "Schemas that role outcomes are validated against.",
+      "type": "object",
+      "required": ["schemas"],
+      "additionalProperties": false,
+      "properties": {
+        "schemas": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/definitions/idToken" },
+          "additionalProperties": { "$ref": "#/definitions/outputSchema" }
+        }
+      }
+    },
+    "filtering": {
+      "description": "Finding filter strategies.",
+      "type": "object",
+      "required": ["findings"],
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["builtin:actionable"] }
+        }
+      }
+    },
+    "deduplication": {
+      "description": "Finding deduplication strategies.",
+      "type": "object",
+      "required": ["findings"],
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["builtin:fingerprint"] }
+        }
+      }
+    },
+    "reporting": {
+      "description": "Report rendering.",
+      "type": "object",
+      "required": ["template"],
+      "additionalProperties": false,
+      "properties": {
+        "template": {
+          "enum": ["builtin:code-review-markdown", "builtin:outcomes-markdown"]
+        }
+      }
+    },
+    "policy": {
+      "description": "Default policy identifier, resolved against `.agents/policies/<id>.yaml`. A role may override it.",
+      "$ref": "#/definitions/idToken"
+    },
+    "default_allowed_commands": {
+      "description": "Commands allowed to every role that does not state its own list.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "idToken": {
+      "description": "Letters, digits, '.', '_' and '-', starting with a letter or digit; never a path separator or '..', because these become path segments.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "not": { "pattern": "\\.\\." }
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "role": {
+      "description": "One role. Either declared inline, or pulled from a shared role file with `ref` and optionally overridden.",
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["ref"] }, { "required": ["description"] }],
+      "not": { "required": ["prompt", "prompt_path"] },
+      "properties": {
+        "ref": {
+          "description": "Identifier of a shared role at `.agents/agents/<id>/agent.md`. Sibling keys here override that file's frontmatter.",
+          "$ref": "#/definitions/idToken"
+        },
+        "description": {
+          "description": "What the role does. Required unless supplied by a referenced role file.",
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "enabled": {
+          "description": "CEL expression deciding whether the role runs. Absent means always enabled. Compiled at load.",
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "prompt": {
+          "description": "Inline prompt. Mutually exclusive with `prompt_path`.",
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "prompt_path": {
+          "description": "Prompt file, absolute or relative to the harness directory. Mutually exclusive with `prompt`.",
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "timeout_ms": {
+          "description": "Role timeout in milliseconds. Defaults to 600000.",
+          "$ref": "#/definitions/positiveInteger"
+        },
+        "allowed_commands": {
+          "description": "Commands this role may run, overriding `default_allowed_commands`.",
+          "$ref": "#/definitions/stringArray"
+        },
+        "required_capabilities": {
+          "description": "Adapter capabilities the role needs. Defaults to none.",
+          "$ref": "#/definitions/stringArray"
+        },
+        "policy": {
+          "description": "Policy identifier for this role, overriding the harness default.",
+          "$ref": "#/definitions/idToken"
+        }
+      }
+    },
+    "execution": {
+      "description": "Which keys apply depends on `mode`. Keys belonging to another mode are ignored by the loader rather than rejected, so they are permitted here — the schema describes the format as implemented.",
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "if": {
+        "properties": { "mode": { "const": "validation-loop" } },
+        "required": ["mode"]
+      },
+      "then": { "required": ["implementation_roles", "validation_roles"] },
+      "properties": {
+        "mode": {
+          "description": "parallel: all enabled roles run concurrently. chain: roles run in sequence and the first failure stops the chain. validation-loop: implementation roles alternate with validation roles until validation passes or the round cap is reached.",
+          "enum": ["parallel", "chain", "validation-loop"]
+        },
+        "order": {
+          "description": "chain only. Step order; every entry must name a declared role.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/nonEmptyString" }
+        },
+        "pass_check": {
+          "description": "chain only. Command run in the workspace after all roles complete; exit 0 means the run passed. The authoritative success gate.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "implementation_roles": {
+          "description": "validation-loop only. Roles that implement.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/nonEmptyString" }
+        },
+        "validation_roles": {
+          "description": "validation-loop only. Roles that validate.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/nonEmptyString" }
+        },
+        "max_rounds": {
+          "description": "validation-loop only. Maximum rounds; defaults to 1.",
+          "$ref": "#/definitions/positiveInteger"
+        }
+      }
+    },
+    "hookCommand": {
+      "description": "Command to run. `$HARNESS_DIR` expands to the harness directory.",
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "hookMatcher": {
+      "description": "Regular expression over tool names; absent matches all.",
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "hookTimeoutSeconds": {
+      "description": "Handler timeout in seconds.",
+      "$ref": "#/definitions/positiveInteger"
+    },
+    "excludedHandlerType": {
+      "description": "Handlers are commands only. `prompt:` and `http:` handler types are deliberately out of spec, and are declared here so that using one is reported as an unsupported handler type rather than as a misspelling.",
+      "not": {}
+    },
+    "toolCallHandlers": {
+      "description": "Handlers for a tool-call event. These are the events that reach an adapter.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "$ref": "#/definitions/hookCommand" },
+          "matcher": { "$ref": "#/definitions/hookMatcher" },
+          "timeout_s": { "$ref": "#/definitions/hookTimeoutSeconds" },
+          "prompt": { "$ref": "#/definitions/excludedHandlerType" },
+          "http": { "$ref": "#/definitions/excludedHandlerType" },
+          "applies_to": {
+            "description": "Event classes this handler registers on; absent means all of them. Valid only on tool-call events.",
+            "type": "array",
+            "minItems": 1,
+            "items": { "enum": ["shell", "mcp", "edit"] }
+          }
+        }
+      }
+    },
+    "lifecycleHandlers": {
+      "description": "Handlers for a lifecycle event.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "$ref": "#/definitions/hookCommand" },
+          "matcher": { "$ref": "#/definitions/hookMatcher" },
+          "timeout_s": { "$ref": "#/definitions/hookTimeoutSeconds" },
+          "prompt": { "$ref": "#/definitions/excludedHandlerType" },
+          "http": { "$ref": "#/definitions/excludedHandlerType" },
+          "applies_to": {
+            "description": "Never valid here — event-class scoping applies only to tool-call events. Declared so that using it is reported as a misplaced key rather than an unknown one, which lets the loader explain why.",
+            "not": {}
+          }
+        }
+      }
+    },
+    "contextProvider": {
+      "description": "One context provider. Keys other than `use` are provider parameters and are deliberately unconstrained here; the provider registry validates them.",
+      "type": "object",
+      "required": ["use"],
+      "properties": {
+        "use": {
+          "description": "Registered provider identifier.",
+          "$ref": "#/definitions/nonEmptyString"
+        }
+      }
+    },
+    "outputSchema": {
+      "oneOf": [
+        {
+          "title": "builtin",
+          "description": "A builtin schema. `builtin:finding` is valid only under the `finding` kind.",
+          "enum": ["builtin:finding"]
+        },
+        {
+          "title": "record",
+          "description": "Required fields for an outcome of this kind.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "required": {
+              "description": "Fields that must be present on the outcome.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/definitions/nonEmptyString" }
+            },
+            "data_required": {
+              "description": "Fields that must be present on the outcome's data object.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/definitions/nonEmptyString" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
