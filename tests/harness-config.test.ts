@@ -1434,6 +1434,15 @@ test("a policy spend ceiling must be a positive finite number", async () => {
       await expect(load()).rejects.toThrow(
         "policy budget limits.cost_usd must be a positive number",
       );
+      // ADR 0018 has the loader enforcing a subset of the schema, never more,
+      // so a value the loader rejects must not satisfy a third-party
+      // validator. `.inf` is the one that needs saying: JSON cannot write it,
+      // YAML can, and expressing finiteness takes an explicit maximum.
+      const parsed = Bun.YAML.parse(`limits: { cost_usd: ${value} }`);
+      expect([
+        value,
+        findAllSchemaViolations(parsed, POLICY_SCHEMA),
+      ]).not.toEqual([value, []]);
     }
   } finally {
     await rm(scratch, { recursive: true, force: true });

@@ -39,9 +39,10 @@
       "additionalProperties": false,
       "properties": {
         "cost_usd": {
-          "description": "Spend ceiling in US dollars. Must be a positive finite number; the loader rejects anything else rather than dropping it.",
+          "description": "Spend ceiling in US dollars. Must be a positive finite number; the loader rejects anything else rather than dropping it. JSON has no infinity literal but YAML does, so finiteness is expressed as a maximum of the largest double — without it `.inf` would satisfy this schema and still fail at load.",
           "type": "number",
-          "exclusiveMinimum": 0
+          "exclusiveMinimum": 0,
+          "maximum": 1.7976931348623157e308
         },
         "timeout_ms": {
           "description": "Wall-clock ceiling in milliseconds.",
