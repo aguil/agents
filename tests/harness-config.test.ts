@@ -3,11 +3,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   filterEnabledRoles,
+  findAllSchemaViolations,
   HARNESS_SCHEMA,
   loadHarness,
   loadManifest,
   SUPPORTED_SPEC_VERSIONS,
-  validateHarnessDocument,
 } from "@aguil/agents-harness-config";
 import type { HarnessDefinition } from "@aguil/agents-orchestration";
 import { REPORT_TEMPLATE_NAMES } from "@aguil/agents-reporting";
@@ -1246,6 +1246,9 @@ test("every harness document in the repository satisfies the schema", async () =
     const parsed = Bun.YAML.parse(
       await readFile(join(repoRoot, relative), "utf8"),
     );
-    expect([relative, validateHarnessDocument(parsed)]).toEqual([relative, []]);
+    // Every rule, not just the subset the loader reports: a third party
+    // validating the published file applies all of them, so the schema has to
+    // stay truthful about these documents under the strictest reading.
+    expect([relative, findAllSchemaViolations(parsed)]).toEqual([relative, []]);
   }
 });

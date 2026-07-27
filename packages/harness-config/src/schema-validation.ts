@@ -93,6 +93,23 @@ const ENFORCED_KEYWORDS: ReadonlySet<string> = new Set([
   "propertyNames",
 ]);
 
+function violations(
+  document: unknown,
+  keywords: ReadonlySet<string> | undefined,
+): readonly string[] {
+  const validate = harnessValidator();
+  if (validate(document)) {
+    return [];
+  }
+  const problems = new Set<string>();
+  for (const error of validate.errors ?? []) {
+    if (keywords === undefined || keywords.has(error.keyword)) {
+      problems.add(describe(error));
+    }
+  }
+  return [...problems];
+}
+
 /**
  * Validate a parsed `harness.yaml` against the published schema, reporting the
  * unknown and misplaced keys the loader cannot detect. An empty array means
@@ -100,15 +117,16 @@ const ENFORCED_KEYWORDS: ReadonlySet<string> = new Set([
  * the loader's semantic checks still run.
  */
 export function validateHarnessDocument(document: unknown): readonly string[] {
-  const validate = harnessValidator();
-  if (validate(document)) {
-    return [];
-  }
-  const problems = new Set<string>();
-  for (const error of validate.errors ?? []) {
-    if (ENFORCED_KEYWORDS.has(error.keyword)) {
-      problems.add(describe(error));
-    }
-  }
-  return [...problems];
+  return violations(document, ENFORCED_KEYWORDS);
+}
+
+/**
+ * Validate against every rule in the schema, including the ones the loader
+ * reports itself. Not used at load time — the loader would report those with
+ * better messages — but it is what a third party validating the published file
+ * would apply, so it is how this repository checks that the schema stays
+ * truthful about documents that actually exist.
+ */
+export function findAllSchemaViolations(document: unknown): readonly string[] {
+  return violations(document, undefined);
 }

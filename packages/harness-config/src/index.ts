@@ -19,7 +19,11 @@ export {
   applyFindingPipelines,
   validateOutcomesAgainstSchemas,
 } from "./output-pipeline";
-export { HARNESS_SCHEMA, validateHarnessDocument } from "./schema-validation";
+export {
+  findAllSchemaViolations,
+  HARNESS_SCHEMA,
+  validateHarnessDocument,
+} from "./schema-validation";
 
 import { validateHarnessDocument } from "./schema-validation";
 
