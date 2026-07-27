@@ -2,14 +2,16 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  isPrApprovedForWork,
+  parsePrFeedbackSettings,
+} from "@aguil/agents-pr-feedback";
 import type { WorkItem } from "@aguil/agents-tracker";
 import { FakeWorkFeed, parsePrFeedbackIdentifier } from "@aguil/agents-tracker";
 import { WorkQueueOrchestrator } from "@aguil/agents-work-queue";
 import {
   applyCodexAlias,
   applySelectionCommand,
-  isPrApprovedForWork,
-  parsePrFeedbackPolicy,
   readSelectionDocument,
   upsertPendingFromWorkItems,
   writeSelectionDocument,
@@ -113,10 +115,10 @@ test("prFeedbackOfferAfterIngest re-offers unchanged threads for selection reten
   ).toEqual({ offer: true, reason: "selection_pending" });
 });
 
-test("parsePrFeedbackPolicy defaults to interactive", () => {
-  const policy = parsePrFeedbackPolicy({});
-  expect(policy.profile).toBe("interactive");
-  expect(policy.notifyChannels.some((c) => c.kind === "jsonl")).toBe(true);
+test("parsePrFeedbackSettings defaults to interactive", () => {
+  const settings = parsePrFeedbackSettings({});
+  expect(settings.profile).toBe("interactive");
+  expect(settings.notifyChannels.some((c) => c.kind === "jsonl")).toBe(true);
 });
 
 test("selection store approve and isPrApprovedForWork", async () => {
@@ -449,7 +451,7 @@ test("JsonRpcAgentSessionClient parses fake server output", async () => {
 });
 
 function policyInteractive() {
-  return parsePrFeedbackPolicy({
+  return parsePrFeedbackSettings({
     policy: { pr_feedback: { profile: "interactive" } },
   });
 }

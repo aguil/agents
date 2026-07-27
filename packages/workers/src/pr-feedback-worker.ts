@@ -1,16 +1,17 @@
 import { join } from "node:path";
-import { collectPrFeedback } from "@aguil/agents-pr-feedback";
+import {
+  collectPrFeedback,
+  isPrApprovedForWork,
+  isPrDeniedForWork,
+  parsePrFeedbackSettings,
+} from "@aguil/agents-pr-feedback";
 import {
   executePrFeedbackSubmit,
   writePrFeedbackTriageQueue,
 } from "@aguil/agents-publish";
 import type { WorkItem } from "@aguil/agents-tracker";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
-import {
-  isPrApprovedForWork,
-  isPrDeniedForWork,
-  readSelectionDocument,
-} from "@aguil/agents-workflow";
+import { readSelectionDocument } from "@aguil/agents-workflow";
 import { runPrFeedbackFixes } from "./pr-feedback-fix";
 import {
   logPrFeedbackWorkReport,
@@ -47,8 +48,8 @@ export async function runPrFeedbackWorker(input: {
     return { status: "failed", error: "aborted" };
   }
 
-  const policy = input.definition.prFeedbackPolicy;
-  if (isPrDeniedForWork(policy, input.item.metadata)) {
+  const settings = parsePrFeedbackSettings(input.definition.config);
+  if (isPrDeniedForWork(settings, input.item.metadata)) {
     console.warn(
       JSON.stringify({
         event: "pr_feedback_fix_skipped_denied",
@@ -62,7 +63,7 @@ export async function runPrFeedbackWorker(input: {
   const selection = await readSelectionDocument(input.hostWorkspacePath);
   const approved = new Set(selection.approved);
   const prApprovedForSubmit = isPrApprovedForWork(
-    policy,
+    settings,
     approved,
     input.item.metadata,
   );
@@ -163,7 +164,7 @@ export async function runPrFeedbackWorker(input: {
     feedbackPath,
     triageItemCount,
     responsesPath,
-    requireApprovalBeforeSubmit: policy.requireApprovalBeforeSubmit,
+    requireApprovalBeforeSubmit: settings.requireApprovalBeforeSubmit,
     prApprovedForSubmit,
   });
 

@@ -31,7 +31,7 @@ Configuration and policy enforcement shared by all harnesses (ADR 0005/0006):
 | ---------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/cli`               | `@aguil/agents-cli`               | CLI entry points for `agents` binary: code-review, triage, pr-feedback, policy-eval, doctor, skills; jj workspace auto-resolution for git/gh |
 | `packages/triage`            | `@aguil/agents-triage`            | `TriageItemV1` / `TriageEnvelopeV1` schema; triage queue file I/O (JSON, toon); `defaultTriageQueueDir`                                      |
-| `packages/pr-feedback`       | `@aguil/agents-pr-feedback`       | PR review thread collection, `PrFeedbackDocumentV1`/`PrFeedbackResponsesV1` schemas, thread reply submission                                 |
+| `packages/pr-feedback`       | `@aguil/agents-pr-feedback`       | PR review thread collection, `PrFeedbackDocumentV1`/`PrFeedbackResponsesV1` schemas, thread reply submission, `policy.pr_feedback` settings  |
 | `packages/code-review-inbox` | `@aguil/agents-code-review-inbox` | GitHub review assignment inbox source; review draft parsing and templating for `agents code-review inbox`                                    |
 | `packages/code-review-post`  | `@aguil/agents-code-review-post`  | Pending-review posting via GitHub API (create, comment, submit)                                                                              |
 | `packages/github`            | `@aguil/agents-github`            | Thin `gh` CLI runner helpers (`runGhJson`, `runGhText`) used across packages                                                                 |
@@ -42,14 +42,14 @@ Configuration and policy enforcement shared by all harnesses (ADR 0005/0006):
 These packages support the long-running `agentsd` host and are not needed by
 one-shot harness invocations:
 
-| Package               | npm name                   | Owns                                                                                                                 |
-| --------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `packages/workflow`   | `@aguil/agents-workflow`   | `WORKFLOW.md` loader, hot-reload diffing, `createWorkflowAgentAdapter` bridge                                        |
-| `packages/workspace`  | `@aguil/agents-workspace`  | Per-work-item workspace lifecycle; `WorkspaceHooks` (afterCreate, beforeRun, afterRun, beforeRemove)                 |
-| `packages/tracker`    | `@aguil/agents-tracker`    | `WorkItem` model; `WorkItemKind` type; github_issue, github_pr_review, github_pr_feedback, mcp_tracker feed adapters |
-| `packages/work-queue` | `@aguil/agents-work-queue` | `WorkQueueOrchestrator` — poll loop, claim, retry, reconcile                                                         |
-| `packages/workers`    | `@aguil/agents-workers`    | Worker implementations: implementation, code_review, pr_feedback                                                     |
-| `packages/agentsd`    | `@aguil/agentsd`           | Host binary entry point, signal handling, `stopAndDrain`                                                             |
+| Package               | npm name                   | Owns                                                                                                                                                         |
+| --------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/workflow`   | `@aguil/agents-workflow`   | `WORKFLOW.md` loader, hot-reload diffing, `createWorkflowAgentAdapter` bridge; harness-specific front matter passes through as `config`, unparsed (ADR 0016) |
+| `packages/workspace`  | `@aguil/agents-workspace`  | Per-work-item workspace lifecycle; `WorkspaceHooks` (afterCreate, beforeRun, afterRun, beforeRemove)                                                         |
+| `packages/tracker`    | `@aguil/agents-tracker`    | `WorkItem` model; `WorkItemKind` type; github_issue, github_pr_review, github_pr_feedback, mcp_tracker feed adapters                                         |
+| `packages/work-queue` | `@aguil/agents-work-queue` | `WorkQueueOrchestrator` — poll loop, claim, retry, reconcile                                                                                                 |
+| `packages/workers`    | `@aguil/agents-workers`    | Worker implementations: implementation, code_review, pr_feedback                                                                                             |
+| `packages/agentsd`    | `@aguil/agentsd`           | Host binary entry point, signal handling, `stopAndDrain`                                                                                                     |
 
 > **Note:** `packages/agentsd` is published as `@aguil/agentsd` (no `agents-`
 > infix) since it is the installable binary itself.

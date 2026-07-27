@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { parsePrFeedbackSettings } from "@aguil/agents-pr-feedback";
 import { createWorkFeeds, workItemTemplateVars } from "@aguil/agents-tracker";
 import { WorkQueueOrchestrator } from "@aguil/agents-work-queue";
 import { createWorkerRouter } from "@aguil/agents-workers";
@@ -60,12 +61,17 @@ export async function runAgentsd(
     argv,
     explicit: options.mcpInvoke,
   });
+  // Re-read per definition rather than per work item: the daemon needs the
+  // deny list when it builds feeds and the profile for its startup line, and
+  // both change only on reload.
+  const prFeedbackSettings = () =>
+    parsePrFeedbackSettings(activeDefinition.config);
   const feeds = () =>
     createWorkFeeds({
       workflowDir: activeDefinition.workflowDir,
       workspacePath: hostWorkspace,
       feeds: activeDefinition.feeds,
-      prFeedbackDeny: activeDefinition.prFeedbackPolicy.deny,
+      prFeedbackDeny: prFeedbackSettings().deny,
       mcpInvoke,
     });
 
@@ -160,7 +166,7 @@ export async function runAgentsd(
       feeds: feeds().map((f) => f.feedKind),
       publish_code_review: activeDefinition.publish.codeReview.mode,
       publish_pr_feedback: activeDefinition.publish.prFeedback.mode,
-      pr_feedback_profile: activeDefinition.prFeedbackPolicy.profile,
+      pr_feedback_profile: prFeedbackSettings().profile,
       implementation_runtime: activeDefinition.implementation.mode,
       implementation_adapter: activeDefinition.implementation.adapter,
       implementation_protocol: activeDefinition.implementation.protocol,

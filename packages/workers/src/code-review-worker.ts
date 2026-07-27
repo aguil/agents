@@ -1,5 +1,9 @@
 import { join } from "node:path";
 import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
+import {
+  applyCodeReviewPublishOverrides,
+  parseCodeReviewSettings,
+} from "@aguil/agents-code-review/workflow-settings";
 import { agentsCodeReviewRunsRoot } from "@aguil/agents-core";
 import type { AgentAdapter } from "@aguil/agents-execution";
 import {
@@ -46,10 +50,16 @@ export async function runCodeReviewWorker(input: {
     };
   }
 
+  const settings = parseCodeReviewSettings(input.definition.config);
+  const publish = applyCodeReviewPublishOverrides(
+    input.definition.publish,
+    settings,
+  );
+
   const scratchpadRoot = agentsCodeReviewRunsRoot(input.workspacePath);
   let reviewWorkspace = input.hostWorkspacePath;
   let cleanupWorktree: (() => Promise<void>) | undefined;
-  if (input.definition.codeReviewPolicy.useWorktree) {
+  if (settings.useWorktree) {
     try {
       const isolated = await createDetachedPullRequestWorktree({
         artifactAnchorWorkspacePath: input.hostWorkspacePath,
@@ -108,7 +118,7 @@ export async function runCodeReviewWorker(input: {
     }
 
     const publishResult = await executeCodeReviewPublish({
-      publish: input.definition.publish,
+      publish,
       result,
       resultPath,
       workspacePath: input.hostWorkspacePath,
@@ -128,7 +138,7 @@ export async function runCodeReviewWorker(input: {
       report_path: reportPath,
     });
 
-    if (input.definition.publish.codeReview.mode === "notify") {
+    if (publish.codeReview.mode === "notify") {
       console.log(
         JSON.stringify({
           event: "code_review_artifacts_ready",

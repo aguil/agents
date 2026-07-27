@@ -1,3 +1,14 @@
+/**
+ * PR-feedback behavioral configuration, read from `WORKFLOW.md` front matter
+ * under `policy.pr_feedback`.
+ *
+ * The front-matter key keeps the word "policy" for compatibility, but these
+ * types deliberately do not: "policy" is reserved for capability governance —
+ * `PolicySpec`, `.agents/policies/`, allow and deny lists evaluated against
+ * tool calls. What lives here is how the PR-feedback harness behaves, with no
+ * evaluator and no verdicts (ADR 0016 §6).
+ */
+
 export type PrFeedbackProfile = "interactive" | "unattended" | "discover_only";
 
 export interface PrFeedbackNotifyChannel {
@@ -5,7 +16,7 @@ export interface PrFeedbackNotifyChannel {
   readonly raw: Readonly<Record<string, unknown>>;
 }
 
-export interface PrFeedbackPolicyConfig {
+export interface PrFeedbackSettings {
   readonly profile: PrFeedbackProfile;
   readonly allow: readonly string[];
   readonly deny: readonly string[];
@@ -17,7 +28,7 @@ export interface PrFeedbackPolicyConfig {
   readonly requireApprovalBeforeSubmit: boolean;
 }
 
-export const defaultPrFeedbackPolicy: PrFeedbackPolicyConfig = {
+export const defaultPrFeedbackSettings: PrFeedbackSettings = {
   profile: "interactive",
   allow: [],
   deny: [],
@@ -32,9 +43,14 @@ export const defaultPrFeedbackPolicy: PrFeedbackPolicyConfig = {
   requireApprovalBeforeSubmit: true,
 };
 
-export function parsePrFeedbackPolicy(
+/**
+ * Parse from raw `WORKFLOW.md` front matter. Total: every malformed value
+ * falls back to its default rather than failing, so this never throws and a
+ * caller needs no error path.
+ */
+export function parsePrFeedbackSettings(
   config: Readonly<Record<string, unknown>>,
-): PrFeedbackPolicyConfig {
+): PrFeedbackSettings {
   const policy = asRecord(config.policy);
   const prFeedback = asRecord(policy.pr_feedback);
   const notify = asRecord(prFeedback.notify);
@@ -101,36 +117,36 @@ export function prIdentifierFromWorkItemMetadata(metadata: {
 }
 
 export function isPrDeniedForWork(
-  policy: PrFeedbackPolicyConfig,
+  settings: PrFeedbackSettings,
   metadata: { readonly repository?: string; readonly pull_number?: string },
 ): boolean {
   const id = prIdentifierFromWorkItemMetadata(metadata);
   if (id === null) {
     return false;
   }
-  return policy.deny.includes(id);
+  return settings.deny.includes(id);
 }
 
 export function isPrApprovedForWork(
-  policy: PrFeedbackPolicyConfig,
+  settings: PrFeedbackSettings,
   approved: ReadonlySet<string>,
   metadata: { readonly repository?: string; readonly pull_number?: string },
 ): boolean {
-  if (isPrDeniedForWork(policy, metadata)) {
+  if (isPrDeniedForWork(settings, metadata)) {
     return false;
   }
-  if (policy.profile === "discover_only") {
+  if (settings.profile === "discover_only") {
     return false;
   }
-  if (policy.profile === "unattended") {
+  if (settings.profile === "unattended") {
     const id = prIdentifierFromWorkItemMetadata(metadata);
     if (id === null) {
       return false;
     }
-    if (policy.allow.length === 0) {
+    if (settings.allow.length === 0) {
       return false;
     }
-    return policy.allow.includes(id);
+    return settings.allow.includes(id);
   }
   const id = prIdentifierFromWorkItemMetadata(metadata);
   if (id === null) {

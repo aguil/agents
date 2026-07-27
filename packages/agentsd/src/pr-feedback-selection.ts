@@ -1,4 +1,10 @@
 import {
+  isPrApprovedForWork,
+  isPrDeniedForWork,
+  parsePrFeedbackSettings,
+  prIdentifierFromWorkItemMetadata,
+} from "@aguil/agents-pr-feedback";
+import {
   buildSelectCommand,
   createSelectionNotifyChannels,
   dispatchSelectionNotifications,
@@ -6,11 +12,8 @@ import {
 import type { WorkFeedTickContext, WorkItem } from "@aguil/agents-tracker";
 import type { WorkflowDefinition } from "@aguil/agents-workflow";
 import {
-  isPrApprovedForWork,
-  isPrDeniedForWork,
   type PrFeedbackPendingEntry,
   pendingFingerprint,
-  prIdentifierFromWorkItemMetadata,
   readSelectionDocument,
   upsertPendingFromWorkItems,
   writeSelectionDocument,
@@ -23,11 +26,11 @@ export async function syncPrFeedbackSelection(input: {
   readonly candidates: readonly WorkItem[];
   readonly tick?: WorkFeedTickContext;
 }): Promise<readonly WorkItem[]> {
-  const policy = input.definition.prFeedbackPolicy;
+  const settings = parsePrFeedbackSettings(input.definition.config);
   const prFeedbackItems = input.candidates.filter(
     (item) =>
       item.kind === "github_pr_feedback" &&
-      !isPrDeniedForWork(policy, item.metadata),
+      !isPrDeniedForWork(settings, item.metadata),
   );
   const otherItems = input.candidates.filter(
     (item) => item.kind !== "github_pr_feedback",
@@ -37,7 +40,7 @@ export async function syncPrFeedbackSelection(input: {
     return [...otherItems];
   }
 
-  if (policy.profile === "discover_only") {
+  if (settings.profile === "discover_only") {
     return [...otherItems];
   }
 
@@ -76,18 +79,18 @@ export async function syncPrFeedbackSelection(input: {
     doc.pending.length > 0 &&
     (doc.notifiedAt === null ||
       Number.isNaN(lastNotified) ||
-      now - lastNotified >= policy.notifyCooldownMs ||
+      now - lastNotified >= settings.notifyCooldownMs ||
       pendingChanged);
 
-  if (shouldNotify && policy.profile === "interactive") {
+  if (shouldNotify && settings.profile === "interactive") {
     const selectCommand = buildSelectCommand({
       selectionId: doc.selectionId,
       workspacePath: input.hostWorkspacePath,
       identifiers: doc.pending.map((p) => p.identifier),
     });
     const channels = createSelectionNotifyChannels({
-      channelKinds: policy.notifyChannels.map((c) => c.kind),
-      webhookUrl: policy.webhookUrl,
+      channelKinds: settings.notifyChannels.map((c) => c.kind),
+      webhookUrl: settings.webhookUrl,
     });
     doc = {
       ...doc,
@@ -111,13 +114,13 @@ export async function syncPrFeedbackSelection(input: {
   }
 
   if (
-    policy.monitorWorkspace !== null &&
-    policy.monitorContextPath !== null &&
+    settings.monitorWorkspace !== null &&
+    settings.monitorContextPath !== null &&
     (JSON.stringify(doc) !== JSON.stringify(initialDoc) || pendingChanged)
   ) {
     await writeMonitorContext({
-      monitorWorkspace: policy.monitorWorkspace,
-      contextPath: policy.monitorContextPath,
+      monitorWorkspace: settings.monitorWorkspace,
+      contextPath: settings.monitorContextPath,
       hostWorkspacePath: input.hostWorkspacePath,
       workflowDir: input.definition.workflowDir,
       doc,
@@ -126,14 +129,14 @@ export async function syncPrFeedbackSelection(input: {
 
   const approved = new Set(doc.approved);
   const dispatchable = prFeedbackItems.filter((item) =>
-    isPrApprovedForWork(policy, approved, item.metadata),
+    isPrApprovedForWork(settings, approved, item.metadata),
   );
 
-  if (policy.profile === "unattended") {
+  if (settings.profile === "unattended") {
     return [...otherItems, ...dispatchable];
   }
 
-  if (policy.profile === "interactive") {
+  if (settings.profile === "interactive") {
     return [...otherItems, ...dispatchable];
   }
 

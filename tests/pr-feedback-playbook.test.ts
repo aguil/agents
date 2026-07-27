@@ -3,31 +3,33 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  isPrApprovedForWork,
+  isPrDeniedForWork,
+  parsePrFeedbackSettings,
+} from "@aguil/agents-pr-feedback";
+import {
   resolvePrFeedbackDisposition,
   verifyOneCommitForTriageItem,
 } from "@aguil/agents-workers";
 import {
-  isPrApprovedForWork,
-  isPrDeniedForWork,
   loadWorkflowFile,
-  parsePrFeedbackPolicy,
   workflowReloadChangedFields,
 } from "@aguil/agents-workflow";
 
-test("parsePrFeedbackPolicy parses deny list", () => {
-  const policy = parsePrFeedbackPolicy({
+test("parsePrFeedbackSettings parses deny list", () => {
+  const settings = parsePrFeedbackSettings({
     policy: {
       pr_feedback: {
         deny: ["org/repo#99"],
       },
     },
   });
-  expect(policy.deny).toEqual(["org/repo#99"]);
+  expect(settings.deny).toEqual(["org/repo#99"]);
   expect(
-    isPrDeniedForWork(policy, { repository: "org/repo", pull_number: "99" }),
+    isPrDeniedForWork(settings, { repository: "org/repo", pull_number: "99" }),
   ).toBe(true);
   expect(
-    isPrApprovedForWork(policy, new Set(["org/repo#99"]), {
+    isPrApprovedForWork(settings, new Set(["org/repo#99"]), {
       repository: "org/repo",
       pull_number: "99",
     }),
@@ -111,6 +113,49 @@ Work
     const changed = workflowReloadChangedFields(base, next);
     expect(changed).toContain("polling.interval_ms");
     expect(changed).toContain("publish");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("workflowReloadChangedFields keeps a label per policy section", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "wf-policy-reload-"));
+  try {
+    const load = async (policyBlock: string) => {
+      const workflowPath = join(dir, "WORKFLOW.md");
+      await writeFile(
+        workflowPath,
+        `---\nworkspace:\n  root: ${join(dir, "ws")}\n${policyBlock}---\nWork\n`,
+        "utf8",
+      );
+      const loaded = await loadWorkflowFile(workflowPath);
+      if (loaded.definition === undefined) {
+        throw new Error("missing definition");
+      }
+      return loaded.definition;
+    };
+
+    const base = await load(
+      "policy:\n  pr_feedback:\n    profile: interactive\n  code_review:\n    use_worktree: false\n",
+    );
+    const next = await load(
+      "policy:\n  pr_feedback:\n    profile: unattended\n  code_review:\n    use_worktree: true\n",
+    );
+
+    // These labels are operator-facing and are no longer derived from typed
+    // fields on the definition, so losing them would be silent.
+    const changed = workflowReloadChangedFields(base, next);
+    expect(changed).toContain("policy.pr_feedback");
+    expect(changed).toContain("policy.code_review");
+
+    // A section the runtime parses nothing from still reports, which is the
+    // one behavior difference from comparing parsed objects.
+    const withUnknown = await load(
+      "policy:\n  pr_feedback:\n    profile: interactive\n  code_review:\n    use_worktree: false\n  future_harness:\n    knob: 1\n",
+    );
+    expect(workflowReloadChangedFields(base, withUnknown)).toEqual([
+      "policy.future_harness",
+    ]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
