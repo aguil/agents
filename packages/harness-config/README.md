@@ -37,6 +37,23 @@ than it appeared to:
   or `NaN`, which compares false against every threshold — read as no ceiling at
   all.
 
+### Keeping the two descriptions in step
+
+Because the schemas and the loader both describe these formats, they can
+disagree, and only one direction is loud. A key the loader knows and the schema
+does not is rejected at load, so it surfaces immediately. A key the schema knows
+and the loader does not is accepted and silently ignored — the bug the schemas
+exist to remove.
+
+`src/key-surface.ts` lists every key the loader reads, grouped by level, and the
+loader builds its unknown-key allowlists from it.
+`tests/harness-schema-drift.test.ts` then asserts three things: each level's
+list matches the corresponding schema location, every object level in every
+schema is closed to unknown keys, and no document the loader rejects would be
+accepted by a strict third-party validator running the published file. That last
+one is the constraint-level version of the same problem, and it caught two real
+disagreements when it was written.
+
 Nine checks cannot move into a schema at all, because they depend on the
 filesystem (a referenced policy or role file existing), on compiling a CEL
 expression, or on agreement between separate parts of the document (execution

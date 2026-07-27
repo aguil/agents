@@ -75,9 +75,13 @@
       "additionalProperties": false,
       "properties": {
         "schemas": {
+          "description": "Outcome schemas by kind. `builtin:finding` is bound to the `finding` kind here rather than described as generally available, because the loader rejects it under any other kind.",
           "type": "object",
           "propertyNames": { "$ref": "#/definitions/idToken" },
-          "additionalProperties": { "$ref": "#/definitions/outputSchema" }
+          "properties": {
+            "finding": { "$ref": "#/definitions/outputSchema" }
+          },
+          "additionalProperties": { "$ref": "#/definitions/recordOutputSchema" }
         }
       }
     },
@@ -132,6 +136,12 @@
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
+    },
+    "nonBlankString": {
+      "description": "A string with at least one non-whitespace character. Distinct from nonEmptyString because the loader trims these particular lists before checking them, so \" \" is empty as far as it is concerned.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
     },
     "idToken": {
       "description": "Letters, digits, '.', '_' and '-', starting with a letter or digit; never a path separator or '..', because these become path segments.",
@@ -307,33 +317,34 @@
         }
       }
     },
+    "recordOutputSchema": {
+      "title": "record",
+      "description": "Required fields for an outcome of this kind.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "description": "Fields that must be present on the outcome.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/nonBlankString" }
+        },
+        "data_required": {
+          "description": "Fields that must be present on the outcome's data object.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/nonBlankString" }
+        }
+      }
+    },
     "outputSchema": {
+      "description": "The `finding` kind only: either the builtin schema or an explicit record of required fields.",
       "oneOf": [
         {
           "title": "builtin",
-          "description": "A builtin schema. `builtin:finding` is valid only under the `finding` kind.",
           "enum": ["builtin:finding"]
         },
-        {
-          "title": "record",
-          "description": "Required fields for an outcome of this kind.",
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "required": {
-              "description": "Fields that must be present on the outcome.",
-              "type": "array",
-              "minItems": 1,
-              "items": { "$ref": "#/definitions/nonEmptyString" }
-            },
-            "data_required": {
-              "description": "Fields that must be present on the outcome's data object.",
-              "type": "array",
-              "minItems": 1,
-              "items": { "$ref": "#/definitions/nonEmptyString" }
-            }
-          }
-        }
+        { "$ref": "#/definitions/recordOutputSchema" }
       ]
     }
   }
