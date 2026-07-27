@@ -235,7 +235,11 @@ function optionalPositiveNumber(
   value: unknown,
   label: string,
 ): number | undefined {
-  if (value === undefined || value === null) {
+  // Only an absent key is absent. `cost_usd:` with nothing after it parses as
+  // null, and treating that as "no ceiling declared" would reinstate the hole
+  // in its easiest-to-write form. The schema types this as a number and so
+  // rejects null already; accepting it here would put the two out of step.
+  if (value === undefined) {
     return undefined;
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {

@@ -1429,7 +1429,7 @@ test("a policy spend ceiling must be a positive finite number", async () => {
 
     // Each of these was accepted before and left the ceiling unset, so a
     // mistyped budget read as no budget at all.
-    for (const value of ["'2.5'", ".nan", ".inf", "0", "-1"]) {
+    for (const value of ["'2.5'", ".nan", ".inf", "0", "-1", "null", ""]) {
       await budget(value);
       await expect(load()).rejects.toThrow(
         "policy budget limits.cost_usd must be a positive number",
