@@ -1,13 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { parseCodeReviewPolicy } from "./code-review-policy";
 import { workItemKindForFeedKind } from "./feed-work-item-kind";
 import {
   parseImplementationExecution,
   validateImplementationRuntime,
 } from "./implementation-runtime";
-import { parsePrFeedbackPolicy } from "./pr-feedback-policy";
 import { resolveConfigString } from "./resolve-vars";
 import type {
   PublishCodeReviewConfig,
@@ -103,8 +101,6 @@ function buildWorkflowDefinition(input: {
 
   const feeds = parseFeeds(input.config.feeds);
   const workers = parseWorkers(input.config.workers);
-  const prFeedbackPolicy = parsePrFeedbackPolicy(input.config);
-  const codeReviewPolicy = parseCodeReviewPolicy(input.config);
   const perFeedMaxConcurrent = parsePerFeedMaxConcurrent(feeds);
   const implementation = parseImplementationExecution({
     config: input.config,
@@ -119,9 +115,7 @@ function buildWorkflowDefinition(input: {
     workflowDir: input.workflowDir,
     feeds,
     workers,
-    publish: parsePublishConfig(publishRaw, codeReviewPolicy),
-    prFeedbackPolicy,
-    codeReviewPolicy,
+    publish: parsePublishConfig(publishRaw),
     perFeedMaxConcurrent,
     pollingIntervalMs: positiveInt(polling.interval_ms, 30_000),
     workspaceRoot,
@@ -201,7 +195,6 @@ function parseWorkers(value: unknown): Readonly<Record<string, string>> {
 
 function parsePublishConfig(
   raw: Record<string, unknown>,
-  codeReviewPolicy: import("./code-review-policy").CodeReviewPolicyConfig,
 ): WorkflowPublishConfig {
   const codeReviewRaw = asRecord(raw.code_review);
   const prFeedbackRaw = asRecord(raw.pr_feedback);
@@ -222,10 +215,10 @@ function parsePublishConfig(
     reviewSummary: parseReviewSummary(codeReviewRaw.review_summary),
     staleHead: codeReviewRaw.stale_head === "post" ? "post" : "skip",
     replacePending: codeReviewRaw.replace_pending === true,
-    // publish_with_findings (#39): operator opts in to posting when triage has items.
-    requireEmptyTriage: codeReviewPolicy.publishWithFindings
-      ? false
-      : codeReviewRaw.require_empty_triage !== false,
+    // The code-review harness can clear this via its own `publish_with_findings`
+    // setting (#39). That override is applied on the code-review path rather
+    // than here, so this package stays free of harness-specific keys.
+    requireEmptyTriage: codeReviewRaw.require_empty_triage !== false,
   };
 
   const prFeedback: PublishPrFeedbackConfig = {

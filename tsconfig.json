@@ -33,6 +33,9 @@
       "@aguil/agents-code-review/config-runner": [
         "harnesses/code-review/src/config-runner.ts"
       ],
+      "@aguil/agents-code-review/workflow-settings": [
+        "harnesses/code-review/src/workflow-settings.ts"
+      ],
       "@aguil/agents-code-review-post": [
         "packages/code-review-post/src/index.ts"
       ],

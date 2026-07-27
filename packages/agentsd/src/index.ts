@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { parsePrFeedbackSettings } from "@aguil/agents-pr-feedback";
 import { createWorkFeeds, workItemTemplateVars } from "@aguil/agents-tracker";
 import { WorkQueueOrchestrator } from "@aguil/agents-work-queue";
 import { createWorkerRouter } from "@aguil/agents-workers";
@@ -60,12 +61,16 @@ export async function runAgentsd(
     argv,
     explicit: options.mcpInvoke,
   });
+  // Parsed once per loaded definition, not per poll or per work item: the
+  // candidate filter below runs on every tick, and the settings can only
+  // change when the workflow file is reloaded.
+  let prFeedbackSettings = parsePrFeedbackSettings(activeDefinition.config);
   const feeds = () =>
     createWorkFeeds({
       workflowDir: activeDefinition.workflowDir,
       workspacePath: hostWorkspace,
       feeds: activeDefinition.feeds,
-      prFeedbackDeny: activeDefinition.prFeedbackPolicy.deny,
+      prFeedbackDeny: prFeedbackSettings.deny,
       mcpInvoke,
     });
 
@@ -105,6 +110,7 @@ export async function runAgentsd(
     filterCandidates: async (items, tick) =>
       syncPrFeedbackSelection({
         definition: activeDefinition,
+        settings: prFeedbackSettings,
         hostWorkspacePath: hostWorkspace,
         candidates: items,
         tick,
@@ -121,6 +127,7 @@ export async function runAgentsd(
     if (next !== undefined) {
       const changedFields = workflowReloadChangedFields(activeDefinition, next);
       activeDefinition = next;
+      prFeedbackSettings = parsePrFeedbackSettings(next.config);
       orchestrator.updateDefinition(next, {
         feeds: feeds(),
         perFeedMaxConcurrent: next.perFeedMaxConcurrent,
@@ -160,7 +167,7 @@ export async function runAgentsd(
       feeds: feeds().map((f) => f.feedKind),
       publish_code_review: activeDefinition.publish.codeReview.mode,
       publish_pr_feedback: activeDefinition.publish.prFeedback.mode,
-      pr_feedback_profile: activeDefinition.prFeedbackPolicy.profile,
+      pr_feedback_profile: prFeedbackSettings.profile,
       implementation_runtime: activeDefinition.implementation.mode,
       implementation_adapter: activeDefinition.implementation.adapter,
       implementation_protocol: activeDefinition.implementation.protocol,
