@@ -1,10 +1,17 @@
 # ADR 0015: the harness spec is project-local; AGENTS-1 convergence is not a goal
 
-**Status:** Proposed
+**Status:** Partially superseded by ADR 0018
 
 **Status history:**
 
 - 2026-07-26 — Proposed.
+- 2026-07-26 — Accepted: merged in #140. From here this ADR is immutable except
+  for these status fields.
+- 2026-07-26 — Partially superseded by ADR 0018: §3's naming of `0.2` as the
+  current version, and its instruction that new documents declare `0.2`. ADR
+  0018 §6 increments to `0.3`. The rest of §3 stands — `0.1` and `0.2` remain
+  accepted — as does every other clause, and §5's increment process is what ADR
+  0018 followed rather than overrode.
 
 **Context:** The planning that produced the `.agents/` loader assumed this
 repository would converge on an external specification referred to as AGENTS-1.

@@ -1,10 +1,12 @@
 # ADR 0018: the published schema enforces unknown-key rejection; spec increments to 0.3
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-07-26 — Proposed.
+- 2026-07-26 — Accepted: merged in #146. Discharges ADR 0015 §5 for the role
+  `ref:` construct and for the schema.
 
 **Context:** ADR 0015 §2 designated `.agents/schemas/harness.schema.json` the
 normative description of the harness document format, and §5 required that any

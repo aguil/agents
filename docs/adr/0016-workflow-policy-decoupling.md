@@ -1,10 +1,12 @@
 # ADR 0016: decouple `WorkflowDefinition` from harness policy configs, but not into `.agents/policies/`
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-07-26 — Proposed.
+- 2026-07-26 — Accepted: merged in #141. Clause 7's deferred implementation is
+  tracked by #144.
 
 **Context:** `WorkflowDefinition` — the parsed form of an agentsd `WORKFLOW.md`
 front matter block — carries two harness-specific fields:
