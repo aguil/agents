@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/aguil/agents/.agents/schemas/manifest.schema.json",
+  "title": "Agents manifest",
+  "description": "The normative description of `.agents/manifest.yaml` (ADR 0015 §2). The manifest states which harnesses are enabled and which version of the format the directory is written against; everything else about a harness lives in its own document.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "specVersion": {
+      "description": "Version of the `.agents/` format this directory is written against, validated against the same set as a harness document's `spec_version` (ADR 0015 §4). Note the spelling: this field is camelCase while its harness counterpart is snake_case, an inconsistency that predates the schema and is preserved rather than corrected.",
+      "enum": ["0.1", "0.2", "0.3"]
+    },
+    "enabled": {
+      "description": "What the runtime should load. Absent means nothing is enabled.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harnesses": {
+          "description": "Harness identifiers to load, each resolved against `.agents/harnesses/<id>/harness.yaml`.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

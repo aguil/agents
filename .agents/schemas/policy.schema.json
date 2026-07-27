@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/aguil/agents/.agents/schemas/policy.schema.json",
+  "title": "Capability policy",
+  "description": "The normative description of `.agents/policies/<id>.yaml` (ADR 0015 §2). A policy is the enforcement source of truth for `packages/policy`, so unknown keys are rejected rather than ignored: a key that is silently dropped here produces a document that appears to constrain and does not.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "Policy identifier. Optional, but must equal the file name when present.",
+      "$ref": "#/definitions/idToken"
+    },
+    "description": {
+      "description": "Human-facing summary. Documentation only — the evaluator does not read it.",
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "capabilities": {
+      "description": "Allow and deny lists per capability class. A class that is absent is unconstrained by this policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "filesystem": {
+          "description": "Path globs the roles governed by this policy may read and write.",
+          "$ref": "#/definitions/capabilityRules"
+        },
+        "exec": {
+          "description": "Command prefixes the roles governed by this policy may run.",
+          "$ref": "#/definitions/capabilityRules"
+        },
+        "network": {
+          "description": "Network destinations the roles governed by this policy may reach.",
+          "$ref": "#/definitions/capabilityRules"
+        }
+      }
+    },
+    "limits": {
+      "description": "Resource ceilings. Note the snake_case keys, which differ from the camelCase fields the parsed policy exposes.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cost_usd": {
+          "description": "Spend ceiling in US dollars. Must be a positive finite number; the loader rejects anything else rather than dropping it. JSON has no infinity literal but YAML does, so finiteness is expressed as a maximum of the largest double — without it `.inf` would satisfy this schema and still fail at load.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1.7976931348623157e308
+        },
+        "timeout_ms": {
+          "description": "Wall-clock ceiling in milliseconds.",
+          "$ref": "#/definitions/positiveInteger"
+        }
+      }
+    },
+    "confirmations": {
+      "description": "Action categories routed to human approval instead of a hard verdict.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requiredFor": {
+          "description": "Categories needing approval.",
+          "$ref": "#/definitions/confirmationCategories"
+        },
+        "required_for": {
+          "description": "snake_case alias of `requiredFor`. Both spellings are accepted, and `requiredFor` wins when a document declares both.",
+          "$ref": "#/definitions/confirmationCategories"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "idToken": {
+      "description": "Letters, digits, '.', '_' and '-', starting with a letter or digit; never a path separator or '..', because these become path segments.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "not": { "pattern": "\\.\\." }
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "capabilityRules": {
+      "description": "Patterns for one capability class. Both lists are optional; deny takes precedence over allow at evaluation time.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "deny": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "confirmationCategories": {
+      "type": "array",
+      "items": { "enum": ["exec.unknown", "filesystem.write"] }
+    }
+  }
+}
