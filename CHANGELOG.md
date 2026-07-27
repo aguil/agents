@@ -10,6 +10,36 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.6.0](https://github.com/aguil/agents/compare/v0.5.4...v0.6.0) (2026-07-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **workflow:** `WorkflowDefinition.prFeedbackPolicy` and `WorkflowDefinition.codeReviewPolicy` are removed, and `@aguil/agents-workflow` no longer exports `parsePrFeedbackPolicy`, `parseCodeReviewPolicy`, `defaultPrFeedbackPolicy`, `isPrApprovedForWork`, `isPrDeniedForWork`, `prIdentifierFromWorkItemMetadata`, `PrFeedbackPolicyConfig`, `PrFeedbackProfile` or `CodeReviewPolicyConfig`. The PR-feedback members are exported from `@aguil/agents-pr-feedback` with `Policy` renamed to `Settings`; the code-review ones from `@aguil/agents-code-review/workflow-settings`.
+* **harness-config:** `.agents/` documents that previously loaded now fail. A manifest or policy document containing an unknown key, a manifest declaring a `specVersion` outside `SUPPORTED_SPEC_VERSIONS`, and a policy whose `limits.cost_usd` is not a positive finite number are each rejected at load rather than parsed and partly ignored. Every document shipped in this repository, in the example, and in the test fixtures is unaffected.
+
+### Added
+
+* **harness-config:** schema-validate manifest.yaml and the policy documents ([9cd664c](https://github.com/aguil/agents/commit/9cd664c726c33f44743cb441d9ee4f0d431356ad)), closes [#149](https://github.com/aguil/agents/issues/149)
+
+
+### Fixed
+
+* **harness-config:** bound the compiled validator cache ([9c1ef7d](https://github.com/aguil/agents/commit/9c1ef7d5f2d8fb4005d83b7cba2ab0b9aefbe5c7))
+* **harness-config:** express cost_usd finiteness in the policy schema ([eb8961f](https://github.com/aguil/agents/commit/eb8961f9e60b0c910913b508d57d96f51892cdda))
+* **harness-config:** reject an explicitly null cost ceiling ([e091241](https://github.com/aguil/agents/commit/e09124160f8e1c4f5e9a36d3346d21e1457ce5ce))
+* **harness-config:** report policy type failures so a null constraint cannot fail open ([f71203f](https://github.com/aguil/agents/commit/f71203fb5de5229ed353c7a959d3abe719b7d508))
+
+
+### Performance
+
+* **agentsd:** parse PR-feedback settings once per definition, not once per poll ([b7b46f9](https://github.com/aguil/agents/commit/b7b46f9b7e8edd7c4e7360fe897d3724cda33a39))
+
+
+### Changed
+
+* **workflow:** remove the embedded harness policy configs from WorkflowDefinition ([845c2f2](https://github.com/aguil/agents/commit/845c2f2554da5431f20c88325dca9d766bd29cc5)), closes [#144](https://github.com/aguil/agents/issues/144)
+
 ## [0.5.4](https://github.com/aguil/agents/compare/v0.5.3...v0.5.4) (2026-07-27)
 
 
