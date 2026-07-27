@@ -11,6 +11,8 @@ import {
 } from "@aguil/agents-reporting";
 import { evaluate, parse } from "@marcbachmann/cel-js";
 
+export type { LoaderKeyLevel } from "./key-surface";
+export { LOADER_ACCEPTED_KEYS, ROLE_FILE_ACCEPTED_KEYS } from "./key-surface";
 export type {
   ApplyFindingPipelinesConfig,
   OutcomeSchemaViolation,
@@ -30,6 +32,11 @@ export {
   validatePolicyDocument,
 } from "./schema-validation";
 
+import {
+  LOADER_ACCEPTED_KEYS,
+  type LoaderKeyLevel,
+  ROLE_FILE_ACCEPTED_KEYS,
+} from "./key-surface";
 import {
   validateHarnessDocument,
   validateManifestDocument,
@@ -307,6 +314,29 @@ function assertMatchesSchema(problems: readonly string[], label: string): void {
   }
 }
 
+/**
+ * Reject keys the loader does not read at a level whose accepted keys are
+ * reified in `LOADER_ACCEPTED_KEYS`. The schema rejects these first in
+ * practice; keeping the check means the list stays tied to real behavior
+ * rather than being a third description that can drift from both.
+ */
+function assertNoUnknownKeys(
+  record: Readonly<Record<string, unknown>>,
+  label: string,
+  level: LoaderKeyLevel,
+  note?: string,
+): void {
+  const accepted = LOADER_ACCEPTED_KEYS[level];
+  const unknown = Object.keys(record).filter(
+    (key) => !(accepted as readonly string[]).includes(key),
+  );
+  if (unknown.length > 0) {
+    fail(
+      `${label} has unsupported fields: ${unknown.join(", ")} (${note ?? `supported: ${accepted.join(", ")}`})`,
+    );
+  }
+}
+
 function assertSupportedSpecVersion(
   version: string | undefined,
   label: string,
@@ -438,27 +468,12 @@ function parsePolicy(value: unknown, id: string): PolicySpec {
   };
 }
 
-const ROLE_FIELDS: ReadonlySet<string> = new Set([
-  "description",
-  "enabled",
-  "prompt",
-  "prompt_path",
-  "timeout_ms",
-  "allowed_commands",
-  "required_capabilities",
-  "policy",
-]);
-
-/**
- * Frontmatter keys accepted in a role file. `prompt` and `prompt_path` are
- * excluded deliberately: the Markdown body below the frontmatter is the
- * prompt, so a role file has no need to point elsewhere for one.
- */
-const ROLE_FILE_FIELDS: ReadonlySet<string> = new Set(
-  [...ROLE_FIELDS].filter(
-    (field) => field !== "prompt" && field !== "prompt_path",
-  ),
+/** Role keys other than `ref`, which `resolveRoleRef` strips before this. */
+const ROLE_FIELDS: ReadonlySet<string> = new Set(
+  LOADER_ACCEPTED_KEYS.role.filter((field) => field !== "ref"),
 );
+
+const ROLE_FILE_FIELDS: ReadonlySet<string> = new Set(ROLE_FILE_ACCEPTED_KEYS);
 
 interface ParsedRole {
   readonly role: RoleDefinition;
@@ -879,16 +894,14 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
       fail(`hooks.${event} must be a list of handlers`);
     }
     hooks[event as HookEvent] = handlersValue.map((handlerValue, index) => {
-      const handler = asRecord(handlerValue, `hooks.${event}[${index}]`);
-      const unknownKeys = Object.keys(handler).filter(
-        (key) =>
-          !["command", "matcher", "timeout_s", "applies_to"].includes(key),
+      const label = `hooks.${event}[${index}]`;
+      const handler = asRecord(handlerValue, label);
+      assertNoUnknownKeys(
+        handler,
+        label,
+        "hookHandler",
+        "spec v0.2 supports command handlers only",
       );
-      if (unknownKeys.length > 0) {
-        fail(
-          `hooks.${event}[${index}] has unsupported fields: ${unknownKeys.join(", ")} (spec v0.2 supports command handlers only)`,
-        );
-      }
       const commandRaw = requiredString(
         handler.command,
         `hooks.${event}[${index}].command`,
@@ -925,12 +938,7 @@ function parseContext(
     return undefined;
   }
   const record = asRecord(value, "context");
-  const unknownKeys = Object.keys(record).filter((key) => key !== "providers");
-  if (unknownKeys.length > 0) {
-    fail(
-      `context has unsupported fields: ${unknownKeys.join(", ")} (supported: providers)`,
-    );
-  }
+  assertNoUnknownKeys(record, "context", "context");
   if (!Array.isArray(record.providers) || record.providers.length === 0) {
     fail("context.providers must be a non-empty list");
   }
@@ -942,24 +950,12 @@ function parseContext(
   });
 }
 
-const OUTPUT_SCHEMA_FIELDS: ReadonlySet<string> = new Set([
-  "required",
-  "data_required",
-]);
-
 function parseOutputSchemas(value: unknown): OutputSchemas | undefined {
   if (value === undefined) {
     return undefined;
   }
   const output = asRecord(value, "output");
-  const outputUnknownKeys = Object.keys(output).filter(
-    (key) => key !== "schemas",
-  );
-  if (outputUnknownKeys.length > 0) {
-    fail(
-      `output has unsupported fields: ${outputUnknownKeys.join(", ")} (supported: schemas)`,
-    );
-  }
+  assertNoUnknownKeys(output, "output", "output");
   const schemas = asRecord(output.schemas, "output.schemas");
   const parsed: Record<string, OutcomeSchema> = {};
   for (const [kind, value] of Object.entries(schemas)) {
@@ -979,14 +975,7 @@ function parseOutputSchemas(value: unknown): OutputSchemas | undefined {
     }
 
     const schema = asRecord(value, label);
-    const unknownKeys = Object.keys(schema).filter(
-      (key) => !OUTPUT_SCHEMA_FIELDS.has(key),
-    );
-    if (unknownKeys.length > 0) {
-      fail(
-        `${label} has unsupported fields: ${unknownKeys.join(", ")} (supported: required, data_required)`,
-      );
-    }
+    assertNoUnknownKeys(schema, label, "outputSchema");
     parsed[kind] = {
       ...(schema.required === undefined
         ? {}
@@ -1015,12 +1004,7 @@ function parseFindingStrategies<T extends string>(
     return undefined;
   }
   const record = asRecord(value, section);
-  const unknownKeys = Object.keys(record).filter((key) => key !== "findings");
-  if (unknownKeys.length > 0) {
-    fail(
-      `${section} has unsupported fields: ${unknownKeys.join(", ")} (supported: findings)`,
-    );
-  }
+  assertNoUnknownKeys(record, section, "findingStrategies");
   const strategies = nonEmptyStringList(record.findings, `${section}.findings`);
   for (const strategy of strategies) {
     if (!(supported as readonly string[]).includes(strategy)) {
@@ -1037,14 +1021,7 @@ function parseReporting(value: unknown): ReportTemplateName | undefined {
     return undefined;
   }
   const reporting = asRecord(value, "reporting");
-  const unknownKeys = Object.keys(reporting).filter(
-    (key) => key !== "template",
-  );
-  if (unknownKeys.length > 0) {
-    fail(
-      `reporting has unsupported fields: ${unknownKeys.join(", ")} (supported: template)`,
-    );
-  }
+  assertNoUnknownKeys(reporting, "reporting", "reporting");
   const template = requiredString(reporting.template, "reporting.template");
   if (!(REPORT_TEMPLATE_NAMES as readonly string[]).includes(template)) {
     fail(
