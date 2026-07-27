@@ -1,10 +1,12 @@
 # ADR 0017: knowledge governance — staged-note schema, provenance namespacing, and a context budget
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-07-26 — Proposed.
+- 2026-07-26 — Accepted: merged in #142. Decisions only; implementation stays
+  blocked on run-level hook dispatch.
 
 **Context:** A knowledge write-back capability has been designed for this
 repository but not built. The intent is that a harness run can record what it
