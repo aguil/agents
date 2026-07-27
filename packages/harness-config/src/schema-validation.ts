@@ -1,35 +1,53 @@
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import harnessSchema from "./harness.schema.json" with { type: "json" };
+import manifestSchema from "./manifest.schema.json" with { type: "json" };
+import policySchema from "./policy.schema.json" with { type: "json" };
+
+export type JsonSchema = Readonly<Record<string, unknown>>;
 
 /**
- * The normative harness document schema (ADR 0015 §2). Published verbatim at
- * `.agents/schemas/harness.schema.json`; a test pins the two copies together.
+ * The normative document schemas (ADR 0015 §2). Each is published verbatim
+ * under `.agents/schemas/`; a test pins every pair of copies together.
  */
-export const HARNESS_SCHEMA: Readonly<Record<string, unknown>> = harnessSchema;
+export const HARNESS_SCHEMA: JsonSchema = harnessSchema;
+export const MANIFEST_SCHEMA: JsonSchema = manifestSchema;
+export const POLICY_SCHEMA: JsonSchema = policySchema;
 
-let compiled: ValidateFunction | undefined;
+/**
+ * What the document is called in an error message. Ajv reports the root as the
+ * empty path, which needs a name, and nested paths read better prefixed by
+ * nothing at all — `capabilities.exec`, not `policy.capabilities.exec`.
+ */
+const ROOT_LABELS: ReadonlyMap<JsonSchema, string> = new Map([
+  [HARNESS_SCHEMA, "harness.yaml"],
+  [MANIFEST_SCHEMA, "manifest.yaml"],
+  [POLICY_SCHEMA, "the policy document"],
+]);
 
-function harnessValidator(): ValidateFunction {
-  if (compiled === undefined) {
+const compiled = new Map<JsonSchema, ValidateFunction>();
+
+function validatorFor(schema: JsonSchema): ValidateFunction {
+  let validate = compiled.get(schema);
+  if (validate === undefined) {
     // allErrors so a document with several mistakes reports all of them
     // rather than one per edit-and-retry cycle.
-    // allErrors so a document with several mistakes reports all of them.
     // verbose so `parentSchema` is available — it carries the sibling
     // `properties`, which is how an unknown-key error can name the keys that
     // would have been accepted.
-    compiled = new Ajv({
+    validate = new Ajv({
       allErrors: true,
       verbose: true,
       strict: false,
-    }).compile(harnessSchema);
+    }).compile(schema);
+    compiled.set(schema, validate);
   }
-  return compiled;
+  return validate;
 }
 
 /** `/roles/security/timeout_ms` reads better as `roles.security.timeout_ms`. */
-function readablePath(instancePath: string): string {
+function readablePath(instancePath: string, rootLabel: string): string {
   if (instancePath.length === 0) {
-    return "harness.yaml";
+    return rootLabel;
   }
   return instancePath.slice(1).split("/").join(".");
 }
@@ -47,8 +65,8 @@ function allowedKeys(error: ErrorObject): readonly string[] {
   return Object.keys(parent?.properties ?? {}).sort();
 }
 
-function describe(error: ErrorObject): string {
-  const where = readablePath(error.instancePath);
+function describe(error: ErrorObject, rootLabel: string): string {
+  const where = readablePath(error.instancePath, rootLabel);
   switch (error.keyword) {
     case "additionalProperties": {
       const key = String(error.params.additionalProperty);
@@ -77,7 +95,7 @@ function describe(error: ErrorObject): string {
 /**
  * Keywords the loader's own checks do not cover.
  *
- * The schema describes the whole format, because it is the normative
+ * The schemas describe the whole format, because they are the normative
  * description (ADR 0015 §2) and third parties validate against all of it. The
  * loader, though, already checks every *known* key with messages that name the
  * offending value — "reporting.template has unknown template X (supported: …)"
@@ -95,16 +113,18 @@ const ENFORCED_KEYWORDS: ReadonlySet<string> = new Set([
 
 function violations(
   document: unknown,
+  schema: JsonSchema,
   keywords: ReadonlySet<string> | undefined,
 ): readonly string[] {
-  const validate = harnessValidator();
+  const validate = validatorFor(schema);
   if (validate(document)) {
     return [];
   }
+  const rootLabel = ROOT_LABELS.get(schema) ?? "the document";
   const problems = new Set<string>();
   for (const error of validate.errors ?? []) {
     if (keywords === undefined || keywords.has(error.keyword)) {
-      problems.add(describe(error));
+      problems.add(describe(error, rootLabel));
     }
   }
   return [...problems];
@@ -117,16 +137,29 @@ function violations(
  * the loader's semantic checks still run.
  */
 export function validateHarnessDocument(document: unknown): readonly string[] {
-  return violations(document, ENFORCED_KEYWORDS);
+  return violations(document, HARNESS_SCHEMA, ENFORCED_KEYWORDS);
+}
+
+/** As {@link validateHarnessDocument}, for a parsed `.agents/manifest.yaml`. */
+export function validateManifestDocument(document: unknown): readonly string[] {
+  return violations(document, MANIFEST_SCHEMA, ENFORCED_KEYWORDS);
+}
+
+/** As {@link validateHarnessDocument}, for a parsed `.agents/policies/<id>.yaml`. */
+export function validatePolicyDocument(document: unknown): readonly string[] {
+  return violations(document, POLICY_SCHEMA, ENFORCED_KEYWORDS);
 }
 
 /**
- * Validate against every rule in the schema, including the ones the loader
+ * Validate against every rule in a schema, including the ones the loader
  * reports itself. Not used at load time — the loader would report those with
  * better messages — but it is what a third party validating the published file
- * would apply, so it is how this repository checks that the schema stays
+ * would apply, so it is how this repository checks that its schemas stay
  * truthful about documents that actually exist.
  */
-export function findAllSchemaViolations(document: unknown): readonly string[] {
-  return violations(document, undefined);
+export function findAllSchemaViolations(
+  document: unknown,
+  schema: JsonSchema = HARNESS_SCHEMA,
+): readonly string[] {
+  return violations(document, schema, undefined);
 }

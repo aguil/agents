@@ -15,16 +15,27 @@ Phase 1 scope (deliberately minimal):
 
 ## Schema validation
 
-`harness.yaml` is validated against a JSON Schema before any semantic check
-runs. The schema is hand-authored at `src/harness.schema.json` and published
-verbatim at `.agents/schemas/harness.schema.json`, which ADR 0015 designates the
-normative description of the format; a test pins the two copies together.
+Every document this package reads is validated against a JSON Schema before any
+semantic check runs — `harness.yaml`, `manifest.yaml`, and each
+`policies/<id>.yaml`. The schemas are hand-authored under `src/` and published
+verbatim under `.agents/schemas/`, which ADR 0015 designates the normative
+description of the format; a test pins each pair of copies together.
 
-The schema describes the whole format, but the loader reports only the problems
+The schemas describe the whole format, but the loader reports only the problems
 it could not already detect — unknown keys, and valid keys at the wrong nesting
 level. Everything else stays with the existing checks, whose messages name the
 offending value rather than only the rule. Net enforcement is unchanged; the
 message a reader gets is the better of the two.
+
+Two exceptions to "unchanged", both closing a document that quietly did less
+than it appeared to:
+
+- The manifest's `specVersion` is now checked against the accepted set, which
+  ADR 0015 §4 called for and nothing implemented.
+- `limits.cost_usd` must be a positive finite number. It previously accepted
+  anything and dropped what it did not understand, so a mistyped spend ceiling —
+  or `NaN`, which compares false against every threshold — read as no ceiling at
+  all.
 
 Nine checks cannot move into a schema at all, because they depend on the
 filesystem (a referenced policy or role file existing), on compiling a CEL

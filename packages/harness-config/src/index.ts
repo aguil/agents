@@ -19,13 +19,22 @@ export {
   applyFindingPipelines,
   validateOutcomesAgainstSchemas,
 } from "./output-pipeline";
+export type { JsonSchema } from "./schema-validation";
 export {
   findAllSchemaViolations,
   HARNESS_SCHEMA,
+  MANIFEST_SCHEMA,
+  POLICY_SCHEMA,
   validateHarnessDocument,
+  validateManifestDocument,
+  validatePolicyDocument,
 } from "./schema-validation";
 
-import { validateHarnessDocument } from "./schema-validation";
+import {
+  validateHarnessDocument,
+  validateManifestDocument,
+  validatePolicyDocument,
+} from "./schema-validation";
 
 export const HARNESS_SPEC_VERSION = "0.3";
 
@@ -43,7 +52,13 @@ export interface PolicyCapabilityRules {
 }
 
 /** Action categories that route to approval instead of a hard verdict. */
-export type PolicyConfirmationCategory = "exec.unknown" | "filesystem.write";
+export const POLICY_CONFIRMATION_CATEGORIES = [
+  "exec.unknown",
+  "filesystem.write",
+] as const;
+
+export type PolicyConfirmationCategory =
+  (typeof POLICY_CONFIRMATION_CATEGORIES)[number];
 
 export interface PolicySpec {
   readonly id: string;
@@ -62,10 +77,9 @@ export interface PolicySpec {
   };
 }
 
-const CONFIRMATION_CATEGORIES: ReadonlySet<string> = new Set([
-  "exec.unknown",
-  "filesystem.write",
-]);
+const CONFIRMATION_CATEGORIES: ReadonlySet<string> = new Set(
+  POLICY_CONFIRMATION_CATEGORIES,
+);
 
 export const HOOK_EVENTS = [
   "pre_tool_call",
@@ -211,6 +225,25 @@ function optionalPositiveInt(
   return value;
 }
 
+/**
+ * A spend ceiling that is not a positive finite number used to be dropped
+ * silently, which turned a typo into an absent limit — the fail-open direction,
+ * in a document whose whole purpose is to constrain. `NaN` in particular
+ * compares false against every threshold, so it read as "no limit".
+ */
+function optionalPositiveNumber(
+  value: unknown,
+  label: string,
+): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    fail(`${label} must be a positive number`);
+  }
+  return value;
+}
+
 function optionalStringArray(
   value: unknown,
   label: string,
@@ -258,6 +291,29 @@ async function readYamlFile(path: string, label: string): Promise<unknown> {
   }
 }
 
+/**
+ * Structural validation, run before any semantic check: the schema rejects
+ * unknown and misplaced keys, which the hand-rolled checks cannot, and its
+ * failures are the ones most likely to explain a document that "parses but
+ * does nothing". Semantic checks the schema cannot express still run after.
+ */
+function assertMatchesSchema(problems: readonly string[], label: string): void {
+  if (problems.length > 0) {
+    fail(`${label} does not match its schema:\n  - ${problems.join("\n  - ")}`);
+  }
+}
+
+function assertSupportedSpecVersion(
+  version: string | undefined,
+  label: string,
+): void {
+  if (version !== undefined && !SUPPORTED_SPEC_VERSIONS.includes(version)) {
+    fail(
+      `unsupported ${label} "${version}" (supported: ${SUPPORTED_SPEC_VERSIONS.join(", ")})`,
+    );
+  }
+}
+
 /** Read `.agents/manifest.yaml`; missing file yields an empty manifest. */
 export async function loadManifest(
   agentsDir: string,
@@ -270,9 +326,15 @@ export async function loadManifest(
     return { enabledHarnesses: [] };
   }
   const parsed = asRecord(Bun.YAML.parse(raw) ?? {}, "manifest.yaml");
+  assertMatchesSchema(validateManifestDocument(parsed), "manifest.yaml");
   const enabled = asRecord(parsed.enabled ?? {}, "manifest.yaml enabled");
+  const specVersion = optionalString(
+    parsed.specVersion,
+    "manifest.specVersion",
+  );
+  assertSupportedSpecVersion(specVersion, "manifest specVersion");
   return {
-    specVersion: optionalString(parsed.specVersion, "manifest.specVersion"),
+    specVersion,
     enabledHarnesses:
       optionalStringArray(enabled.harnesses, "manifest.enabled.harnesses") ??
       [],
@@ -281,6 +343,7 @@ export async function loadManifest(
 
 function parsePolicy(value: unknown, id: string): PolicySpec {
   const record = asRecord(value, `policy ${id}`);
+  assertMatchesSchema(validatePolicyDocument(record), `policy "${id}"`);
   const declaredId = optionalString(record.id, `policy ${id} id`);
   if (declaredId !== undefined && declaredId !== id) {
     fail(`policy file for "${id}" declares mismatched id "${declaredId}"`);
@@ -351,8 +414,10 @@ function parsePolicy(value: unknown, id: string): PolicySpec {
       ? {}
       : {
           limits: {
-            costUsd:
-              typeof limits.cost_usd === "number" ? limits.cost_usd : undefined,
+            costUsd: optionalPositiveNumber(
+              limits.cost_usd,
+              `policy ${id} limits.cost_usd`,
+            ),
             timeoutMs: optionalPositiveInt(
               limits.timeout_ms,
               `policy ${id} limits.timeout_ms`,
@@ -1041,23 +1106,15 @@ export async function loadHarness(
     "harness.yaml",
   );
 
-  // Structural validation first: the schema rejects unknown and misplaced
-  // keys, which the checks below cannot, and its failures are the ones most
-  // likely to explain a document that "parses but does nothing". Semantic
-  // checks the schema cannot express still run afterwards.
-  const schemaProblems = validateHarnessDocument(parsed);
-  if (schemaProblems.length > 0) {
-    fail(
-      `harness "${options.harnessId}" does not match the harness schema:\n  - ${schemaProblems.join("\n  - ")}`,
-    );
-  }
+  assertMatchesSchema(
+    validateHarnessDocument(parsed),
+    `harness "${options.harnessId}"`,
+  );
 
-  const specVersion = requiredString(parsed.spec_version, "spec_version");
-  if (!SUPPORTED_SPEC_VERSIONS.includes(specVersion)) {
-    fail(
-      `unsupported spec_version "${specVersion}" (supported: ${SUPPORTED_SPEC_VERSIONS.join(", ")})`,
-    );
-  }
+  assertSupportedSpecVersion(
+    requiredString(parsed.spec_version, "spec_version"),
+    "spec_version",
+  );
   if (parsed.kind !== "harness") {
     fail(`kind must be "harness"`);
   }

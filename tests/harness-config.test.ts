@@ -7,6 +7,9 @@ import {
   HARNESS_SCHEMA,
   loadHarness,
   loadManifest,
+  MANIFEST_SCHEMA,
+  POLICY_CONFIRMATION_CATEGORIES,
+  POLICY_SCHEMA,
   SUPPORTED_SPEC_VERSIONS,
 } from "@aguil/agents-harness-config";
 import type { HarnessDefinition } from "@aguil/agents-orchestration";
@@ -1203,34 +1206,54 @@ test("harness.description is accepted, and spec 0.3 loads alongside 0.1 and 0.2"
   }
 });
 
-test("the published schema matches the one the loader enforces", async () => {
+test("the published schemas match the ones the loader enforces", async () => {
   const { readFile } = await import("node:fs/promises");
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-  const published = await readFile(
-    join(repoRoot, ".agents", "schemas", "harness.schema.json"),
-    "utf8",
-  );
-  const enforced = await readFile(
-    join(repoRoot, "packages", "harness-config", "src", "harness.schema.json"),
-    "utf8",
-  );
-  // ADR 0015 designates the published file normative; it is worthless as a
-  // description if it can drift from what actually runs.
-  expect(published).toBe(enforced);
+  for (const name of [
+    "harness.schema.json",
+    "manifest.schema.json",
+    "policy.schema.json",
+  ]) {
+    const published = await readFile(
+      join(repoRoot, ".agents", "schemas", name),
+      "utf8",
+    );
+    const enforced = await readFile(
+      join(repoRoot, "packages", "harness-config", "src", name),
+      "utf8",
+    );
+    // ADR 0015 designates the published file normative; it is worthless as a
+    // description if it can drift from what actually runs.
+    expect([name, published]).toEqual([name, enforced]);
+  }
 });
 
 test("schema enums stay in step with the constants they describe", () => {
-  const schema = HARNESS_SCHEMA as {
+  const harness = HARNESS_SCHEMA as {
     properties: {
       spec_version: { enum: readonly string[] };
       reporting: { properties: { template: { enum: readonly string[] } } };
     };
   };
-  expect(schema.properties.spec_version.enum).toEqual([
+  expect(harness.properties.spec_version.enum).toEqual([
     ...SUPPORTED_SPEC_VERSIONS,
   ]);
-  expect(schema.properties.reporting.properties.template.enum).toEqual([
+  expect(harness.properties.reporting.properties.template.enum).toEqual([
     ...REPORT_TEMPLATE_NAMES,
+  ]);
+
+  const manifest = MANIFEST_SCHEMA as {
+    properties: { specVersion: { enum: readonly string[] } };
+  };
+  expect(manifest.properties.specVersion.enum).toEqual([
+    ...SUPPORTED_SPEC_VERSIONS,
+  ]);
+
+  const policy = POLICY_SCHEMA as {
+    definitions: { confirmationCategories: { items: { enum: string[] } } };
+  };
+  expect(policy.definitions.confirmationCategories.items.enum).toEqual([
+    ...POLICY_CONFIRMATION_CATEGORIES,
   ]);
 });
 
@@ -1250,6 +1273,170 @@ test("every harness document in the repository satisfies the schema", async () =
     // validating the published file applies all of them, so the schema has to
     // stay truthful about these documents under the strictest reading.
     expect([relative, findAllSchemaViolations(parsed)]).toEqual([relative, []]);
+  }
+});
+
+test("every manifest and policy document in the repository satisfies its schema", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const documents: readonly (readonly [string, typeof MANIFEST_SCHEMA])[] = [
+    [".agents/manifest.yaml", MANIFEST_SCHEMA],
+    ["examples/incident-triage/.agents/manifest.yaml", MANIFEST_SCHEMA],
+    ["tests/fixtures/agents-dir/manifest.yaml", MANIFEST_SCHEMA],
+    [".agents/policies/code-review-readonly.yaml", POLICY_SCHEMA],
+    [
+      "examples/incident-triage/.agents/policies/triage-fix.yaml",
+      POLICY_SCHEMA,
+    ],
+    [
+      "examples/incident-triage/.agents/policies/triage-readonly.yaml",
+      POLICY_SCHEMA,
+    ],
+    ["tests/fixtures/agents-dir/policies/triage-readonly.yaml", POLICY_SCHEMA],
+  ];
+  for (const [relative, schema] of documents) {
+    const parsed = Bun.YAML.parse(
+      await readFile(join(repoRoot, relative), "utf8"),
+    );
+    expect([relative, findAllSchemaViolations(parsed, schema)]).toEqual([
+      relative,
+      [],
+    ]);
+  }
+});
+
+test("the manifest rejects unknown keys and unsupported spec versions", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const manifest = (lines: readonly string[]) =>
+      writeFile(join(scratch, "manifest.yaml"), lines.join("\n"));
+
+    await manifest(['specVersion: "0.2"', "enabled:", "  harnesses: [a]"]);
+    expect((await loadManifest(scratch)).enabledHarnesses).toEqual(["a"]);
+
+    // The gap ADR 0015 §4 named: any string used to load.
+    await manifest(['specVersion: "9.9"']);
+    await expect(loadManifest(scratch)).rejects.toThrow(
+      'unsupported manifest specVersion "9.9" (supported: 0.1, 0.2, 0.3)',
+    );
+
+    await manifest(["specVerison: '0.2'"]);
+    await expect(loadManifest(scratch)).rejects.toThrow(
+      'manifest.yaml has unknown key "specVerison" (supported: enabled, specVersion)',
+    );
+
+    // The one that mattered: a typo here enables nothing, silently.
+    await manifest(["enabled:", "  harnesess: [a]"]);
+    await expect(loadManifest(scratch)).rejects.toThrow(
+      'enabled has unknown key "harnesess" (supported: harnesses)',
+    );
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("a policy document rejects unknown keys at every level", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    await mkdir(join(scratch, "harnesses", "policied"), { recursive: true });
+    await mkdir(join(scratch, "policies"), { recursive: true });
+    await writeFile(
+      join(scratch, "harnesses", "policied", "harness.yaml"),
+      [
+        'spec_version: "0.3"',
+        "kind: harness",
+        "harness: { id: policied }",
+        "policy: guard",
+        "roles: { a: { description: A } }",
+      ].join("\n"),
+    );
+    const policy = (lines: readonly string[]) =>
+      writeFile(
+        join(scratch, "policies", "guard.yaml"),
+        ["id: guard", ...lines].join("\n"),
+      );
+    const load = () =>
+      loadHarness({ agentsDir: scratch, harnessId: "policied" });
+
+    // A governance document that fails open is the whole point of #149: each
+    // of these used to parse cleanly and constrain nothing.
+    await policy(["capabilties:", "  exec: { deny: ['*'] }"]);
+    await expect(load()).rejects.toThrow(
+      'the policy document has unknown key "capabilties"',
+    );
+
+    await policy(["capabilities:", "  filesytem: { deny: ['.env'] }"]);
+    await expect(load()).rejects.toThrow(
+      'capabilities has unknown key "filesytem" (supported: exec, filesystem, network)',
+    );
+
+    await policy(["capabilities:", "  exec: { dney: ['rm'] }"]);
+    await expect(load()).rejects.toThrow(
+      'capabilities.exec has unknown key "dney" (supported: allow, deny)',
+    );
+
+    await policy(["limits:", "  timeout_msec: 1000"]);
+    await expect(load()).rejects.toThrow(
+      'limits has unknown key "timeout_msec" (supported: cost_usd, timeout_ms)',
+    );
+
+    await policy(["confirmations:", "  requiredfor: [exec.unknown]"]);
+    await expect(load()).rejects.toThrow(
+      'confirmations has unknown key "requiredfor"',
+    );
+
+    // Both spellings of the confirmations key stay accepted.
+    await policy(["confirmations:", "  required_for: [exec.unknown]"]);
+    const loaded = await load();
+    expect(loaded.rolePolicies.a?.confirmations?.requiredFor).toEqual([
+      "exec.unknown",
+    ]);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("a policy spend ceiling must be a positive finite number", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    await mkdir(join(scratch, "harnesses", "priced"), { recursive: true });
+    await mkdir(join(scratch, "policies"), { recursive: true });
+    await writeFile(
+      join(scratch, "harnesses", "priced", "harness.yaml"),
+      [
+        'spec_version: "0.3"',
+        "kind: harness",
+        "harness: { id: priced }",
+        "policy: budget",
+        "roles: { a: { description: A } }",
+      ].join("\n"),
+    );
+    const budget = (value: string) =>
+      writeFile(
+        join(scratch, "policies", "budget.yaml"),
+        ["id: budget", "limits:", `  cost_usd: ${value}`].join("\n"),
+      );
+    const load = () => loadHarness({ agentsDir: scratch, harnessId: "priced" });
+
+    await budget("2.5");
+    expect((await load()).rolePolicies.a?.limits?.costUsd).toBe(2.5);
+
+    // Each of these was accepted before and left the ceiling unset, so a
+    // mistyped budget read as no budget at all.
+    for (const value of ["'2.5'", ".nan", ".inf", "0", "-1"]) {
+      await budget(value);
+      await expect(load()).rejects.toThrow(
+        "policy budget limits.cost_usd must be a positive number",
+      );
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
   }
 });
 
