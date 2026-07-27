@@ -122,6 +122,23 @@ const ENFORCED_KEYWORDS: ReadonlySet<string> = new Set([
   "propertyNames",
 ]);
 
+/**
+ * The policy document additionally reports type failures.
+ *
+ * Its failures are asymmetric in a way the other two documents' are not: it is
+ * the enforcement source of truth for `packages/policy`, and the loader reads
+ * its lists with helpers that treat an explicit null as an absent key. So
+ * `deny:` with nothing after it produces a policy that grants everything —
+ * fail-open, in the document whose only purpose is to constrain. No field here
+ * is typed to accept null, so reporting type failures closes that whole class
+ * at once. Range and enum failures stay with the loader, whose messages name
+ * the offending value.
+ */
+const POLICY_ENFORCED_KEYWORDS: ReadonlySet<string> = new Set([
+  ...ENFORCED_KEYWORDS,
+  "type",
+]);
+
 function violations(
   document: unknown,
   schema: JsonSchema,
@@ -156,9 +173,12 @@ export function validateManifestDocument(document: unknown): readonly string[] {
   return violations(document, MANIFEST_SCHEMA, ENFORCED_KEYWORDS);
 }
 
-/** As {@link validateHarnessDocument}, for a parsed `.agents/policies/<id>.yaml`. */
+/**
+ * As {@link validateHarnessDocument}, for a parsed `.agents/policies/<id>.yaml`
+ * — plus type failures, for the reason given on {@link POLICY_ENFORCED_KEYWORDS}.
+ */
 export function validatePolicyDocument(document: unknown): readonly string[] {
-  return violations(document, POLICY_SCHEMA, ENFORCED_KEYWORDS);
+  return violations(document, POLICY_SCHEMA, POLICY_ENFORCED_KEYWORDS);
 }
 
 /**

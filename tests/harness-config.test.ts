@@ -1400,6 +1400,38 @@ test("a policy document rejects unknown keys at every level", async () => {
   }
 });
 
+test("a policy constraint written as an empty key fails rather than granting everything", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    await mkdir(join(scratch, "harnesses", "nulled"), { recursive: true });
+    await mkdir(join(scratch, "policies"), { recursive: true });
+    await writeFile(
+      join(scratch, "harnesses", "nulled", "harness.yaml"),
+      [
+        'spec_version: "0.3"',
+        "kind: harness",
+        "harness: { id: nulled }",
+        "policy: guard",
+        "roles: { a: { description: A } }",
+      ].join("\n"),
+    );
+    // `deny:` with nothing after it parses as null, and the loader's list
+    // helper reads null as an absent key — so this used to load as a policy
+    // that denied nothing at all.
+    await writeFile(
+      join(scratch, "policies", "guard.yaml"),
+      ["id: guard", "capabilities:", "  exec:", "    deny:"].join("\n"),
+    );
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "nulled" }),
+    ).rejects.toThrow("capabilities.exec.deny must be array");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
 test("a policy spend ceiling must be a positive finite number", async () => {
   const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
@@ -1428,12 +1460,22 @@ test("a policy spend ceiling must be a positive finite number", async () => {
     expect((await load()).rolePolicies.a?.limits?.costUsd).toBe(2.5);
 
     // Each of these was accepted before and left the ceiling unset, so a
-    // mistyped budget read as no budget at all.
-    for (const value of ["'2.5'", ".nan", ".inf", "0", "-1", "null", ""]) {
+    // mistyped budget read as no budget at all. Which layer reports it splits
+    // by kind: the schema owns wrong types, including the bare `cost_usd:`
+    // that parses as null, and the loader owns values of the right type that
+    // are out of range, where its message names the constraint.
+    const rejected = [
+      ["'2.5'", "limits.cost_usd must be number"],
+      ["null", "limits.cost_usd must be number"],
+      ["", "limits.cost_usd must be number"],
+      [".nan", "policy budget limits.cost_usd must be a positive number"],
+      [".inf", "policy budget limits.cost_usd must be a positive number"],
+      ["0", "policy budget limits.cost_usd must be a positive number"],
+      ["-1", "policy budget limits.cost_usd must be a positive number"],
+    ] as const;
+    for (const [value, message] of rejected) {
       await budget(value);
-      await expect(load()).rejects.toThrow(
-        "policy budget limits.cost_usd must be a positive number",
-      );
+      await expect(load()).rejects.toThrow(message);
       // ADR 0018 has the loader enforcing a subset of the schema, never more,
       // so a value the loader rejects must not satisfy a third-party
       // validator. `.inf` is the one that needs saying: JSON cannot write it,
