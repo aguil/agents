@@ -66,7 +66,7 @@ function describe(error: ErrorObject): string {
     case "const":
       return `${where} must be ${JSON.stringify(error.params.allowedValue)}`;
     case "propertyNames":
-      return `${where} has an invalid key`;
+      return `${where} has invalid key "${String(error.params.propertyName)}"`;
     case "minProperties":
       return `${where} must not be empty`;
     default:

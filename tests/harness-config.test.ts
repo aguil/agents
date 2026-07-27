@@ -1252,3 +1252,30 @@ test("every harness document in the repository satisfies the schema", async () =
     expect([relative, findAllSchemaViolations(parsed)]).toEqual([relative, []]);
   }
 });
+
+test("role identifiers cannot escape the scratchpad directory", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "traversal");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.3"',
+        "kind: harness",
+        "harness: { id: traversal }",
+        "roles:",
+        '  "../../outside": { description: Escape }',
+      ].join("\n"),
+    );
+    // A role id is joined into the run scratchpad path, so traversal in one
+    // would place a role's directory outside it.
+    await expect(
+      loadHarness({ agentsDir: scratch, harnessId: "traversal" }),
+    ).rejects.toThrow('roles has invalid key "../../outside"');
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});

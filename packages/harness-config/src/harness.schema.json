@@ -32,9 +32,10 @@
       }
     },
     "roles": {
-      "description": "Roles by identifier. At least one is required.",
+      "description": "Roles by identifier. At least one is required. Identifiers become path segments in run scratchpads, so they are constrained like every other id in this format.",
       "type": "object",
       "minProperties": 1,
+      "propertyNames": { "$ref": "#/definitions/idToken" },
       "additionalProperties": { "$ref": "#/definitions/role" }
     },
     "execution": {

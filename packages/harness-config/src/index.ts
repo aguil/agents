@@ -553,6 +553,10 @@ function parseRole(
   harnessDir: string,
   roleFiles: ReadonlyMap<string, RoleFile>,
 ): ParsedRole {
+  // A role id becomes a path segment under the run scratchpad, so it is
+  // constrained here as well as in the schema — the loader must hold this
+  // regardless of which subset of schema failures the runtime reports.
+  assertValidIdToken("role", roleId);
   const declared = asRecord(value, `role ${roleId}`);
   const record = resolveRoleRef(roleId, declared, roleFiles);
   const unknownKeys = Object.keys(record).filter(
