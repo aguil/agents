@@ -61,17 +61,16 @@ export async function runAgentsd(
     argv,
     explicit: options.mcpInvoke,
   });
-  // Re-read per definition rather than per work item: the daemon needs the
-  // deny list when it builds feeds and the profile for its startup line, and
-  // both change only on reload.
-  const prFeedbackSettings = () =>
-    parsePrFeedbackSettings(activeDefinition.config);
+  // Parsed once per loaded definition, not per poll or per work item: the
+  // candidate filter below runs on every tick, and the settings can only
+  // change when the workflow file is reloaded.
+  let prFeedbackSettings = parsePrFeedbackSettings(activeDefinition.config);
   const feeds = () =>
     createWorkFeeds({
       workflowDir: activeDefinition.workflowDir,
       workspacePath: hostWorkspace,
       feeds: activeDefinition.feeds,
-      prFeedbackDeny: prFeedbackSettings().deny,
+      prFeedbackDeny: prFeedbackSettings.deny,
       mcpInvoke,
     });
 
@@ -111,6 +110,7 @@ export async function runAgentsd(
     filterCandidates: async (items, tick) =>
       syncPrFeedbackSelection({
         definition: activeDefinition,
+        settings: prFeedbackSettings,
         hostWorkspacePath: hostWorkspace,
         candidates: items,
         tick,
@@ -127,6 +127,7 @@ export async function runAgentsd(
     if (next !== undefined) {
       const changedFields = workflowReloadChangedFields(activeDefinition, next);
       activeDefinition = next;
+      prFeedbackSettings = parsePrFeedbackSettings(next.config);
       orchestrator.updateDefinition(next, {
         feeds: feeds(),
         perFeedMaxConcurrent: next.perFeedMaxConcurrent,
@@ -166,7 +167,7 @@ export async function runAgentsd(
       feeds: feeds().map((f) => f.feedKind),
       publish_code_review: activeDefinition.publish.codeReview.mode,
       publish_pr_feedback: activeDefinition.publish.prFeedback.mode,
-      pr_feedback_profile: prFeedbackSettings().profile,
+      pr_feedback_profile: prFeedbackSettings.profile,
       implementation_runtime: activeDefinition.implementation.mode,
       implementation_adapter: activeDefinition.implementation.adapter,
       implementation_protocol: activeDefinition.implementation.protocol,

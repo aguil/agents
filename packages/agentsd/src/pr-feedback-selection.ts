@@ -1,7 +1,7 @@
 import {
   isPrApprovedForWork,
   isPrDeniedForWork,
-  parsePrFeedbackSettings,
+  type PrFeedbackSettings,
   prIdentifierFromWorkItemMetadata,
 } from "@aguil/agents-pr-feedback";
 import {
@@ -22,11 +22,13 @@ import { writeMonitorContext } from "./monitor-context";
 
 export async function syncPrFeedbackSelection(input: {
   readonly definition: WorkflowDefinition;
+  /** Parsed once per loaded definition by the caller; this runs every poll. */
+  readonly settings: PrFeedbackSettings;
   readonly hostWorkspacePath: string;
   readonly candidates: readonly WorkItem[];
   readonly tick?: WorkFeedTickContext;
 }): Promise<readonly WorkItem[]> {
-  const settings = parsePrFeedbackSettings(input.definition.config);
+  const settings = input.settings;
   const prFeedbackItems = input.candidates.filter(
     (item) =>
       item.kind === "github_pr_feedback" &&
