@@ -10,6 +10,30 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.5.4](https://github.com/aguil/agents/compare/v0.5.3...v0.5.4) (2026-07-27)
+
+
+### Added
+
+* **harness-config:** discover roles as files with ref: resolution ([88210c0](https://github.com/aguil/agents/commit/88210c011f947f5a95974bf6d2a25d38ffd3fc59))
+* **harness-config:** discover roles as files with ref: resolution ([5588a58](https://github.com/aguil/agents/commit/5588a58627d69c4c0c472075c5b4225ba2ef53cf))
+* **harness-config:** validate harness documents against a published schema ([389cd1f](https://github.com/aguil/agents/commit/389cd1f269db4bd7fb8ec636dbd9f4ce76092ea0))
+* **harness-config:** validate harness documents against a published schema ([3516e80](https://github.com/aguil/agents/commit/3516e80255085b644a29058ec48e6bfbae7f128e))
+
+
+### Fixed
+
+* **harness-config:** check real documents against every schema rule ([8dc5a9e](https://github.com/aguil/agents/commit/8dc5a9e27625f788c63d41792ab79700a545e576))
+* **harness-config:** constrain role identifiers to the path-safe token ([59eca10](https://github.com/aguil/agents/commit/59eca10d8ff1bdf59701b08fc359b502e636975e))
+* **harness-config:** report the real cause of role-file read failures ([4e01159](https://github.com/aguil/agents/commit/4e0115977af70af141a572514d7212658f1083f7))
+* **harness-config:** require an exact --- line to close role frontmatter ([353f7df](https://github.com/aguil/agents/commit/353f7df1b786240e64656b24e867e4f2cfcd6988))
+* **harness-config:** resolve role files by reference only ([5b478a8](https://github.com/aguil/agents/commit/5b478a809ea674f0fa7c526719eed36400409562))
+
+
+### Performance
+
+* **harness-config:** read referenced role files concurrently ([5aefa8b](https://github.com/aguil/agents/commit/5aefa8b23dbcf71555cb9621f725b12ff1bb7113))
+
 ## [0.5.3](https://github.com/aguil/agents/compare/v0.5.2...v0.5.3) (2026-07-25)
 
 
