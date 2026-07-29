@@ -108,3 +108,9 @@ so it is upheld in review.
   ADR 0018: hand-authored `harness.schema.json` validated with ajv, enforcing
   unknown-key rejection while the loader keeps its more specific messages;
   `harness.description` declared; spec increments to 0.3 for `ref:`, additive.
+- [0019-structured-finding-evidence.md](0019-structured-finding-evidence.md) —
+  ADR 0019: `validation.evidence` carries structured evidence items, optional in
+  the envelope and required by the filter; `builtin:actionable` classifies
+  rather than discards, publishing unsubstantiated findings visibly but outside
+  the gate; the eleven-substring prose heuristic is deleted; spec increments to
+  0.4, additive.

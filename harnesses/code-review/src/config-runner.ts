@@ -348,8 +348,14 @@ export async function runCodeReviewFromConfig(
     },
   );
 
+  // Surfaced so a run that withheld findings is distinguishable from a clean
+  // one without reading the report (ADR 0019 §4).
+  const unsubstantiatedCount = findings.filter(
+    (finding) => finding.unsubstantiated === true,
+  ).length;
   const rawMetadata = {
     ...baseMetadata,
+    unsubstantiated_findings: String(unsubstantiatedCount),
     timed_out_roles: rawResult.metadata?.timed_out_roles ?? "",
     failed_roles: rawResult.metadata?.failed_roles ?? "",
     completed_roles: rawResult.metadata?.completed_roles ?? "",

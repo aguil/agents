@@ -7,7 +7,10 @@ import {
   applyFindingPipelines,
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
-import { actionableFindings, dedupeFindings } from "@aguil/agents-reporting";
+import {
+  dedupeFindings,
+  markUnsubstantiatedFindings,
+} from "@aguil/agents-reporting";
 
 const validFinding: Finding = {
   id: "finding-1",
@@ -111,7 +114,7 @@ test("finding pipelines match reporting composition exactly", () => {
   };
   const findings = [duplicate, notReproduced, validFinding];
 
-  const expected = dedupeFindings(actionableFindings(findings));
+  const expected = dedupeFindings(markUnsubstantiatedFindings(findings));
   expect(
     applyFindingPipelines(findings, {
       filters: ["builtin:actionable"],

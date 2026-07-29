@@ -4,7 +4,10 @@ import {
   harnessOutcomeToFinding,
 } from "@aguil/agents-core";
 import { validateFinding } from "@aguil/agents-execution";
-import { actionableFindings, dedupeFindings } from "@aguil/agents-reporting";
+import {
+  dedupeFindings,
+  markUnsubstantiatedFindings,
+} from "@aguil/agents-reporting";
 import type {
   FindingDeduperStrategy,
   FindingFilterStrategy,
@@ -58,7 +61,10 @@ export function applyFindingPipelines(
   for (const filter of config.filters ?? []) {
     switch (filter) {
       case "builtin:actionable":
-        result = actionableFindings(result);
+        // Marks rather than removes (ADR 0019 §3). The name is kept because
+        // it is a declared construct in every harness document; what changed
+        // is that it no longer decides what an operator gets to see.
+        result = markUnsubstantiatedFindings(result);
         break;
     }
   }

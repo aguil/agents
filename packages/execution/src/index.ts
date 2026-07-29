@@ -133,9 +133,59 @@ export function validateFinding(value: unknown): FindingValidationResult {
       );
     }
     requireString(validation.details, "validation.details", errors);
+    validateEvidence(validation.evidence, errors);
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Structured evidence is optional (ADR 0019 §2) so that recordings predating
+ * it still validate — but a present-and-malformed list is a protocol error,
+ * same as any other bad envelope field. A finding that omits it is published
+ * as unsubstantiated rather than rejected.
+ */
+function validateEvidence(value: unknown, errors: string[]): void {
+  if (value === undefined) {
+    return;
+  }
+  if (!Array.isArray(value)) {
+    errors.push("validation.evidence must be a list when present");
+    return;
+  }
+  for (const [index, entry] of value.entries()) {
+    const at = `validation.evidence[${index}]`;
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      errors.push(`${at} must be an object`);
+      continue;
+    }
+    const item = entry as Record<string, unknown>;
+    switch (item.kind) {
+      case "command":
+        requireString(item.command, `${at}.command`, errors);
+        if (
+          item.exitCode !== undefined &&
+          !Number.isInteger(item.exitCode as number)
+        ) {
+          errors.push(`${at}.exitCode must be an integer when present`);
+        }
+        break;
+      case "source":
+        requireString(item.file, `${at}.file`, errors);
+        if (
+          item.line !== undefined &&
+          (!Number.isInteger(item.line as number) || (item.line as number) < 1)
+        ) {
+          errors.push(`${at}.line must be a positive integer when present`);
+        }
+        break;
+      case "artifact":
+        requireString(item.path, `${at}.path`, errors);
+        break;
+      default:
+        errors.push(`${at}.kind must be command, source, or artifact`);
+    }
+  }
 }
 
 function requireString(value: unknown, field: string, errors: string[]): void {
@@ -1015,6 +1065,23 @@ export function buildOpenCodeCommand(
   return cmd;
 }
 
+/**
+ * How the envelope's `validation.evidence` is explained to an agent (ADR 0019
+ * §7). Shared verbatim by every prompt builder: a role taught a different
+ * envelope than its neighbours emits findings that classify differently for
+ * no reason the operator can see.
+ *
+ * It states the consequence rather than only the schema, because the schema
+ * alone gives a model no reason to spend tokens on the field.
+ */
+const FINDING_EVIDENCE_GUIDANCE = [
+  "- `validation.evidence`: a list of what you actually did to check this, one entry per act. A finding with an empty or absent list is still reported, but is excluded from the run's status and from the triage queue — so a real issue with nothing here gets ignored. Each entry is one of:",
+  '  - `{"kind": "command", "command": "<the command you ran>", "exitCode": <integer>}` — `exitCode` optional',
+  '  - `{"kind": "source", "file": "<path you read>", "line": <positive integer>}` — `line` optional',
+  '  - `{"kind": "artifact", "path": "<context bundle entry you used>"}`',
+  "  Cite only what you genuinely did. A fabricated citation is worse than an absent one.",
+].join("\n");
+
 export function buildOpenCodePrompt(request: AgentRunRequest): string {
   const vcsMode = request.metadata?.vcs_mode;
   const vcsGuidance =
@@ -1054,7 +1121,8 @@ Emit each finding as a single JSON line: a JSON object with a single top-level k
 - \`description\`
 - \`evidence\`
 - \`sourceRole\`: the string \`${request.roleId}\`
-- \`validation\`: an object with \`status\` (\`verified\`, \`not_reproduced\`, or \`not_run\`) and \`details\`
+- \`validation\`: an object with \`status\` (\`verified\`, \`not_reproduced\`, or \`not_run\`), \`details\`, and \`evidence\`
+${FINDING_EVIDENCE_GUIDANCE}
 - optional \`file\`
 - optional \`line\`: a positive integer
 
@@ -1133,7 +1201,8 @@ Emit each finding as a single JSON line: a JSON object with a single top-level k
 - \`description\`
 - \`evidence\`
 - \`sourceRole\`: the string \`${request.roleId}\`
-- \`validation\`: an object with \`status\` (\`verified\`, \`not_reproduced\`, or \`not_run\`) and \`details\`
+- \`validation\`: an object with \`status\` (\`verified\`, \`not_reproduced\`, or \`not_run\`), \`details\`, and \`evidence\`
+${FINDING_EVIDENCE_GUIDANCE}
 - optional \`file\`
 - optional \`line\`: a positive integer
 

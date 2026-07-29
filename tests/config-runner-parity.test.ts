@@ -24,6 +24,7 @@ function finding(id: string, overrides: Partial<Finding> = {}): Finding {
     validation: {
       status: "verified",
       details: "Reproduced with deterministic test input.",
+      evidence: [{ kind: "command", command: "bun test", exitCode: 0 }],
     },
     file: "src/example.ts",
     line: 12,
@@ -116,7 +117,7 @@ async function runConfigured(
   });
 }
 
-test("config-driven code review filters non-actionable findings and dedupes by fingerprint", async () => {
+test("config-driven code review marks unevidenced findings and dedupes by fingerprint", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-parity-"));
   try {
     const contextBundlePath = await writeBundle(workspacePath, "full");
@@ -128,6 +129,10 @@ test("config-driven code review filters non-actionable findings and dedupes by f
           duplicate,
           finding("not-reproduced", {
             title: "Unconfirmed issue",
+            // A distinct file keeps this out of the fingerprint group above,
+            // so the assertion below is about classification rather than
+            // deduplication.
+            file: "src/other.ts",
             validation: {
               status: "not_reproduced",
               details: "Could not reproduce with deterministic test input.",
@@ -143,10 +148,19 @@ test("config-driven code review filters non-actionable findings and dedupes by f
       adapter,
     );
 
+    // The unevidenced finding survives to result.json — dropping it is the
+    // defect ADR 0019 corrects — while the fingerprint duplicate does not.
+    // Ordered by title, so the unconfirmed one leads.
     expect(result.findings.map((entry) => entry.id)).toEqual([
+      "not-reproduced",
       "verified-first",
     ]);
+    expect(
+      result.findings.map((entry) => entry.unsubstantiated === true),
+    ).toEqual([true, false]);
+    // Status counts only the substantiated one.
     expect(result.status).toBe("warnings");
+    expect(result.metadata?.unsubstantiated_findings).toBe("1");
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
   }

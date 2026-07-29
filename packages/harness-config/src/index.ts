@@ -43,14 +43,21 @@ import {
   validatePolicyDocument,
 } from "./schema-validation";
 
-export const HARNESS_SPEC_VERSION = "0.3";
+export const HARNESS_SPEC_VERSION = "0.4";
 
 /**
  * Accepted `spec_version` values. Every increment so far is additive — v0.2
- * added per-handler `applies_to` event classes, v0.3 added role `ref:` — so
- * documents declaring an older version remain loadable unchanged.
+ * added per-handler `applies_to` event classes, v0.3 added role `ref:`, v0.4
+ * changed what `builtin:actionable` does without changing how it is spelled
+ * (ADR 0019 §6) — so documents declaring an older version remain loadable
+ * unchanged.
  */
-export const SUPPORTED_SPEC_VERSIONS: readonly string[] = ["0.1", "0.2", "0.3"];
+export const SUPPORTED_SPEC_VERSIONS: readonly string[] = [
+  "0.1",
+  "0.2",
+  "0.3",
+  "0.4",
+];
 
 /** Capability constraint lists (carried here, enforced by the policy layer). */
 export interface PolicyCapabilityRules {

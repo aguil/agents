@@ -9,7 +9,7 @@
   "properties": {
     "spec_version": {
       "description": "Version of this format the document is written against. Advisory: the loader validates the token and does not otherwise branch on it, which is sound only while every increment is additive (ADR 0015 §4).",
-      "enum": ["0.1", "0.2", "0.3"]
+      "enum": ["0.1", "0.2", "0.3", "0.4"]
     },
     "kind": {
       "description": "Document kind discriminator.",
@@ -86,12 +86,13 @@
       }
     },
     "filtering": {
-      "description": "Finding filter strategies.",
+      "description": "Finding classification strategies. Named `filtering` because in spec 0.1 through 0.3 these removed findings; as of 0.4 none of them does, and the key is kept rather than renamed so older documents load unchanged (ADR 0019 §3, §6).",
       "type": "object",
       "required": ["findings"],
       "additionalProperties": false,
       "properties": {
         "findings": {
+          "description": "Applied in order. `builtin:actionable` marks any finding that is not `validation.status: verified` with at least one `validation.evidence` item as unsubstantiated: still published, but excluded from run status and from the triage queue.",
           "type": "array",
           "minItems": 1,
           "items": { "enum": ["builtin:actionable"] }

@@ -623,10 +623,14 @@ async function readPrompt(
 function statusFromFindings(
   findings: readonly Finding[],
 ): HarnessRunResult["status"] {
-  if (findings.some((finding) => finding.severity === "critical")) {
+  // Unsubstantiated findings are reported but do not move the gate (ADR 0019 §4).
+  const counted = findings.filter(
+    (finding) => finding.unsubstantiated !== true,
+  );
+  if (counted.some((finding) => finding.severity === "critical")) {
     return "failed";
   }
-  if (findings.length > 0) {
+  if (counted.length > 0) {
     return "warnings";
   }
   return "passed";

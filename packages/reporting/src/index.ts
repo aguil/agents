@@ -11,35 +11,69 @@ export interface ReportRenderer {
   render(result: HarnessRunResult): string | Promise<string>;
 }
 
-export function actionableFindings(
+/**
+ * Mark findings that lack structured backing, rather than removing them
+ * (ADR 0019 §3).
+ *
+ * This used to drop anything whose validation prose failed a keyword test,
+ * silently — which hid 43 verified findings across the recorded review
+ * history, two of them critical security findings. Nothing removes a finding
+ * from a published result now; an unsubstantiated one is reported and left
+ * out of run status and triage ingest instead.
+ */
+export function markUnsubstantiatedFindings(
   findings: readonly Finding[],
 ): readonly Finding[] {
-  return findings.filter(isActionableFinding);
+  return findings.map((finding) =>
+    isSubstantiatedFinding(finding)
+      ? finding
+      : { ...finding, unsubstantiated: true },
+  );
 }
 
-export function isActionableFinding(finding: Finding): boolean {
+export function isSubstantiatedFinding(finding: Finding): boolean {
   if (finding.validation.status !== "verified") {
     return false;
   }
-  return hasSubstantiveValidationDetails(finding.validation.details);
+  return (finding.validation.evidence ?? []).length > 0;
 }
 
+/** Findings that count: published, substantiated, and gate-affecting. */
+export function substantiatedFindings(
+  findings: readonly Finding[],
+): readonly Finding[] {
+  return findings.filter((finding) => finding.unsubstantiated !== true);
+}
+
+/**
+ * Collapse findings sharing a fingerprint, keeping a substantiated one over an
+ * unsubstantiated one.
+ *
+ * The preference is load-bearing rather than cosmetic. Before ADR 0019 the
+ * actionable filter ran first and removed unsubstantiated findings outright, so
+ * whichever survived to here was substantiated by construction. Now that
+ * nothing is removed, a plain first-wins rule lets an unevidenced duplicate
+ * evict the evidenced original — and since unsubstantiated findings do not
+ * count toward status (§4), that would report a run clean while it held a real
+ * finding. That is the #158 failure mode reintroduced through a different door.
+ */
 export function dedupeFindings(
   findings: readonly Finding[],
 ): readonly Finding[] {
-  const seen = new Set<string>();
-  const deduped: Finding[] = [];
+  const chosen = new Map<string, Finding>();
 
   for (const finding of sortFindings(findings)) {
     const key = findingFingerprint(finding);
-    if (seen.has(key)) {
-      continue;
+    const incumbent = chosen.get(key);
+    if (
+      incumbent === undefined ||
+      (incumbent.unsubstantiated === true && finding.unsubstantiated !== true)
+    ) {
+      chosen.set(key, finding);
     }
-    seen.add(key);
-    deduped.push(finding);
   }
 
-  return deduped;
+  return [...chosen.values()];
 }
 
 export function findingFingerprint(finding: Finding): string {
@@ -66,13 +100,20 @@ export function findingFingerprint(finding: Finding): string {
   return [finding.sourceRole, semantic].join("|");
 }
 
+/**
+ * Unsubstantiated findings are reported but do not move the gate (ADR 0019
+ * §4) — counting them would flip most runs from clean to non-empty before
+ * agents emit structured evidence, and a gate that goes noisy overnight gets
+ * ignored rather than heeded.
+ */
 export function statusForFindings(
   findings: readonly Finding[],
 ): HarnessRunResult["status"] {
-  if (findings.some((finding) => finding.severity === "critical")) {
+  const counted = substantiatedFindings(findings);
+  if (counted.some((finding) => finding.severity === "critical")) {
     return "failed";
   }
-  if (findings.length > 0) {
+  if (counted.length > 0) {
     return "warnings";
   }
   return "passed";
@@ -85,7 +126,11 @@ export class MarkdownReportRenderer implements ReportRenderer {
 }
 
 export function renderMarkdownReport(result: HarnessRunResult): string {
-  const findings = sortFindings(result.findings);
+  const all = sortFindings(result.findings);
+  const findings = all.filter((finding) => finding.unsubstantiated !== true);
+  const unsubstantiated = all.filter(
+    (finding) => finding.unsubstantiated === true,
+  );
   const summary =
     findings.length === 0
       ? "No verified critical or warning findings."
@@ -122,8 +167,37 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
     ...executionNotes,
     ...(executionNotes.length > 0 ? [""] : []),
     ...sections,
+    ...renderUnsubstantiatedSection(unsubstantiated),
     "",
   ].join("\n");
+}
+
+/**
+ * Findings the run produced but did not count (ADR 0019 §4). They are listed
+ * rather than dropped: withholding one silently is the defect this section
+ * exists to prevent.
+ */
+function renderUnsubstantiatedSection(
+  findings: readonly Finding[],
+): readonly string[] {
+  if (findings.length === 0) {
+    return [];
+  }
+  return [
+    "",
+    `## Reported without structured evidence (${findings.length})`,
+    "",
+    "These carry no `validation.evidence`, so they are excluded from run",
+    "status and from the triage queue. They are listed here rather than",
+    "discarded; judge them yourself.",
+    "",
+    ...findings.map(
+      (finding) =>
+        `- ${severityEmoji(finding.severity)} **${finding.title}** (${finding.sourceRole}` +
+        `${finding.file ? `, ${finding.file}${finding.line ? `:${finding.line}` : ""}` : ""})` +
+        `\n  ${finding.validation.details}`,
+    ),
+  ];
 }
 
 export function renderOutcomesMarkdownReport(result: HarnessRunResult): string {
@@ -244,27 +318,6 @@ function parseRoleList(value: string | undefined): readonly string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function hasSubstantiveValidationDetails(details: string): boolean {
-  const normalized = details.trim().toLowerCase();
-  if (normalized.length < 18) {
-    return false;
-  }
-  const evidenceSignals = [
-    "reproduced",
-    "validated",
-    "verified",
-    "inspection",
-    "trace",
-    "command",
-    "output",
-    "test",
-    "line",
-    "diff",
-    "path",
-  ];
-  return evidenceSignals.some((signal) => normalized.includes(signal));
 }
 
 const STOP_WORDS = new Set([

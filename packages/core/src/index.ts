@@ -41,9 +41,32 @@ export interface HarnessRunRequest {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
+/**
+ * One concrete evidentiary act behind a finding's validation (ADR 0019).
+ *
+ * The three kinds cover every case observed across the recorded review
+ * history: naming files that were examined is by far the most common, running
+ * a command is next, and citing a context-bundle artifact is the remainder.
+ * `line` is optional because almost no finding carries one.
+ */
+export type ValidationEvidence =
+  | {
+      readonly kind: "command";
+      readonly command: string;
+      readonly exitCode?: number;
+    }
+  | { readonly kind: "source"; readonly file: string; readonly line?: number }
+  | { readonly kind: "artifact"; readonly path: string };
+
 export interface ValidationState {
   readonly status: ValidationStatus;
   readonly details: string;
+  /**
+   * Structured backing for `details`. Optional in the envelope so recordings
+   * predating ADR 0019 still validate; a finding without it is published as
+   * unsubstantiated rather than discarded.
+   */
+  readonly evidence?: readonly ValidationEvidence[];
 }
 
 export interface Finding {
@@ -56,6 +79,12 @@ export interface Finding {
   readonly validation: ValidationState;
   readonly file?: string;
   readonly line?: number;
+  /**
+   * Set by the output pipeline when the finding carries no structured
+   * validation evidence. Such findings are reported, but excluded from run
+   * status and from triage ingest (ADR 0019 §4).
+   */
+  readonly unsubstantiated?: boolean;
 }
 
 /**

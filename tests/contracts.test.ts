@@ -54,9 +54,9 @@ import {
   validateFinding,
 } from "@aguil/agents-execution";
 import {
-  actionableFindings,
   dedupeFindings,
   findingFingerprint,
+  markUnsubstantiatedFindings,
   renderMarkdownReport,
   severityEmoji,
   statusForFindings,
@@ -359,30 +359,74 @@ test("serializes agent events as JSONL", () => {
   expect(serializeEvent(event)).toBe(`${JSON.stringify(event)}\n`);
 });
 
-test("keeps only verified findings for actionable reports", () => {
-  const verified: Finding = {
+test("marks findings without structured evidence, and keeps every one", () => {
+  const substantiated: Finding = {
     id: "finding-1",
     severity: "warning",
     title: "Verified issue",
     description: "A validated review finding.",
     evidence: "The reproduction passed.",
     sourceRole: "quality",
-    validation: { status: "verified", details: "Reproduced locally." },
+    validation: {
+      status: "verified",
+      details: "Reproduced locally.",
+      evidence: [{ kind: "command", command: "bun test", exitCode: 0 }],
+    },
   };
   const unverified: Finding = {
-    ...verified,
+    ...substantiated,
     id: "finding-2",
     validation: { status: "not_run", details: "No validation was attempted." },
   };
-  const weaklyValidated: Finding = {
-    ...verified,
+  // Verified, and its prose contains "Reproduced" — one of the eleven
+  // substrings the deleted heuristic looked for. It is unsubstantiated now
+  // because it cites nothing, which is the point of ADR 0019 §1.
+  const prosePassedTheOldHeuristic: Finding = {
+    ...substantiated,
     id: "finding-3",
-    validation: { status: "verified", details: "looks fine" },
+    validation: { status: "verified", details: "Reproduced locally." },
   };
 
-  expect(actionableFindings([verified, unverified, weaklyValidated])).toEqual([
-    verified,
+  expect(
+    markUnsubstantiatedFindings([
+      substantiated,
+      unverified,
+      prosePassedTheOldHeuristic,
+    ]),
+  ).toEqual([
+    substantiated,
+    { ...unverified, unsubstantiated: true },
+    { ...prosePassedTheOldHeuristic, unsubstantiated: true },
   ]);
+});
+
+test("unsubstantiated findings are published but do not move the gate", () => {
+  const base: Finding = {
+    id: "finding-1",
+    severity: "critical",
+    title: "Critical issue",
+    description: "A critical review finding.",
+    evidence: "Observed in the diff.",
+    sourceRole: "security",
+    validation: { status: "verified", details: "Reproduced locally." },
+  };
+
+  // A critical finding that cites nothing must not fail the run on its own —
+  // otherwise every run goes red before agents emit evidence (ADR 0019 §4).
+  expect(statusForFindings(markUnsubstantiatedFindings([base]))).toBe("passed");
+  expect(
+    statusForFindings(
+      markUnsubstantiatedFindings([
+        {
+          ...base,
+          validation: {
+            ...base.validation,
+            evidence: [{ kind: "source", file: "src/example.ts" }],
+          },
+        },
+      ]),
+    ),
+  ).toBe("failed");
 });
 
 test("classifies small diffs as trivial", () => {
@@ -1616,6 +1660,93 @@ test("coerces empty and null file or line before validating findings", () => {
   expect(stringLine.valid).toBe(true);
 });
 
+test("structured evidence is optional, and rejected when malformed", () => {
+  const base = {
+    id: "finding-1",
+    severity: "warning" as const,
+    title: "T",
+    description: "D",
+    evidence: "E",
+    sourceRole: "quality",
+  };
+  const withEvidence = (evidence: unknown) =>
+    validateFinding({
+      ...base,
+      validation: { status: "verified" as const, details: "ok", evidence },
+    });
+
+  // Optional, so every recording predating ADR 0019 still validates (§2).
+  expect(
+    validateFinding({
+      ...base,
+      validation: { status: "verified", details: "ok" },
+    }).valid,
+  ).toBe(true);
+  expect(withEvidence([]).valid).toBe(true);
+  expect(
+    withEvidence([
+      { kind: "command", command: "bun test", exitCode: 0 },
+      { kind: "source", file: "src/a.ts" },
+      { kind: "source", file: "src/a.ts", line: 12 },
+      { kind: "artifact", path: "context/diff.md" },
+    ]).valid,
+  ).toBe(true);
+
+  // Present-and-malformed is a protocol error, not a silent downgrade to
+  // unsubstantiated — the agent tried to cite something and got it wrong.
+  expect(withEvidence("bun test").errors).toContain(
+    "validation.evidence must be a list when present",
+  );
+  expect(withEvidence([{ kind: "screenshot" }]).errors).toContain(
+    "validation.evidence[0].kind must be command, source, or artifact",
+  );
+  expect(withEvidence([{ kind: "command" }]).errors).toContain(
+    "validation.evidence[0].command must be a non-empty string",
+  );
+  expect(
+    withEvidence([{ kind: "source", file: "a.ts", line: 0 }]).errors,
+  ).toContain(
+    "validation.evidence[0].line must be a positive integer when present",
+  );
+  expect(withEvidence([{ kind: "artifact" }]).errors).toContain(
+    "validation.evidence[0].path must be a non-empty string",
+  );
+});
+
+test("deduplication prefers a substantiated finding over an unsubstantiated twin", () => {
+  const base: Finding = {
+    id: "unevidenced",
+    severity: "warning",
+    // Sorts first by title, so first-wins deduplication would keep this one.
+    title: "A duplicated issue",
+    description: "Same description.",
+    evidence: "Same evidence.",
+    sourceRole: "quality",
+    file: "src/example.ts",
+    line: 12,
+    validation: { status: "verified", details: "Looks wrong." },
+  };
+  const evidenced: Finding = {
+    ...base,
+    id: "evidenced",
+    validation: {
+      ...base.validation,
+      evidence: [{ kind: "command", command: "bun test", exitCode: 1 }],
+    },
+  };
+
+  expect(findingFingerprint(base)).toBe(findingFingerprint(evidenced));
+
+  const deduped = dedupeFindings(
+    markUnsubstantiatedFindings([base, evidenced]),
+  );
+
+  // Keeping the unevidenced twin would drop the finding out of run status
+  // entirely, reporting clean while holding a real finding.
+  expect(deduped.map((entry) => entry.id)).toEqual(["evidenced"]);
+  expect(statusForFindings(deduped)).toBe("warnings");
+});
+
 test("normalizes finding JSONL emitted by an agent", () => {
   const finding: Finding = {
     id: "finding-1",
@@ -2322,6 +2453,46 @@ test("renders severity emojis in markdown report", () => {
   expect(report).not.toContain("WARNING:");
 });
 
+test("the report lists unsubstantiated findings in their own section", () => {
+  const counted: Finding = {
+    id: "finding-counted",
+    severity: "warning",
+    title: "Evidenced issue",
+    description: "A warning problem.",
+    evidence: "Evidence here.",
+    sourceRole: "performance",
+    validation: {
+      status: "verified",
+      details: "Validated.",
+      evidence: [{ kind: "command", command: "bun test" }],
+    },
+  };
+  const uncounted: Finding = {
+    ...counted,
+    id: "finding-uncounted",
+    severity: "critical",
+    title: "Unevidenced issue",
+    validation: { status: "verified", details: "Looked at it." },
+    unsubstantiated: true,
+  };
+
+  const report = renderMarkdownReport({
+    runId: "run-1",
+    status: "warnings",
+    findings: [counted, uncounted],
+    artifacts: [],
+  });
+
+  // The numbered body holds only what counts, so an operator reading the top
+  // of the report sees the gate's view.
+  expect(report).toContain("## 1. ⚠️ Evidenced issue");
+  expect(report).not.toContain("## 2.");
+  // But the uncounted one is present rather than silently gone, which is the
+  // whole point of ADR 0019.
+  expect(report).toContain("## Reported without structured evidence (1)");
+  expect(report).toContain("Unevidenced issue");
+});
+
 test("uses unknown severity fallback emoji", () => {
   expect(severityEmoji("critical")).toBe("🔴");
   expect(severityEmoji("warning")).toBe("⚠️");
@@ -2835,7 +3006,11 @@ test("runs the code-review harness with a fake adapter", async () => {
     description: "A validated review finding.",
     evidence: "The reproduction passed.",
     sourceRole: "quality",
-    validation: { status: "verified", details: "Reproduced locally." },
+    validation: {
+      status: "verified",
+      details: "Reproduced locally.",
+      evidence: [{ kind: "source", file: "src/example.ts", line: 12 }],
+    },
   };
   const tempDir = await mkdtemp(join(tmpdir(), "agents-code-review-"));
   try {
@@ -3537,6 +3712,63 @@ test("runTriageCli accepts legacy leading ingest token", async () => {
     expect(slugDirs).toHaveLength(1);
     const slug = slugDirs[0];
     await readFile(join(triageRoot, slug, "triage-queue.json"), "utf8");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("triage ingest skips unsubstantiated findings", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-triage-unsub-"));
+  try {
+    const resultRel = "result.json";
+    const base = {
+      severity: "warning",
+      title: "Example",
+      description: "Detail line.",
+      evidence: "Evidence line.",
+      sourceRole: "quality",
+      validation: { status: "verified", details: "ok" },
+    };
+    await writeFile(
+      resolve(workspace, resultRel),
+      JSON.stringify({
+        runId: "stored-run",
+        findings: [
+          { ...base, id: "finding-counted" },
+          { ...base, id: "finding-uncounted", unsubstantiated: true },
+        ],
+      }),
+      "utf8",
+    );
+
+    expect(
+      await runTriageCli([
+        "triage",
+        "--from",
+        "code-review",
+        "--workspace",
+        workspace,
+        "--result",
+        resultRel,
+      ]),
+    ).toBe(0);
+
+    const triageRoot = join(workspace, ".agents-triage");
+    const slug = (await readdir(triageRoot)).find((name) =>
+      name.startsWith("code-review-"),
+    );
+    if (slug === undefined) {
+      throw new Error("expected a code-review slug directory");
+    }
+    const envelope = JSON.parse(
+      await readFile(join(triageRoot, slug, "triage-queue.json"), "utf8"),
+    ) as { items?: readonly { readonly id?: string }[] };
+
+    // The documented acceptance bar is an empty queue, so anything the gate
+    // does not count must stay out of it (ADR 0019 §4).
+    expect((envelope.items ?? []).map((item) => item.id)).toEqual([
+      "finding-counted",
+    ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
