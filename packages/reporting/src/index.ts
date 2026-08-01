@@ -236,7 +236,7 @@ function renderUnsubstantiatedSection(
   }
   return [
     "",
-    `## Reported without structured evidence (${findings.length})`,
+    `## Reported but not counted (${findings.length})`,
     "",
     "Each of these is either not `validation.status: verified` or carries no",
     "`validation.evidence`, so it is excluded from run status and from the",

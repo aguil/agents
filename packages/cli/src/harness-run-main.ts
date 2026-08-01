@@ -455,7 +455,7 @@ export async function runHarnessRunCli(
     ).length;
     if (unsubstantiated > 0) {
       console.log(
-        `findings without structured evidence: ${unsubstantiated} (reported, not counted)`,
+        `findings reported but not counted: ${unsubstantiated} (unverified or citing no evidence)`,
       );
     }
   }

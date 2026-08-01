@@ -2537,7 +2537,7 @@ test("the report lists unsubstantiated findings in their own section", () => {
   // But the uncounted one is present rather than silently gone, which is the
   // whole point of ADR 0019 — and present in enough detail to act on, since
   // this section is the only place it appears.
-  expect(report).toContain("## Reported without structured evidence (1)");
+  expect(report).toContain("## Reported but not counted (1)");
   expect(report).toContain("### 🔴 Unevidenced issue");
   expect(report).toContain("A warning problem.");
   expect(report).toContain("Evidence: Evidence here.");
