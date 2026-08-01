@@ -232,12 +232,20 @@ function renderUnsubstantiatedSection(
     "status and from the triage queue. They are listed here rather than",
     "discarded; judge them yourself.",
     "",
-    ...findings.map(
-      (finding) =>
-        `- ${severityEmoji(finding.severity)} **${finding.title}** (${finding.sourceRole}` +
-        `${finding.file ? `, ${finding.file}${finding.line ? `:${finding.line}` : ""}` : ""})` +
-        `\n  ${finding.validation.details}`,
-    ),
+    ...findings.flatMap((finding) => [
+      `### ${severityEmoji(finding.severity)} ${finding.title}`,
+      ...(finding.file === undefined
+        ? []
+        : [
+            `Location: ${finding.file}${finding.line === undefined ? "" : `:${finding.line}`}`,
+          ]),
+      `Source: ${finding.sourceRole}`,
+      "",
+      finding.description,
+      `Evidence: ${finding.evidence}`,
+      `Validation: ${finding.validation.status} - ${finding.validation.details}`,
+      "",
+    ]),
   ];
 }
 
