@@ -80,9 +80,13 @@ export interface Finding {
   readonly file?: string;
   readonly line?: number;
   /**
-   * Set by the output pipeline when the finding carries no structured
-   * validation evidence. Such findings are reported, but excluded from run
-   * status and from triage ingest (ADR 0019 §4).
+   * Set by the output pipeline when `validation.status` is not `verified`, or
+   * when `validation.evidence` is absent or empty. Such findings are reported,
+   * but excluded from run status and from triage ingest (ADR 0019 §4).
+   *
+   * Derived state, not envelope input: the pipeline writes it on every finding
+   * it classifies and clears any value that arrived with one, so an agent
+   * cannot take its own evidenced finding out of the gate by setting it.
    */
   readonly unsubstantiated?: boolean;
 }
