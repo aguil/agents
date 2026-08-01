@@ -1,6 +1,6 @@
 # ADR 0015: the harness spec is project-local; AGENTS-1 convergence is not a goal
 
-**Status:** Partially superseded by ADR 0018 and ADR 0019
+**Status:** Partially superseded by ADR 0019
 
 **Status history:**
 
