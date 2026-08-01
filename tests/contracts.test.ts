@@ -1713,6 +1713,44 @@ test("structured evidence is optional, and rejected when malformed", () => {
   );
 });
 
+test("an agent cannot mark its own finding unsubstantiated", () => {
+  const finding = {
+    id: "finding-1",
+    severity: "warning",
+    title: "T",
+    description: "D",
+    evidence: "E",
+    sourceRole: "quality",
+    validation: {
+      status: "verified",
+      details: "ok",
+      evidence: [{ kind: "command", command: "bun test" }],
+    },
+    unsubstantiated: true,
+  };
+
+  const events = normalizeAgentOutputLine(
+    {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review.",
+      workspacePath: "/tmp/workspace",
+      contextBundlePath: "/tmp/context.json",
+      scratchpadPath: "/tmp/scratchpad",
+      timeoutMs: 1_000,
+      allowedCommands: [],
+    },
+    JSON.stringify({ finding }),
+  );
+
+  expect(events[0]?.type).toBe("finding");
+  // Honoring the field would let a role take its own evidenced finding out of
+  // run status and the triage queue by adding one key.
+  expect(
+    (events[0]?.data as Record<string, unknown> | undefined)?.unsubstantiated,
+  ).toBeUndefined();
+});
+
 test("deduplication prefers a substantiated finding over an unsubstantiated twin", () => {
   const base: Finding = {
     id: "unevidenced",

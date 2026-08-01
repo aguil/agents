@@ -60,6 +60,12 @@ export function isFinding(value: unknown): value is Finding {
 function coerceFindingShape(raw: Record<string, unknown>): Partial<Finding> {
   const o: Record<string, unknown> = { ...raw };
 
+  // Derived pipeline state, never envelope input. Left alone, an agent could
+  // set it on an evidenced finding and take that finding out of run status and
+  // the triage queue — a self-service version of the silent suppression ADR
+  // 0019 exists to end. The classifier is the only writer.
+  delete o.unsubstantiated;
+
   if (o.file === null || o.file === undefined) {
     delete o.file;
   } else if (typeof o.file === "string") {
