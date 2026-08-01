@@ -182,10 +182,19 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
   const unsubstantiated = all.filter(
     (finding) => finding.unsubstantiated === true,
   );
-  const summary =
+  // The uncounted findings belong in the summary even though they do not move
+  // the gate. Omitting them reproduces the defect ADR 0019 exists to fix, in
+  // the one line an operator is most likely to read and stop at.
+  const counted =
     findings.length === 0
       ? "No verified critical or warning findings."
       : `${findings.length} verified finding${findings.length === 1 ? "" : "s"}.`;
+  const summary =
+    unsubstantiated.length === 0
+      ? counted
+      : `${counted} ${unsubstantiated.length} further finding${
+          unsubstantiated.length === 1 ? "" : "s"
+        } reported but not counted.`;
 
   const sections = findings.map((finding, index) => {
     const location = finding.file
