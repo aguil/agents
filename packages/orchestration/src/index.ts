@@ -490,7 +490,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     for await (const event of this.options.adapter.run(agentRequest)) {
       await this.options.eventSink?.write(event);
       if (event.type === "finding" && isFinding(event.data)) {
-        findings.push(event.data);
+        findings.push(withoutSuppliedMarker(event.data));
       }
       if (
         event.type === "outcome" &&
@@ -618,6 +618,24 @@ async function readPrompt(
     return readFile(role.promptPath, "utf8");
   }
   return role.description;
+}
+
+/**
+ * Drop an `unsubstantiated` marker that arrived with the finding.
+ *
+ * The marker is derived state written by `builtin:actionable` (ADR 0019 §4),
+ * which runs downstream of here, so one present at collection time can only
+ * have come from the agent — and every consumer of `result.findings` treats it
+ * as authority to keep the finding out of run status and the triage queue.
+ * Stripping at the single point where findings enter the result means no
+ * consumer has to defend itself.
+ */
+function withoutSuppliedMarker(finding: Finding): Finding {
+  if (finding.unsubstantiated === undefined) {
+    return finding;
+  }
+  const { unsubstantiated: _supplied, ...rest } = finding;
+  return rest;
 }
 
 /**

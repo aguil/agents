@@ -204,6 +204,41 @@ test("an unevidenced critical does not fail a config-driven run", async () => {
   }
 });
 
+test("an agent-supplied marker never reaches the result", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-supplied-"));
+  try {
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const adapter = scriptedAdapter({
+      quality: {
+        // Emitted as a direct finding event, which does not pass through the
+        // JSONL envelope coercion — the path three earlier fixes missed.
+        findings: [
+          finding("self-suppressed", {
+            severity: "critical",
+            unsubstantiated: true,
+          }),
+        ],
+      },
+    });
+
+    const result = await runConfigured(
+      workspacePath,
+      contextBundlePath,
+      adapter,
+    );
+
+    // The finding is evidenced, so honoring its marker would hide a critical
+    // from the gate on the agent's say-so.
+    expect(result.findings.map((entry) => entry.unsubstantiated)).toEqual([
+      undefined,
+    ]);
+    expect(result.status).toBe("failed");
+    expect(result.metadata?.unsubstantiated_findings).toBe("0");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
 test("config-driven trivial tier schedules only quality", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-trivial-"));
   try {
