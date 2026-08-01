@@ -6,7 +6,11 @@ export const CODE_REVIEW_RUN_METADATA_KEYS = {
   completedRoles: "completed_roles",
   timedOutRoles: "timed_out_roles",
   failedRoles: "failed_roles",
-  /** How many published findings carried no structured evidence (ADR 0019 §4). */
+  /**
+   * How many published findings were excluded from status and triage — either
+   * not `validation.status: verified`, or carrying no `validation.evidence`
+   * (ADR 0019 §4).
+   */
   unsubstantiatedFindings: "unsubstantiated_findings",
 } as const;
 
@@ -28,9 +32,11 @@ export interface CodeReviewRunMetadata {
   readonly timedOutRoles: readonly string[];
   readonly failedRoles: readonly string[];
   /**
-   * Findings published but excluded from status and triage for lack of
-   * structured evidence (ADR 0019 §4). Absent from older runs, which is why it
-   * parses to 0 rather than being required.
+   * Findings published but excluded from run status and triage (ADR 0019 §4),
+   * because `validation.status` is not `verified` or `validation.evidence` is
+   * absent or empty. Both limbs count: a `not_reproduced` finding is uncounted
+   * even when it cites the command that failed to reproduce it. Absent from
+   * older runs, which is why it parses to 0 rather than being required.
    */
   readonly unsubstantiatedFindings: number;
 }
