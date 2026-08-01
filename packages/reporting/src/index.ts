@@ -228,9 +228,10 @@ function renderUnsubstantiatedSection(
     "",
     `## Reported without structured evidence (${findings.length})`,
     "",
-    "These carry no `validation.evidence`, so they are excluded from run",
-    "status and from the triage queue. They are listed here rather than",
-    "discarded; judge them yourself.",
+    "Each of these is either not `validation.status: verified` or carries no",
+    "`validation.evidence`, so it is excluded from run status and from the",
+    "triage queue. They are listed here rather than discarded; judge them",
+    "yourself.",
     "",
     ...findings.flatMap((finding) => [
       `### ${severityEmoji(finding.severity)} ${finding.title}`,
