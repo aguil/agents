@@ -113,4 +113,5 @@ so it is upheld in review.
   the envelope and required by the filter; `builtin:actionable` classifies
   rather than discards, publishing unsubstantiated findings visibly but outside
   the gate; the eleven-substring prose heuristic is deleted; spec increments to
-  0.4, additive.
+  0.4, additive in format but not in behavior, partially superseding ADR 0015
+  §4.

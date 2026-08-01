@@ -136,6 +136,16 @@ undermines the gate it feeds.
    not a compatibility guarantee worth honoring. The change is applied the way a
    bug fix is applied: to everyone.
 
+   **This partially supersedes ADR 0015 §4.** That clause permits the loader's
+   version-blindness "only while every version increment is additive", and
+   requires a non-additive change to either branch on the declared version or
+   consolidate the accepted set. This ADR does neither, on the grounds above.
+   The part of §4 that stands is the one about parsing: no document is parsed
+   differently by version, and the loader still does not branch. What is relaxed
+   is the assumption that behavior attached to a construct can never change
+   without a version gate. ADR 0015's status is updated accordingly; §5's
+   increment process is untouched and this ADR follows it.
+
    Shipped documents keep their declared versions. `.agents/manifest.yaml` and
    `.agents/harnesses/code-review/harness.yaml` still say `0.2`, as they did
    through the `0.3` increment, because they use no surface newer than that and
@@ -196,7 +206,8 @@ undermines the gate it feeds.
 
 - ADR 0014 — ADRs are standalone; the reason this ADR inlines its evidence.
 - ADR 0015 — the harness spec is project-local, the schema is its normative
-  description, and §5 governs the increment clause 6 performs.
+  description, §5 governs the increment clause 6 performs, and §4 is partially
+  superseded by that clause.
 - ADR 0018 — the published schema and the `0.3` increment, whose format-level
   additivity clause 6 preserves while departing from it behaviorally.
 - Issues #158 (this defect), #159 (the live critical finding it hid), #115

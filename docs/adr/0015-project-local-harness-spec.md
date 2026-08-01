@@ -1,6 +1,6 @@
 # ADR 0015: the harness spec is project-local; AGENTS-1 convergence is not a goal
 
-**Status:** Partially superseded by ADR 0018
+**Status:** Partially superseded by ADR 0018 and ADR 0019
 
 **Status history:**
 
@@ -12,6 +12,16 @@
   0018 §6 increments to `0.3`. The rest of §3 stands — `0.1` and `0.2` remain
   accepted — as does every other clause, and §5's increment process is what ADR
   0018 followed rather than overrode.
+- 2026-08-01 — Partially superseded by ADR 0019: §4's precondition that the
+  loader's version-blindness holds "only while every version increment is
+  additive", and its instruction that a non-additive change must branch on the
+  declared version or consolidate the accepted set. ADR 0019 §6 increments to
+  `0.4` changing what `builtin:actionable` does, and deliberately does neither —
+  an older document receives the new behavior — because the old behavior
+  silently discarded findings and preserving it for existing documents would
+  preserve the defect. §4 still governs _parsing_: no document is parsed
+  differently by version, and the loader still does not branch. §5's increment
+  process is unaffected and ADR 0019 followed it.
 
 **Context:** The planning that produced the `.agents/` loader assumed this
 repository would converge on an external specification referred to as AGENTS-1.
