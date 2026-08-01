@@ -5,7 +5,11 @@ import {
   resolveContextProvider,
   writeContextBundle,
 } from "@aguil/agents-context";
-import type { HarnessOutcome } from "@aguil/agents-core";
+import type {
+  Finding,
+  HarnessOutcome,
+  HarnessRunResult,
+} from "@aguil/agents-core";
 import {
   createRunId,
   isReviewTriageTier,
@@ -31,7 +35,10 @@ import {
 } from "@aguil/agents-hooks";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 import { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
-import { resolveReportRenderer } from "@aguil/agents-reporting";
+import {
+  resolveReportRenderer,
+  statusForFindings,
+} from "@aguil/agents-reporting";
 
 export { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
 
@@ -401,15 +408,6 @@ export async function runHarnessRunCli(
     strictMode: parsed.strict,
   });
 
-  console.log(`run: ${result.runId}`);
-  console.log(`status: ${result.status}`);
-  console.log(`execution: ${result.metadata?.execution_mode ?? "parallel"}`);
-  console.log(
-    `roles completed: ${result.metadata?.completed_roles ?? "(none)"}`,
-  );
-  if ((result.metadata?.failed_roles ?? "") !== "") {
-    console.log(`roles failed: ${result.metadata?.failed_roles}`);
-  }
   // Declared pipelines shape the reported findings the same way the
   // code-review package does imperatively (it renders report.md AFTER
   // dedup/filter); the raw count stays visible so filtering is
@@ -427,10 +425,33 @@ export async function runHarnessRunCli(
           : { dedupers: loaded.findingDedupers }),
       })
     : result.findings;
+
+  const status = statusAfterPipelines(loaded, result, reportedFindings);
+
+  console.log(`run: ${result.runId}`);
+  console.log(`status: ${status}`);
+  console.log(`execution: ${result.metadata?.execution_mode ?? "parallel"}`);
+  console.log(
+    `roles completed: ${result.metadata?.completed_roles ?? "(none)"}`,
+  );
+  if ((result.metadata?.failed_roles ?? "") !== "") {
+    console.log(`roles failed: ${result.metadata?.failed_roles}`);
+  }
   if (hasPipelines) {
     console.log(
       `findings: ${reportedFindings.length} after pipelines (${result.findings.length} raw)`,
     );
+    // Reported but not counted toward status (ADR 0019 §4). Said out loud
+    // because the whole point of the classifier is that nothing it sets aside
+    // disappears quietly.
+    const unsubstantiated = reportedFindings.filter(
+      (finding) => finding.unsubstantiated === true,
+    ).length;
+    if (unsubstantiated > 0) {
+      console.log(
+        `findings without structured evidence: ${unsubstantiated} (reported, not counted)`,
+      );
+    }
   }
   for (const outcome of result.outcomes ?? []) {
     console.log(
@@ -443,11 +464,47 @@ export async function runHarnessRunCli(
       reportPath,
       resolveReportRenderer(loaded.reportingTemplate)({
         ...result,
+        status,
         findings: reportedFindings,
       }),
     );
     console.log(`report: ${reportPath}`);
   }
   console.log(`artifacts: ${scratchpadPath}`);
-  return result.status === "passed" ? 0 : 1;
+  return status === "passed" ? 0 : 1;
+}
+
+/**
+ * Recompute the findings-derived part of the status against the pipelined
+ * findings.
+ *
+ * The orchestrator computes status before the declared pipelines run, so it
+ * judges raw findings — which do not yet carry the `unsubstantiated` marker
+ * `builtin:actionable` adds. Left alone, an unevidenced finding would fail the
+ * run here while the report beside it said the finding was not counted, and
+ * `agents code-review` (which recomputes after its pipelines) would disagree
+ * with `agents harness run` on the same document.
+ *
+ * Only the findings-derived part moves. A role that failed or timed out, and a
+ * harness whose `execution` block makes status findings-blind, are untouched:
+ * no pipeline can make a failed role succeed.
+ */
+export function statusAfterPipelines(
+  loaded: LoadedHarness,
+  result: HarnessRunResult,
+  reportedFindings: readonly Finding[],
+): HarnessRunResult["status"] {
+  const findingsBlind = loaded.definition.execution !== undefined;
+  if (findingsBlind || result.status === "error") {
+    return result.status;
+  }
+  const timedOut = (result.metadata?.timed_out_roles ?? "") !== "";
+  const fromFindings = statusForFindings(reportedFindings);
+  if (fromFindings === "failed") {
+    return "failed";
+  }
+  if (fromFindings === "warnings" || timedOut) {
+    return "warnings";
+  }
+  return "passed";
 }

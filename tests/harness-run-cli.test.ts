@@ -560,6 +560,77 @@ test("declared reporting template renders report.md into the scratchpad", async 
   }
 });
 
+test("status is recomputed against pipelined findings, not raw ones", async () => {
+  const { statusAfterPipelines } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const { markUnsubstantiatedFindings } = await import(
+    "@aguil/agents-reporting"
+  );
+  type Loaded = Parameters<typeof statusAfterPipelines>[0];
+  type Result = Parameters<typeof statusAfterPipelines>[1];
+  type Findings = Parameters<typeof statusAfterPipelines>[2];
+
+  const loaded = (execution: unknown) =>
+    ({
+      definition: {
+        id: "h",
+        roles: [],
+        ...(execution === undefined ? {} : { execution }),
+      },
+      rolePolicies: {},
+      hooks: {},
+      harnessDir: "/tmp",
+    }) as unknown as Loaded;
+  const ran = (status: string, metadata: Record<string, string> = {}): Result =>
+    ({
+      runId: "r",
+      status,
+      findings: [],
+      artifacts: [],
+      metadata,
+    }) as unknown as Result;
+  const critical = markUnsubstantiatedFindings([
+    {
+      id: "f1",
+      severity: "critical",
+      title: "T",
+      description: "D",
+      evidence: "E",
+      sourceRole: "quality",
+      validation: { status: "verified", details: "Looked at it." },
+    },
+  ]) as unknown as Findings;
+
+  // The orchestrator judged the raw finding and said "failed"; after the
+  // pipeline marks it unsubstantiated the run must not fail on it, or the CLI
+  // would exit 1 while its own report says the finding was not counted.
+  expect(statusAfterPipelines(loaded(undefined), ran("failed"), critical)).toBe(
+    "passed",
+  );
+
+  // Things a pipeline has no business overturning.
+  expect(statusAfterPipelines(loaded(undefined), ran("error"), critical)).toBe(
+    "error",
+  );
+  expect(
+    statusAfterPipelines(
+      loaded(undefined),
+      ran("passed", { timed_out_roles: "a" }),
+      critical,
+    ),
+  ).toBe("warnings");
+  // A harness with an execution block has findings-blind status (#157), so a
+  // pass_check failure stands regardless of what the pipeline decided.
+  expect(
+    statusAfterPipelines(
+      loaded({ mode: "chain", order: ["a"] }),
+      ran("failed"),
+      critical,
+    ),
+  ).toBe("failed");
+});
+
 test("harness run surfaces loader errors with a nonzero exit", async () => {
   const result = await runHarnessCli([
     "no-such-harness",
