@@ -422,12 +422,17 @@ export async function runHarnessRunCli(
       })
     : result.findings;
 
-  const status = statusAfterFindingPipelines({
-    rawStatus: result.status,
-    findings: reportedFindings,
-    findingsBlind: loaded.definition.execution !== undefined,
-    timedOut: (result.metadata?.timed_out_roles ?? "") !== "",
-  });
+  // Only recompute when a classifier actually ran. Without pipelines the
+  // findings carry no marker this code put there, and re-deriving status from
+  // them would start honoring one an agent supplied.
+  const status = hasPipelines
+    ? statusAfterFindingPipelines({
+        rawStatus: result.status,
+        findings: reportedFindings,
+        findingsBlind: loaded.definition.execution !== undefined,
+        timedOut: (result.metadata?.timed_out_roles ?? "") !== "",
+      })
+    : result.status;
 
   console.log(`run: ${result.runId}`);
   console.log(`status: ${status}`);

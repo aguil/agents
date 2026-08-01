@@ -620,17 +620,23 @@ async function readPrompt(
   return role.description;
 }
 
+/**
+ * Every finding counts here, including any carrying an `unsubstantiated`
+ * marker.
+ *
+ * That marker is derived state written by `builtin:actionable`, which runs
+ * after this (ADR 0019 §4), so at this point it can only have come from the
+ * agent — and honoring it would let a role delete its own finding from the
+ * gate. Callers that apply the classifier recompute status afterwards through
+ * `statusAfterFindingPipelines`; callers that do not have no marker to respect.
+ */
 function statusFromFindings(
   findings: readonly Finding[],
 ): HarnessRunResult["status"] {
-  // Unsubstantiated findings are reported but do not move the gate (ADR 0019 §4).
-  const counted = findings.filter(
-    (finding) => finding.unsubstantiated !== true,
-  );
-  if (counted.some((finding) => finding.severity === "critical")) {
+  if (findings.some((finding) => finding.severity === "critical")) {
     return "failed";
   }
-  if (counted.length > 0) {
+  if (findings.length > 0) {
     return "warnings";
   }
   return "passed";
