@@ -24,11 +24,21 @@ export interface ReportRenderer {
 export function markUnsubstantiatedFindings(
   findings: readonly Finding[],
 ): readonly Finding[] {
-  return findings.map((finding) =>
-    isSubstantiatedFinding(finding)
-      ? finding
-      : { ...finding, unsubstantiated: true },
-  );
+  return findings.map((finding) => {
+    if (!isSubstantiatedFinding(finding)) {
+      return { ...finding, unsubstantiated: true };
+    }
+    if (finding.unsubstantiated === undefined) {
+      return finding;
+    }
+    // Clear rather than pass through. The marker is derived state, and an
+    // input that already carries it — from an adapter emitting finding events
+    // directly, say — would otherwise take an evidenced finding out of run
+    // status and the triage queue. Writing it here means classified output
+    // never depends on what the input claimed.
+    const { unsubstantiated: _supplied, ...rest } = finding;
+    return rest;
+  });
 }
 
 export function isSubstantiatedFinding(finding: Finding): boolean {

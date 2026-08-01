@@ -398,6 +398,15 @@ test("marks findings without structured evidence, and keeps every one", () => {
     { ...unverified, unsubstantiated: true },
     { ...prosePassedTheOldHeuristic, unsubstantiated: true },
   ]);
+
+  // A supplied marker is overwritten, not honored. Some adapters emit finding
+  // events directly and never pass through the envelope coercion, so the
+  // classifier cannot trust what it was handed.
+  expect(
+    markUnsubstantiatedFindings([
+      { ...substantiated, unsubstantiated: true },
+    ])[0]?.unsubstantiated,
+  ).toBeUndefined();
 });
 
 test("unsubstantiated findings are published but do not move the gate", () => {
