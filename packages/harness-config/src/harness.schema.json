@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "spec_version": {
-      "description": "Version of this format the document is written against. Advisory: the loader validates the token and does not otherwise branch on it, which is sound only while every increment is additive (ADR 0015 §4).",
+      "description": "Version of this format the document is written against. Advisory: the loader validates the token and does not otherwise branch on it. Parsing is additive across versions, so no document is read differently by version; the behavior of a declared construct may still be corrected uniformly across all of them (ADR 0015 §4, partially superseded by ADR 0019 §6).",
       "enum": ["0.1", "0.2", "0.3", "0.4"]
     },
     "kind": {
