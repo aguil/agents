@@ -6,6 +6,8 @@ export const CODE_REVIEW_RUN_METADATA_KEYS = {
   completedRoles: "completed_roles",
   timedOutRoles: "timed_out_roles",
   failedRoles: "failed_roles",
+  /** How many published findings carried no structured evidence (ADR 0019 §4). */
+  unsubstantiatedFindings: "unsubstantiated_findings",
 } as const;
 
 /** Canonical full role order for scheduling and review-coverage summaries. */
@@ -25,6 +27,12 @@ export interface CodeReviewRunMetadata {
   readonly completedRoles: readonly string[];
   readonly timedOutRoles: readonly string[];
   readonly failedRoles: readonly string[];
+  /**
+   * Findings published but excluded from status and triage for lack of
+   * structured evidence (ADR 0019 §4). Absent from older runs, which is why it
+   * parses to 0 rather than being required.
+   */
+  readonly unsubstantiatedFindings: number;
 }
 
 /** Same type as {@link CodeReviewRunMetadata}; named for tooling / schema references. */
@@ -61,6 +69,7 @@ export function parseCodeReviewRunMetadata(
       completedRoles: [],
       timedOutRoles: [],
       failedRoles: [],
+      unsubstantiatedFindings: 0,
     };
   }
   const trimmedTriage =
@@ -78,7 +87,20 @@ export function parseCodeReviewRunMetadata(
     failedRoles: parseMetadataRolesList(
       record[CODE_REVIEW_RUN_METADATA_KEYS.failedRoles],
     ),
+    unsubstantiatedFindings: parseMetadataCount(
+      record[CODE_REVIEW_RUN_METADATA_KEYS.unsubstantiatedFindings],
+    ),
   };
+}
+
+/**
+ * A non-negative count off the wire. Anything unparseable reads as 0, matching
+ * how the roles lists treat absence: a run recorded before the key existed is
+ * not a run with a broken count.
+ */
+function parseMetadataCount(raw: string | undefined): number {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
 }
 
 /** Roles scheduled for each triage tier (single source for harness + CLI). */

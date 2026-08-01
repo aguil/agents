@@ -34,15 +34,21 @@ Tier is written to `result.json` under `metadata.triage` and stored in
 These keys appear in `result.json → metadata` and are the stable identifiers
 used by `parseCodeReviewRunMetadata`:
 
-| Constant                                       | Wire key            | Description              |
-| ---------------------------------------------- | ------------------- | ------------------------ |
-| `CODE_REVIEW_RUN_METADATA_KEYS.triage`         | `"triage"`          | Selected triage tier     |
-| `CODE_REVIEW_RUN_METADATA_KEYS.completedRoles` | `"completed_roles"` | Comma-separated role IDs |
-| `CODE_REVIEW_RUN_METADATA_KEYS.timedOutRoles`  | `"timed_out_roles"` | Comma-separated role IDs |
-| `CODE_REVIEW_RUN_METADATA_KEYS.failedRoles`    | `"failed_roles"`    | Comma-separated role IDs |
+| Constant                                                | Wire key                     | Description                               |
+| ------------------------------------------------------- | ---------------------------- | ----------------------------------------- |
+| `CODE_REVIEW_RUN_METADATA_KEYS.triage`                  | `"triage"`                   | Selected triage tier                      |
+| `CODE_REVIEW_RUN_METADATA_KEYS.completedRoles`          | `"completed_roles"`          | Comma-separated role IDs                  |
+| `CODE_REVIEW_RUN_METADATA_KEYS.timedOutRoles`           | `"timed_out_roles"`          | Comma-separated role IDs                  |
+| `CODE_REVIEW_RUN_METADATA_KEYS.failedRoles`             | `"failed_roles"`             | Comma-separated role IDs                  |
+| `CODE_REVIEW_RUN_METADATA_KEYS.unsubstantiatedFindings` | `"unsubstantiated_findings"` | Count of findings published but uncounted |
 
 Role lists are comma-separated strings, not JSON arrays. Use
 `parseMetadataRolesList` to parse them.
+
+`unsubstantiated_findings` is a decimal count of findings that reached
+`result.json` without `validation.evidence` and were therefore excluded from run
+status and from triage ingest (ADR 0019 §4). Runs recorded before the key
+existed parse as `0`.
 
 ## Scratchpad artifact layout
 

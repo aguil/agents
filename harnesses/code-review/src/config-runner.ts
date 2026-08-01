@@ -43,6 +43,7 @@ import {
   parseTriageTier,
   writeLatestCodeReviewDiscoveryPointer,
 } from "./index";
+import { CODE_REVIEW_RUN_METADATA_KEYS } from "./review-contract";
 
 export type ConfigHarnessSourceKind =
   | "explicit"
@@ -355,7 +356,8 @@ export async function runCodeReviewFromConfig(
   ).length;
   const rawMetadata = {
     ...baseMetadata,
-    unsubstantiated_findings: String(unsubstantiatedCount),
+    [CODE_REVIEW_RUN_METADATA_KEYS.unsubstantiatedFindings]:
+      String(unsubstantiatedCount),
     timed_out_roles: rawResult.metadata?.timed_out_roles ?? "",
     failed_roles: rawResult.metadata?.failed_roles ?? "",
     completed_roles: rawResult.metadata?.completed_roles ?? "",
