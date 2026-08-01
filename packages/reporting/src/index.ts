@@ -125,6 +125,47 @@ export class MarkdownReportRenderer implements ReportRenderer {
   }
 }
 
+/**
+ * Run status once the declared finding pipelines have classified the findings.
+ *
+ * The orchestrator computes status before those pipelines run, so it judges
+ * raw findings that do not yet carry the `unsubstantiated` marker. Every entry
+ * point that applies pipelines must therefore recompute, or a finding excluded
+ * from the gate still fails the run — the report says "not counted" while the
+ * exit code says otherwise.
+ *
+ * This lives here, shared, because both entry points previously derived status
+ * independently and disagreed: `harness run` and `agents code-review` reached
+ * different answers for the same document, which is how the divergence went
+ * unnoticed.
+ *
+ * Only the findings-derived part moves. A failed or timed-out role stands, and
+ * `findingsBlind` (a harness declaring `execution`, whose status comes from
+ * role outcomes and its pass gate rather than findings) is returned untouched:
+ * no pipeline can talk a failed pass_check into success.
+ */
+export function statusAfterFindingPipelines(input: {
+  readonly rawStatus: HarnessRunResult["status"];
+  readonly findings: readonly Finding[];
+  readonly findingsBlind: boolean;
+  readonly timedOut: boolean;
+}): HarnessRunResult["status"] {
+  if (input.rawStatus === "error") {
+    return "error";
+  }
+  if (input.findingsBlind) {
+    return input.rawStatus;
+  }
+  const fromFindings = statusForFindings(input.findings);
+  if (fromFindings === "failed") {
+    return "failed";
+  }
+  if (fromFindings === "warnings" || input.timedOut) {
+    return "warnings";
+  }
+  return "passed";
+}
+
 export function renderMarkdownReport(result: HarnessRunResult): string {
   const all = sortFindings(result.findings);
   const findings = all.filter((finding) => finding.unsubstantiated !== true);

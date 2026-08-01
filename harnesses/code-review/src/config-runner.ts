@@ -30,12 +30,11 @@ import {
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 import {
   resolveReportRenderer,
-  statusForFindings,
+  statusAfterFindingPipelines,
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import {
   type CodeReviewRunResult,
-  combineStatuses,
   defaultCommandsForVcsMode,
   detectWorkspaceVcsMode,
   loadContextBundleFromPath,
@@ -372,18 +371,20 @@ export async function runCodeReviewFromConfig(
   // leak into status here either, or replay diverges (surfaced by the
   // Tier 2 differential on corpus entries with only non-actionable
   // findings).
-  const timedOut = (rawResult.metadata?.timed_out_roles ?? "") !== "";
-  const passStatus: HarnessRunResult["status"] =
-    rawResult.status === "error"
-      ? "error"
-      : rawResult.status === "failed"
-        ? "failed"
-        : timedOut
-          ? "warnings"
-          : "passed";
+  //
+  // That leak is exactly what a raw `failed` was: this harness declares no
+  // `execution` block, so the orchestrator's status is findings-derived, and
+  // passing it through kept an unevidenced critical failing the run after the
+  // pipeline had excluded it from the gate. The shared composition recomputes
+  // instead, so this path and `harness run` cannot answer differently.
   const result: HarnessRunResult = {
     ...rawResult,
-    status: combineStatuses(passStatus, statusForFindings(findings)),
+    status: statusAfterFindingPipelines({
+      rawStatus: rawResult.status,
+      findings,
+      findingsBlind: loaded.definition.execution !== undefined,
+      timedOut: (rawResult.metadata?.timed_out_roles ?? "") !== "",
+    }),
     findings,
     metadata: rawMetadata,
     artifacts: [

@@ -166,6 +166,44 @@ test("config-driven code review marks unevidenced findings and dedupes by finger
   }
 });
 
+test("an unevidenced critical does not fail a config-driven run", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-critical-"));
+  try {
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const adapter = scriptedAdapter({
+      quality: {
+        findings: [
+          finding("unevidenced-critical", {
+            severity: "critical",
+            validation: {
+              status: "verified",
+              details: "Read the file and it looked wrong.",
+            },
+          }),
+        ],
+      },
+    });
+
+    const result = await runConfigured(
+      workspacePath,
+      contextBundlePath,
+      adapter,
+    );
+
+    // The orchestrator sees a raw critical and says "failed" before the
+    // pipeline classifies it. Letting that through would fail the run on a
+    // finding the same run reports as not counted — and only a critical
+    // reaches that branch, which is why a warning-only case missed it.
+    expect(result.findings.map((entry) => entry.unsubstantiated)).toEqual([
+      true,
+    ]);
+    expect(result.status).toBe("passed");
+    expect(result.metadata?.unsubstantiated_findings).toBe("1");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
 test("config-driven trivial tier schedules only quality", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-trivial-"));
   try {

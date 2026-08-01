@@ -5,11 +5,7 @@ import {
   resolveContextProvider,
   writeContextBundle,
 } from "@aguil/agents-context";
-import type {
-  Finding,
-  HarnessOutcome,
-  HarnessRunResult,
-} from "@aguil/agents-core";
+import type { HarnessOutcome } from "@aguil/agents-core";
 import {
   createRunId,
   isReviewTriageTier,
@@ -37,7 +33,7 @@ import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 import { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
 import {
   resolveReportRenderer,
-  statusForFindings,
+  statusAfterFindingPipelines,
 } from "@aguil/agents-reporting";
 
 export { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
@@ -426,7 +422,12 @@ export async function runHarnessRunCli(
       })
     : result.findings;
 
-  const status = statusAfterPipelines(loaded, result, reportedFindings);
+  const status = statusAfterFindingPipelines({
+    rawStatus: result.status,
+    findings: reportedFindings,
+    findingsBlind: loaded.definition.execution !== undefined,
+    timedOut: (result.metadata?.timed_out_roles ?? "") !== "",
+  });
 
   console.log(`run: ${result.runId}`);
   console.log(`status: ${status}`);
@@ -472,39 +473,4 @@ export async function runHarnessRunCli(
   }
   console.log(`artifacts: ${scratchpadPath}`);
   return status === "passed" ? 0 : 1;
-}
-
-/**
- * Recompute the findings-derived part of the status against the pipelined
- * findings.
- *
- * The orchestrator computes status before the declared pipelines run, so it
- * judges raw findings — which do not yet carry the `unsubstantiated` marker
- * `builtin:actionable` adds. Left alone, an unevidenced finding would fail the
- * run here while the report beside it said the finding was not counted, and
- * `agents code-review` (which recomputes after its pipelines) would disagree
- * with `agents harness run` on the same document.
- *
- * Only the findings-derived part moves. A role that failed or timed out, and a
- * harness whose `execution` block makes status findings-blind, are untouched:
- * no pipeline can make a failed role succeed.
- */
-export function statusAfterPipelines(
-  loaded: LoadedHarness,
-  result: HarnessRunResult,
-  reportedFindings: readonly Finding[],
-): HarnessRunResult["status"] {
-  const findingsBlind = loaded.definition.execution !== undefined;
-  if (findingsBlind || result.status === "error") {
-    return result.status;
-  }
-  const timedOut = (result.metadata?.timed_out_roles ?? "") !== "";
-  const fromFindings = statusForFindings(reportedFindings);
-  if (fromFindings === "failed") {
-    return "failed";
-  }
-  if (fromFindings === "warnings" || timedOut) {
-    return "warnings";
-  }
-  return "passed";
 }
