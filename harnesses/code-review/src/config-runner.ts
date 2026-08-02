@@ -231,14 +231,17 @@ function assertEnforceableHere(loaded: LoadedHarness, agentsDir: string): void {
 }
 
 /**
- * Refuse workspace-sourced harness declarations that would execute host argv.
+ * Refuse workspace-sourced harness declarations that execute host argv or
+ * flip status without a trusted gate.
  *
  * Resolution prefers `<workspace>/.agents` before user-global and package. For
  * `agents code-review --pr` that workspace is the detached PR worktree, so a
- * PR that plants `execution.pass_check` or a `shell-command` context provider
- * would otherwise run arbitrary argv on the reviewer's host with a full
- * inherited environment (findings `security-pass-check-workspace-harness-rce`
- * and `security-workspace-shell-command-rce`). Package, user-global, and
+ * PR that plants `execution` (including `pass_check`), or a `shell-command`
+ * context provider, would otherwise run arbitrary argv on the reviewer's host
+ * or greenwash run status to findings-blind `passed` (findings
+ * `security-pass-check-workspace-harness-rce`,
+ * `security-workspace-shell-command-rce`,
+ * `quality-workspace-execution-blinds-status`). Package, user-global, and
  * explicit `--agents-dir` sources remain trusted.
  */
 function assertTrustedHostExec(
@@ -255,17 +258,13 @@ function assertTrustedHostExec(
     CONFIG_HARNESS_ID,
     "harness.yaml",
   );
-  const execution = loaded.definition.execution;
-  if (
-    execution !== undefined &&
-    execution.mode === "chain" &&
-    execution.passCheck !== undefined
-  ) {
+  if (loaded.definition.execution !== undefined) {
     throw new Error(
-      "code-review: harness declares execution.pass_check, but the harness was " +
-        "loaded from the workspace `.agents` tree, which is untrusted " +
-        "(a `--pr` worktree can supply it). Remove `pass_check` from " +
-        `${harnessPath}, install the harness with ` +
+      "code-review: harness declares `execution`, but the harness was loaded " +
+        "from the workspace `.agents` tree, which is untrusted " +
+        "(a `--pr` worktree can supply it). An `execution` block flips status " +
+        "to findings-blind and may run `pass_check` argv on the host. Remove " +
+        `\`execution\` from ${harnessPath}, install the harness with ` +
         "`agents harness install code-review`, or pass `--agents-dir` pointing " +
         "at a trusted `.agents` tree.",
     );

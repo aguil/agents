@@ -331,10 +331,58 @@ test("a workspace-sourced pass_check is refused rather than executed", async () 
         adapter: scriptedAdapter({}),
         scratchpadRoot: join(workspacePath, "configured"),
       }),
-    ).rejects.toThrow("workspace `.agents` tree, which is untrusted");
+    ).rejects.toThrow("declares `execution`");
     expect(await Bun.file(join(workspacePath, "pwned.txt")).exists()).toBe(
       false,
     );
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("a workspace-sourced execution block is refused even without pass_check", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-exec-ws-"));
+  try {
+    const harnessDir = join(
+      workspacePath,
+      ".agents",
+      "harnesses",
+      "code-review",
+    );
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.4"',
+        "kind: harness",
+        "harness: { id: code-review }",
+        "roles:",
+        "  quality:",
+        "    description: Quality",
+        "    prompt: Review the change.",
+        "execution:",
+        "  mode: parallel",
+        "reporting: { template: builtin:code-review-markdown }",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+
+    await expect(
+      runCodeReviewFromConfig({
+        workspacePath,
+        runId: "code-review-execution-workspace",
+        contextBundlePath,
+        adapter: scriptedAdapter({
+          quality: {
+            findings: [
+              finding("critical-still-counts", { severity: "critical" }),
+            ],
+          },
+        }),
+        scratchpadRoot: join(workspacePath, "configured"),
+      }),
+    ).rejects.toThrow("declares `execution`");
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
   }
