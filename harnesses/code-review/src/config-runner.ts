@@ -25,6 +25,7 @@ import {
   filterEnabledRoles,
   type LoadedHarness,
   loadHarness,
+  makePassGate,
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
@@ -268,6 +269,11 @@ export async function runCodeReviewFromConfig(
 
   const adapter = options.adapter ?? new FakeAgentAdapter();
   const outputSchemas = loaded.outputSchemas;
+  // `pass_check` belongs to the document, not to the driver that reads it, so
+  // it has to take effect here exactly as it does under `harness run` (#156).
+  // The command runs in `workspacePath`, which for a `--pr` run is the detached
+  // worktree — checking the PR's own code is the point, not an accident.
+  const passGate = makePassGate(definition.execution, workspacePath);
   const fileEventSink = new JsonlFileEventSink(
     join(scratchpadPath, "events.jsonl"),
   );
@@ -284,6 +290,7 @@ export async function runCodeReviewFromConfig(
             },
           },
     contextBundlePath: writtenContext.jsonPath,
+    ...(passGate === undefined ? {} : { passGate }),
     ...(outputSchemas === undefined
       ? {}
       : {

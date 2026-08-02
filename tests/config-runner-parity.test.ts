@@ -239,6 +239,57 @@ test("an agent-supplied marker never reaches the result", async () => {
   }
 });
 
+test("a declared pass_check decides the run on the config path too", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-pass-check-"));
+  try {
+    const agentsDir = join(workspacePath, "agents-dir");
+    const harnessDir = join(agentsDir, "harnesses", "code-review");
+    await mkdir(harnessDir, { recursive: true });
+    const writeHarness = (passCheck: string) =>
+      writeFile(
+        join(harnessDir, "harness.yaml"),
+        [
+          'spec_version: "0.4"',
+          "kind: harness",
+          "harness: { id: code-review }",
+          "roles:",
+          "  quality:",
+          "    description: Quality",
+          "    prompt: Review the change.",
+          "execution:",
+          "  mode: chain",
+          "  order: [quality]",
+          `  pass_check: ${passCheck}`,
+          "reporting: { template: builtin:code-review-markdown }",
+        ].join("\n"),
+        "utf8",
+      );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const run = () =>
+      runCodeReviewFromConfig({
+        agentsDir,
+        workspacePath,
+        runId: "code-review-pass-check",
+        contextBundlePath,
+        adapter: scriptedAdapter({}),
+        scratchpadRoot: join(workspacePath, "configured"),
+      });
+
+    // Writing the working directory proves both halves: that the command ran
+    // at all, and that it ran against the workspace rather than wherever the
+    // driver happens to live.
+    await writeHarness('["sh", "-c", "pwd > ran-in.txt; exit 1"]');
+    expect((await run()).status).toBe("failed");
+    expect((await Bun.file(join(workspacePath, "ran-in.txt")).text()).trim()) //
+      .toBe(workspacePath);
+
+    await writeHarness('["true"]');
+    expect((await run()).status).toBe("passed");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
 test("config-driven trivial tier schedules only quality", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-trivial-"));
   try {

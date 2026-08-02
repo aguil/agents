@@ -21,6 +21,7 @@ export {
   applyFindingPipelines,
   validateOutcomesAgainstSchemas,
 } from "./output-pipeline";
+export { makePassGate } from "./pass-gate";
 export type { JsonSchema } from "./schema-validation";
 export {
   findAllSchemaViolations,
