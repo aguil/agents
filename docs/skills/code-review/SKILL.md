@@ -137,9 +137,9 @@ whose own **`.agents/harnesses/code-review/harness.yaml`** exists reviews
 **`execution`** (including **`pass_check`**), and **`shell-command`** context
 providers are **refused** from that workspace tree (they would otherwise run on
 the reviewer's host, greenwash run status, or look enforced when they are
-not)—see the configuration guide. Treat the workspace harness as untrusted
-input on a PR from a fork or an unfamiliar repo—the PR branch can change that
-file. When the operator wants the harness they trust regardless of workspace:
+not)—see the configuration guide. Treat the workspace harness as untrusted input
+on a PR from a fork or an unfamiliar repo—the PR branch can change that file.
+When the operator wants the harness they trust regardless of workspace:
 
 ```text
 agents harness install code-review            # writes ~/.agents/… (prompts before overwriting)
