@@ -5,9 +5,10 @@ description: >-
   network egress, and non-allowlisted commands are denied by evaluation,
   not by instruction. Known shared limit: allowlisted read commands (cat,
   rg, ...) are not correlated against filesystem deny globs, so shell
-  reads of denied paths are not blocked by either model (#104). Not yet
-  wired into the code-review dispatch path (hook enforcement is the
-  harness-run machinery).
+  reads of denied paths are not blocked by either model (#104). Hook
+  enforcement is the harness-run machinery, so this policy takes effect
+  under `agents harness run`; referencing it from a harness that
+  `agents code-review` loads is refused rather than silently inert (#156).
 capabilities:
   filesystem:
     allow: ["**"]

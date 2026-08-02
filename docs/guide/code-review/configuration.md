@@ -168,6 +168,21 @@ would replace existing files at the destination, the installer prompts before
 overwriting them. Later config runs report version drift between that global
 install and the running CLI package.
 
+### What this path honors
+
+Customizing the harness is only meaningful for keys this runner acts on. It
+reads roles and their enablement expressions, context providers, output schemas,
+the finding pipelines, the reporting template, `default_allowed_commands`
+(unioned with the commands your VCS makes available, so declaring grants never
+strips `jj diff` from a jj workspace), and `execution` including `pass_check`,
+which runs in the workspace after the roles finish and decides the run.
+
+It refuses `hooks` and `policy`. Policy is enforced by generating hook config
+for a specific adapter, which is `agents harness run`'s job — this path accepts
+whatever adapter you hand it. A harness declaring either key errors rather than
+running without the enforcement it asked for. To review under a policy, run
+`agents harness run code-review --adapter cursor`.
+
 For a one-off run, bypass layered lookup with an explicit `.agents` directory:
 
 ```bash
