@@ -10,6 +10,51 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.7.0](https://github.com/aguil/agents/compare/v0.6.0...v0.7.0) (2026-08-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **execution:** CursorAdapter / buildCursorCommand with no options no longer emit --force; they emit --sandbox enabled. Pass force: true to restore the previous auto-allow behaviour.
+* **code-review:** `agents code-review` now errors on a harness declaring `hooks` or `policy` instead of silently running without enforcement.
+* **code-review:** `agents code-review post` and `--post-pr` no longer publish findings marked `unsubstantiated`. Use `--include-unsubstantiated` to post specific ones.
+* **code-review:** `builtin:actionable` no longer removes findings from published output. A harness declaring it now emits findings it previously discarded, marked `unsubstantiated`, and consumers reading `result.json` or `report.md` will see entries that were absent before. Run status and triage `items` are unaffected by those entries, so the merge gate keeps its meaning. `actionableFindings` and `isActionableFinding` are removed from `@aguil/agents-reporting` in favor of `markUnsubstantiatedFindings` and `isSubstantiatedFinding`. `spec_version` increments to 0.4: additive in format, and deliberately not version-gated in behavior, since preserving silent data loss for older documents is the defect rather than a compatibility guarantee.
+
+### Added
+
+* **code-review:** refuse a harness whose hooks or policy this path cannot enforce ([5a2a8e9](https://github.com/aguil/agents/commit/5a2a8e999b33d19b721c84e7e3a3c33878716a63)), closes [#156](https://github.com/aguil/agents/issues/156)
+* **code-review:** structured finding evidence; builtin:actionable stops discarding ([280e662](https://github.com/aguil/agents/commit/280e6629162ededd194c385cef4ee1e33e0a0e42)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **code-review:** withhold unsubstantiated findings from PR posting by default ([d2f6d13](https://github.com/aguil/agents/commit/d2f6d132356131323b27e60c2320eff8c72b098a)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **harness-config:** honor execution.pass_check on the code-review path ([1c420d7](https://github.com/aguil/agents/commit/1c420d70ff2faa695d6123c7355be8c7a2db26dc)), closes [#156](https://github.com/aguil/agents/issues/156)
+
+
+### Fixed
+
+* **cli:** keep hooks/policy-eval on overview help path ([96a774d](https://github.com/aguil/agents/commit/96a774da818f8eb77ea24baed1eac8784718bc20))
+* **cli:** recompute harness run status against pipelined findings ([7cd2852](https://github.com/aguil/agents/commit/7cd285203cee72f452d1e5b75269c98df5ef0581)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **cli:** route help for harness run ([5430972](https://github.com/aguil/agents/commit/543097207e3efa86b34801701415d439b623df25))
+* **cli:** route help for harness run ([7b2c375](https://github.com/aguil/agents/commit/7b2c375268cca8a5b07490d31598f18df300f7f1))
+* **code-review:** refuse any workspace-sourced execution block ([e0235fe](https://github.com/aguil/agents/commit/e0235fe8fad0f2b153b5c78846760d09b5108a9a)), closes [#156](https://github.com/aguil/agents/issues/156)
+* **code-review:** refuse workspace-sourced pass_check ([c463aa6](https://github.com/aguil/agents/commit/c463aa6eed0ad14b97c8a300f7d6bdc5cceec0e1)), closes [#156](https://github.com/aguil/agents/issues/156)
+* **code-review:** refuse workspace-sourced shell-command providers ([7926eab](https://github.com/aguil/agents/commit/7926eabd328c014a741ebc7ccce0803beb293d7b)), closes [#156](https://github.com/aguil/agents/issues/156)
+* **code-review:** stop raw critical findings failing a configured run ([b411eb6](https://github.com/aguil/agents/commit/b411eb6b56722b970f165bbeb3ea42be57d22a2a)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **code-review:** union declared command grants with the vcs-derived ones ([82c2ead](https://github.com/aguil/agents/commit/82c2eada4cf3060015b1fd2039676989c4d17c95)), closes [#156](https://github.com/aguil/agents/issues/156)
+* **execution:** Cursor --force opt-in; default --sandbox enabled ([#168](https://github.com/aguil/agents/issues/168)) ([a65d7ec](https://github.com/aguil/agents/commit/a65d7ec2642f1707402bd5d599d037298deeafe1))
+* **execution:** strip agent-supplied unsubstantiated markers at the envelope ([e4cb4cb](https://github.com/aguil/agents/commit/e4cb4cba3629d4d06ea133ebb9792680bea355b3)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **harness-config:** ignore pass_check stdout/stderr so the gate cannot hang ([2b5f845](https://github.com/aguil/agents/commit/2b5f845cf944fba384d55485ff13526579625294)), closes [#156](https://github.com/aguil/agents/issues/156)
+* **harness-config:** treat only a missing key as absent ([de704bb](https://github.com/aguil/agents/commit/de704bbd0e1d1705e4d50a4ea60010f376aa2bce))
+* **harness-config:** treat only a missing key as absent ([663d81d](https://github.com/aguil/agents/commit/663d81dff63b3756780095fe503a88693b64dc27)), closes [#152](https://github.com/aguil/agents/issues/152)
+* **orchestration:** sanitize the unsubstantiated marker where findings are collected ([9bb791f](https://github.com/aguil/agents/commit/9bb791f7e73ccefce28880d7c1609c5d3ac4e895)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **orchestration:** stop trusting the marker where no classifier has run ([689e83a](https://github.com/aguil/agents/commit/689e83af44985883ad15e985c3ff41b40064e002)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **reporting:** make the classifier the authoritative writer of the marker ([bd20db5](https://github.com/aguil/agents/commit/bd20db5f6f5d2daf157d19a77f6fad8215b1dbe6)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **reporting:** render description and evidence for uncounted findings ([97e990d](https://github.com/aguil/agents/commit/97e990d83fd7a80b5a21bbe330c83b69b25a6a6e)), closes [#158](https://github.com/aguil/agents/issues/158)
+* **reporting:** stop the summary line claiming a clean run that is not clean ([e30af5a](https://github.com/aguil/agents/commit/e30af5a954343143f166550c6576134957ce7cca)), closes [#158](https://github.com/aguil/agents/issues/158)
+
+
+### Changed
+
+* **code-review:** declare unsubstantiated_findings in the metadata contract ([b056ad5](https://github.com/aguil/agents/commit/b056ad5e73c3071d0fa53b3789a70cacb564f75f)), closes [#158](https://github.com/aguil/agents/issues/158)
+
 ## [0.6.0](https://github.com/aguil/agents/compare/v0.5.4...v0.6.0) (2026-07-27)
 
 
