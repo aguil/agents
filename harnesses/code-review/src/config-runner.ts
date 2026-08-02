@@ -292,7 +292,17 @@ export async function runCodeReviewFromConfig(
   const enablement = filterEnabledRoles(loaded.definition, { tier: triage });
   const definition = {
     ...enablement.definition,
-    defaultAllowedCommands: defaultCommandsForVcsMode(vcsMode),
+    // Union, because the two lists answer different questions and neither may
+    // erase the other (#156). The declared list is what the harness author
+    // wants roles to be able to run; the VCS-derived one is capability
+    // discovery — `jj diff` exists in a jj workspace and not in a git one.
+    // Overwriting used to drop the declared list entirely.
+    defaultAllowedCommands: [
+      ...new Set([
+        ...(enablement.definition.defaultAllowedCommands ?? []),
+        ...defaultCommandsForVcsMode(vcsMode),
+      ]),
+    ],
   };
 
   const adapter = options.adapter ?? new FakeAgentAdapter();

@@ -349,6 +349,61 @@ test("a harness this path cannot enforce is refused, not run inert", async () =>
   }
 });
 
+test("declared and vcs-derived command grants are unioned, not replaced", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-commands-"));
+  try {
+    const agentsDir = join(workspacePath, "agents-dir");
+    const harnessDir = join(agentsDir, "harnesses", "code-review");
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.4"',
+        "kind: harness",
+        "harness: { id: code-review }",
+        "roles:",
+        "  quality:",
+        "    description: Quality",
+        "    prompt: Review the change.",
+        "reporting: { template: builtin:code-review-markdown }",
+        "default_allowed_commands: [shellcheck, rg]",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    let granted: readonly string[] | undefined;
+    const capturing: AgentAdapter = {
+      ...scriptedAdapter({}),
+      async *run(request: AgentRunRequest) {
+        granted = request.allowedCommands;
+        yield* scriptedAdapter({}).run(request);
+      },
+    };
+
+    await runCodeReviewFromConfig({
+      agentsDir,
+      workspacePath,
+      runId: "code-review-commands",
+      contextBundlePath,
+      adapter: capturing,
+      scratchpadRoot: join(workspacePath, "configured"),
+    });
+
+    // The scratch workspace is neither a jj nor a git checkout, so the derived
+    // list is the vcs-free base. Declared entries survive alongside it, and
+    // `rg` appearing in both is not counted twice.
+    expect(granted).toEqual([
+      "shellcheck",
+      "rg",
+      "grep",
+      "bun test",
+      "npm test",
+    ]);
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
 test("config-driven trivial tier schedules only quality", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-trivial-"));
   try {
