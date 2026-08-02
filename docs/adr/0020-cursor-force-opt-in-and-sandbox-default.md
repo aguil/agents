@@ -1,10 +1,11 @@
 # ADR 0020: Cursor `--force` is opt-in; unforced runs default to `--sandbox enabled`
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-08-02 — Proposed.
+- 2026-08-02 — Accepted: merged in #168.
 
 **Context:** `agents harness run` constructed the Cursor adapter as
 `new CursorAdapter({ force: true })`, and `buildCursorCommand` treated `--force`
