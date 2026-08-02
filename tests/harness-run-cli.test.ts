@@ -50,6 +50,70 @@ test("harness run -h matches --help", async () => {
   const result = await runHarnessCli(["-h"]);
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain("Usage: agents harness run <id>");
+  expect(result.stdout).toContain("--force-tool-calls");
+});
+
+test("harness run --force-tool-calls warns; default options stay non-forcing", async () => {
+  const { cursorOptionsForHarnessRun } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const { buildCursorCommand, resolveCursorApprovalFlags } = await import(
+    "@aguil/agents-execution"
+  );
+
+  const safe = cursorOptionsForHarnessRun(false);
+  const forced = cursorOptionsForHarnessRun(true);
+  expect(resolveCursorApprovalFlags(safe)).toEqual({
+    force: false,
+    sandbox: "enabled",
+  });
+  expect(resolveCursorApprovalFlags(forced)).toEqual({
+    force: true,
+    sandbox: undefined,
+  });
+
+  const base = {
+    runId: "run-1",
+    roleId: "scout",
+    prompt: "x",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch",
+    timeoutMs: 1_000,
+    allowedCommands: [] as string[],
+  };
+  const safeCmd = buildCursorCommand(base, "/scratch/r.json", safe);
+  const forcedCmd = buildCursorCommand(base, "/scratch/r.json", forced);
+  expect(safeCmd).not.toContain("--force");
+  expect(safeCmd).toContain("--sandbox");
+  expect(forcedCmd).toContain("--force");
+  expect(forcedCmd).not.toContain("--sandbox");
+
+  const workspace = await mkdtemp(join(tmpdir(), "harness-run-force-"));
+  try {
+    await cp(
+      join(repoRoot, "examples", "incident-triage", "fixture"),
+      workspace,
+      { recursive: true },
+    );
+    const result = await runHarnessCli([
+      "incident-triage",
+      "--agents-dir",
+      join(repoRoot, "examples", "incident-triage", ".agents"),
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+      "--allow-unenforced-policy",
+      "--force-tool-calls",
+    ]);
+    // fake adapter ignores the flag for spawning, but the warn must still fire
+    // when a policy-declaring harness is forced (audibility of the weaker posture).
+    expect(result.stderr).toContain("--force-tool-calls");
+    expect(result.stderr).toContain("collapses hook ask");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("harness run rejects unknown adapters and arguments", async () => {

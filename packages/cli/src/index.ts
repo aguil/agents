@@ -32,6 +32,7 @@ import {
   agentsCodeReviewDryRunRoot,
   agentsCodeReviewRunsRoot,
 } from "@aguil/agents-core";
+import { resolveCursorApprovalFlags } from "@aguil/agents-execution";
 import { severityEmoji } from "@aguil/agents-reporting";
 import type { CliOptions } from "./code-review-cli-models";
 import { stabilizeMergedWorkspace } from "./code-review-config";
@@ -561,6 +562,7 @@ interface EffectiveAdapterOptions {
     readonly argsTemplate?: readonly string[];
     readonly mode?: "agent" | "plan" | "ask";
     readonly force: boolean;
+    readonly sandbox?: "enabled" | "disabled";
   };
 }
 
@@ -810,7 +812,10 @@ function resolveEffectiveAdapterOptions(
       model: options.model,
       argsTemplate: coerceAdapterArgsTemplate(options.cursorArgs),
       mode: parseCursorMode(options.cursorMode),
-      force: true,
+      // Safe default (issue #159 / ADR 0020): no --force; sandbox enabled via
+      // resolveCursorApprovalFlags when force is off. Previously hardcoded
+      // force: true, which collapsed hook ask into allow.
+      force: false,
     },
   };
 }
@@ -855,7 +860,9 @@ async function buildDeterminismMetadata(
         ? ""
         : JSON.stringify([...effective.cursor.argsTemplate]);
     metadata.cursor_mode = effective.cursor.mode ?? "";
-    metadata.cursor_force = effective.cursor.force ? "true" : "false";
+    const approval = resolveCursorApprovalFlags(effective.cursor);
+    metadata.cursor_force = approval.force ? "true" : "false";
+    metadata.cursor_sandbox = approval.sandbox ?? "";
     metadata.cursor_version = await detectExecutableVersion(
       options.cursor ?? "agent",
     );

@@ -39,7 +39,7 @@ Common model IDs:
 bun run agents code-review --adapter cursor --model sonnet-4
 bun run agents code-review --adapter cursor --model sonnet-4-thinking --cursor-mode plan
 bun run agents code-review --adapter cursor --model gpt-5 --cursor "$(which agent)"
-bun run agents code-review --adapter cursor --cursor-args "--print,--output-format,stream-json,--workspace,{workspace},--trust,--force,{prompt}"
+bun run agents code-review --adapter cursor --cursor-args "--print,--output-format,stream-json,--workspace,{workspace},--trust,--sandbox,enabled,{prompt}"
 # When the comma template would begin with bundled CLI-looking tokens, bind with =:
 bun run agents code-review --adapter cursor --cursor-args="--strict,--trust,--print"
 ```
@@ -54,7 +54,13 @@ Common model IDs:
 Discover models with `agent models`.
 
 Cursor non-interactive runs require a trusted workspace. If you override
-`--cursor-args`, keep `--trust` in the template.
+`--cursor-args`, keep `--trust` in the template. Embedding `--force`, `--yolo`,
+or `--auto-review` in that template does **not** opt into a weaker approval
+posture on the code-review path: those flags are stripped unless the adapter is
+constructed with `force: true` (issue #159 / ADR 0020). For
+`agents harness run`, the opt-in is `--force-tool-calls`. The default template
+uses `--sandbox enabled` so policy-allowed writes still run while escalation
+stays enforceable.
 
 ## Fake
 
@@ -74,7 +80,8 @@ Enabled by default. Emits deterministic metadata in `result.json`.
 - **Claude:** conservative defaults; no extra CLI args unless `--claude-args` is
   set.
 - **Cursor:** defaults use
-  `--print --output-format stream-json --trust --force`.
+  `--print --output-format stream-json --trust --sandbox enabled` (no `--force`;
+  see ADR 0020).
 
 Use `--no-deterministic` to opt out. Determinism is best-effort;
 seed/temperature controls are not currently surfaced by this harness CLI.

@@ -970,8 +970,37 @@ export interface CursorAdapterOptions {
   readonly model?: string;
   readonly argsTemplate?: readonly string[];
   readonly mode?: "agent" | "plan" | "ask";
+  /**
+   * Pass Cursor's `--force` (auto-allow unless explicitly denied). Default
+   * off: an omitted flag must not collapse hook `ask` into allow (issue
+   * #159 / ADR 0020). Opt in only when the operator has stated a weaker
+   * posture.
+   */
   readonly force?: boolean;
+  /**
+   * Cursor `--sandbox` mode. When omitted and `force` is not true, defaults
+   * to `"enabled"` so policy-`allow` writes still run headlessly without
+   * `--force` (ADR 0020 Decision §2). Explicit `"disabled"` turns that off.
+   */
   readonly sandbox?: "enabled" | "disabled";
+}
+
+/**
+ * Resolve the Cursor CLI approval flags from adapter options.
+ *
+ * `--force` only when `force === true`. Otherwise default `--sandbox enabled`
+ * so a hook `allow` can authorise non-read-only commands without defeating
+ * hook `ask` (measured on Cursor CLI `2026.07.23-e383d2b`; ADR 0020).
+ */
+export function resolveCursorApprovalFlags(
+  options: Pick<CursorAdapterOptions, "force" | "sandbox"> = {},
+): {
+  readonly force: boolean;
+  readonly sandbox: "enabled" | "disabled" | undefined;
+} {
+  const force = options.force === true;
+  const sandbox = options.sandbox ?? (force ? undefined : "enabled");
+  return { force, sandbox };
 }
 
 export class OpenCodeAdapter extends SubprocessAgentAdapter {
@@ -1217,6 +1246,69 @@ Emit the JSON line once per finding, with real values. Do not emit a template, p
 If no verified critical or warning findings exist, do not emit any finding JSON line.`;
 }
 
+/**
+ * Apply resolved Cursor approval flags to argv after template expansion.
+ *
+ * Custom `argsTemplate` / `--cursor-args` must not reintroduce `--force`
+ * (or omit the sandbox default) while `resolveCursorApprovalFlags` and run
+ * metadata report the safe posture (issue #159 / ADR 0020 §1–§2).
+ *
+ * Call this on template-expanded args only — before any trailing prompt is
+ * appended — so injected flags stay in the flag region.
+ */
+export function applyCursorApprovalToArgv(
+  args: readonly string[],
+  approval: {
+    readonly force: boolean;
+    readonly sandbox: "enabled" | "disabled" | undefined;
+  },
+): string[] {
+  const out: string[] = [];
+  let sawSandbox = false;
+  let sawForce = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) {
+      continue;
+    }
+    if (
+      arg === "--force" ||
+      arg === "-f" ||
+      arg === "--yolo" ||
+      arg === "--auto-review"
+    ) {
+      // --auto-review collapses hook ask on writes the same way --force does
+      // (ADR 0020); keep it off the argv unless force is an explicit opt-in.
+      if (!approval.force) {
+        continue;
+      }
+      if (arg !== "--auto-review") {
+        sawForce = true;
+      }
+      out.push(arg);
+      continue;
+    }
+    if (arg === "--sandbox") {
+      sawSandbox = true;
+      if (approval.sandbox !== undefined) {
+        out.push("--sandbox", approval.sandbox);
+        if (args[index + 1] === "enabled" || args[index + 1] === "disabled") {
+          index += 1;
+        }
+        continue;
+      }
+    }
+    out.push(arg);
+  }
+  if (approval.force && !sawForce) {
+    out.push("--force");
+  }
+  if (approval.sandbox !== undefined && !sawSandbox) {
+    out.push("--sandbox", approval.sandbox);
+  }
+  return out;
+}
+
 export function buildCursorCommand(
   request: AgentRunRequest,
   requestPath: string,
@@ -1232,6 +1324,7 @@ export function buildCursorCommand(
     prompt,
   };
 
+  const approval = resolveCursorApprovalFlags(options);
   const template = options.argsTemplate ?? [
     "--print",
     "--output-format",
@@ -1239,24 +1332,31 @@ export function buildCursorCommand(
     "--workspace",
     "{workspace}",
     "--trust",
-    ...(options.force === false ? [] : ["--force"]),
+    ...(approval.force ? ["--force"] : []),
     ...(options.mode !== undefined && options.mode !== "agent"
       ? ["--mode", options.mode]
       : []),
-    ...(options.sandbox !== undefined ? ["--sandbox", options.sandbox] : []),
+    ...(approval.sandbox !== undefined ? ["--sandbox", approval.sandbox] : []),
     ...(options.model !== undefined ? ["--model", "{model}"] : []),
     "{prompt}",
   ];
 
-  const args = template.map((arg) => substituteTemplateArg(arg, substitutions));
-  const hasPrompt = template.some((arg) => arg.includes("{prompt}"));
-  const cmd = [options.executable ?? "agent", ...args];
-
-  if (!hasPrompt) {
-    cmd.push(prompt);
-  }
-
-  return cmd;
+  const promptSlot = template.findIndex(
+    (arg) => arg === "{prompt}" || arg.includes("{prompt}"),
+  );
+  const expanded = template.map((arg) =>
+    substituteTemplateArg(arg, substitutions),
+  );
+  const flagArgs =
+    promptSlot >= 0
+      ? expanded.filter((_, index) => index !== promptSlot)
+      : expanded;
+  const trailingPrompt =
+    promptSlot >= 0 ? (expanded[promptSlot] ?? prompt) : prompt;
+  // Enforce approval on flag argv only so injected --sandbox/--force stay
+  // ahead of the prompt (and custom templates cannot disagree with metadata).
+  const enforced = applyCursorApprovalToArgv(flagArgs, approval);
+  return [options.executable ?? "agent", ...enforced, trailingPrompt];
 }
 
 export {
