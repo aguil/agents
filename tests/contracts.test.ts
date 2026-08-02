@@ -329,6 +329,11 @@ test("resolveCodeReviewHelp maps contextual help scopes", () => {
     kind: "run_replay",
     legacyRunSpelling: true,
   });
+  expect(resolveCodeReviewHelp(["harness", "run", "--help"])).toBeNull();
+  expect(resolveCodeReviewHelp(["harness", "--help"])).toBeNull();
+  expect(resolveCodeReviewHelp(["pr-feedback", "--help"])).toBeNull();
+  expect(resolveCodeReviewHelp(["hooks", "test", "--help"])).toBeNull();
+  expect(resolveCodeReviewHelp(["policy-eval", "--help"])).toBeNull();
 });
 
 test("codeReviewHelpStderrExtras surfaces unknown command hints", () => {
@@ -4139,7 +4144,7 @@ test("agents triage --stdout --format json prints envelope", async () => {
   }
 });
 
-test("code-review overview help mentions agents triage, doctor, and skills", () => {
+test("code-review overview help mentions agents triage, doctor, skills, and harness", () => {
   const overview = resolveCodeReviewHelp([]);
   expect(overview).not.toBeNull();
   if (overview !== null && overview.kind === "overview") {
@@ -4150,5 +4155,7 @@ test("code-review overview help mentions agents triage, doctor, and skills", () 
     expect(rendered).toContain("agents doctor --help");
     expect(rendered).toContain("agents skills --help");
     expect(rendered).toContain("skills <command>");
+    expect(rendered).toContain("agents harness run --help");
+    expect(rendered).toContain("harness run <id>");
   }
 });

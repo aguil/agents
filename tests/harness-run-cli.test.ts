@@ -36,6 +36,22 @@ test("harness run requires agents-dir and workspace", async () => {
   expect(result.stderr).toContain("--agents-dir and --workspace are required");
 });
 
+test("harness run --help prints usage instead of the top-level overview", async () => {
+  const result = await runHarnessCli(["--help"]);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain("Usage: agents harness run <id>");
+  expect(result.stdout).toContain("--agents-dir <dir>");
+  expect(result.stdout).toContain("--workspace <path>");
+  expect(result.stdout).not.toContain("Unknown command");
+  expect(result.stderr).not.toContain("Unknown command");
+});
+
+test("harness run -h matches --help", async () => {
+  const result = await runHarnessCli(["-h"]);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain("Usage: agents harness run <id>");
+});
+
 test("harness run rejects unknown adapters and arguments", async () => {
   const bad = await runHarnessCli([
     "incident-triage",
