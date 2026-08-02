@@ -2817,6 +2817,46 @@ test("worker Cursor default follows the safe adapter posture (#159)", () => {
   expect(command).toContain("enabled");
 });
 
+test("custom cursor argsTemplate cannot reintroduce --force without force:true (#159)", () => {
+  const base = {
+    runId: "run-1",
+    roleId: "quality",
+    prompt: "Review this change.",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch/roles/quality",
+    timeoutMs: 1_000,
+    allowedCommands: ["bun test"],
+  } as const;
+  const requestPath = "/scratch/roles/quality/quality.request.json";
+
+  const leaked = buildCursorCommand(base, requestPath, {
+    argsTemplate: [
+      "--print",
+      "--workspace",
+      "{workspace}",
+      "--trust",
+      "--force",
+      "{prompt}",
+    ],
+  });
+  expect(leaked).not.toContain("--force");
+  expect(leaked).toContain("--sandbox");
+  expect(leaked).toContain("enabled");
+
+  const intentional = buildCursorCommand(base, requestPath, {
+    force: true,
+    argsTemplate: [
+      "--print",
+      "--workspace",
+      "{workspace}",
+      "--trust",
+      "{prompt}",
+    ],
+  });
+  expect(intentional).toContain("--force");
+});
+
 test("adds cursor --mode only for non-default modes", () => {
   const command = buildCursorCommand(
     {
@@ -2866,6 +2906,8 @@ test("builds cursor command from a custom args template", () => {
     "/repo",
     "--mode",
     "ask",
+    "--sandbox",
+    "enabled",
     expect.stringContaining("quality specialist"),
   ]);
 });
