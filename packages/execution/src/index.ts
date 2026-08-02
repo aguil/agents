@@ -1271,11 +1271,20 @@ export function applyCursorApprovalToArgv(
     if (arg === undefined) {
       continue;
     }
-    if (arg === "--force" || arg === "-f" || arg === "--yolo") {
+    if (
+      arg === "--force" ||
+      arg === "-f" ||
+      arg === "--yolo" ||
+      arg === "--auto-review"
+    ) {
+      // --auto-review collapses hook ask on writes the same way --force does
+      // (ADR 0020); keep it off the argv unless force is an explicit opt-in.
       if (!approval.force) {
         continue;
       }
-      sawForce = true;
+      if (arg !== "--auto-review") {
+        sawForce = true;
+      }
       out.push(arg);
       continue;
     }

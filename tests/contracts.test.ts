@@ -2837,10 +2837,12 @@ test("custom cursor argsTemplate cannot reintroduce --force without force:true (
       "{workspace}",
       "--trust",
       "--force",
+      "--auto-review",
       "{prompt}",
     ],
   });
   expect(leaked).not.toContain("--force");
+  expect(leaked).not.toContain("--auto-review");
   expect(leaked).toContain("--sandbox");
   expect(leaked).toContain("enabled");
 
