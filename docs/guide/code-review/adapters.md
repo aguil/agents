@@ -54,10 +54,13 @@ Common model IDs:
 Discover models with `agent models`.
 
 Cursor non-interactive runs require a trusted workspace. If you override
-`--cursor-args`, keep `--trust` in the template. Do **not** add `--force` unless
-you intend to collapse hook `ask` into allow (issue #159 / ADR 0020); the
-default template uses `--sandbox enabled` instead so policy-allowed writes still
-run while escalation stays enforceable.
+`--cursor-args`, keep `--trust` in the template. Embedding `--force`,
+`--yolo`, or `--auto-review` in that template does **not** opt into a weaker
+approval posture on the code-review path: those flags are stripped unless the
+adapter is constructed with `force: true` (issue #159 / ADR 0020). For
+`agents harness run`, the opt-in is `--force-tool-calls`. The default template
+uses `--sandbox enabled` so policy-allowed writes still run while escalation
+stays enforceable.
 
 ## Fake
 
