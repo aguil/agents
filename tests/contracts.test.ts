@@ -87,8 +87,10 @@ import {
   formatReviewCoverageSectionLines,
   formatReviewProvenanceSectionLines,
   loadStoredReviewResult,
+  parseIncludeUnsubstantiated,
   parsePrNumber,
   parseReviewSummaryStyle,
+  partitionForPublication,
   resolveAdapterModelFromMetadata,
 } from "../packages/cli/src/index";
 import {
@@ -1888,6 +1890,68 @@ test("defaults review summary style to impact", () => {
   expect(parseReviewSummaryStyle(undefined)).toBe("impact");
 });
 
+test("unsubstantiated findings are withheld from a pull request by default", () => {
+  const base: Finding = {
+    id: "counted",
+    severity: "warning",
+    title: "Evidenced issue",
+    description: "D",
+    evidence: "E",
+    sourceRole: "quality",
+    file: "src/app.ts",
+    line: 12,
+    validation: {
+      status: "verified",
+      details: "ok",
+      evidence: [{ kind: "command", command: "bun test" }],
+    },
+  };
+  const uncounted: Finding = {
+    ...base,
+    id: "uncounted",
+    validation: { status: "verified", details: "ok" },
+    unsubstantiated: true,
+  };
+  const findings = [base, uncounted];
+
+  // A pull request comment is a change request read by everyone on the thread;
+  // the gate does not count this finding, so it is not broadcast unasked.
+  const byDefault = partitionForPublication(findings, []);
+  expect(byDefault.publishable.map((f) => f.id)).toEqual(["counted"]);
+  expect(byDefault.withheld.map((f) => f.id)).toEqual(["uncounted"]);
+
+  // ...but an operator who has read it can promote it, by id or wholesale.
+  expect(
+    partitionForPublication(findings, ["uncounted"]).publishable.map(
+      (f) => f.id,
+    ),
+  ).toEqual(["counted", "uncounted"]);
+  expect(
+    partitionForPublication(findings, "all").publishable.map((f) => f.id),
+  ).toEqual(["counted", "uncounted"]);
+  expect(partitionForPublication(findings, "all").withheld).toEqual([]);
+
+  // A typo must not quietly withhold the finding the operator meant to post.
+  expect(() => partitionForPublication(findings, ["uncountd"])).toThrow(
+    "not withheld findings: uncountd",
+  );
+  // Including a typo that happens to name a substantiated finding: promoting
+  // one is a no-op, so accepting it would let preflight pass while the finding
+  // the operator meant to publish stayed withheld and unmentioned.
+  expect(() => partitionForPublication(findings, ["counted"])).toThrow(
+    "not withheld findings: counted",
+  );
+});
+
+test("parses the include-unsubstantiated promotion list", () => {
+  expect(parseIncludeUnsubstantiated(undefined)).toEqual([]);
+  expect(parseIncludeUnsubstantiated("all")).toBe("all");
+  expect(parseIncludeUnsubstantiated(" a , b ")).toEqual(["a", "b"]);
+  // Present but empty is a mistake, not a request to promote nothing.
+  expect(parseIncludeUnsubstantiated("  ")).toBeUndefined();
+  expect(parseIncludeUnsubstantiated(",")).toBeUndefined();
+});
+
 test("rejects invalid review summary style", () => {
   expect(parseReviewSummaryStyle("unknown")).toBeUndefined();
 });
@@ -3543,6 +3607,109 @@ test("resolveCodeReviewCliOptions merges configs and applies preset and CLI prec
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  }
+});
+
+test("the config merge forwards every explicitly parsed CLI option", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-merge-cover-"));
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    await mkdir(xdg, { recursive: true });
+    await mkdir(ws, { recursive: true });
+    process.env.XDG_CONFIG_HOME = xdg;
+
+    // Every string-valued flag at once. The merge builds its result field by
+    // field, so a newly added option is silently dropped unless someone
+    // remembers to list it there — which is how --include-unsubstantiated
+    // shipped as a no-op. This asserts the class, not the instance.
+    const argv = [
+      "--workspace",
+      ws,
+      "--result",
+      "r.json",
+      "--pr",
+      "1",
+      "--post-pr",
+      "2",
+      "--review-summary",
+      "triage",
+      "--include-unsubstantiated",
+      "a,b",
+      "--log",
+      "summary",
+      "--adapter",
+      "fake",
+    ];
+    const parsed = parseCodeReviewArgv(argv);
+    const resolved = await resolveCodeReviewCliOptions(ws, parsed);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) {
+      return;
+    }
+
+    const dropped = [...parsed.explicitKeys].filter((key) => {
+      const supplied = (parsed.options as unknown as Record<string, unknown>)[
+        key
+      ];
+      return (
+        supplied !== undefined &&
+        (resolved.options as unknown as Record<string, unknown>)[key] ===
+          undefined
+      );
+    });
+    expect(dropped).toEqual([]);
+    expect(resolved.options.includeUnsubstantiated).toBe("a,b");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  }
+});
+
+test("promotion cannot be pre-authorized by config or environment", async () => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const prevEnv = process.env.AGENTS_CODE_REVIEW_INCLUDE_UNSUBSTANTIATED;
+  const tempRoot = await mkdtemp(join(tmpdir(), "agents-cr-promote-"));
+  try {
+    const xdg = join(tempRoot, "xdg");
+    const ws = join(tempRoot, "ws");
+    await mkdir(join(xdg, "agents", "code-review"), { recursive: true });
+    await mkdir(ws, { recursive: true });
+    await writeFile(
+      join(xdg, "agents", "code-review", "config.json"),
+      JSON.stringify({ includeUnsubstantiated: "all" }),
+    );
+    process.env.XDG_CONFIG_HOME = xdg;
+    process.env.AGENTS_CODE_REVIEW_INCLUDE_UNSUBSTANTIATED = "all";
+
+    const resolved = await resolveCodeReviewCliOptions(
+      ws,
+      parseCodeReviewArgv([]),
+    );
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) {
+      return;
+    }
+    // Publishing an uncounted finding is a per-run decision by a person, so a
+    // standing config value must not stand in for one (ADR 0019 §7).
+    expect(resolved.options.includeUnsubstantiated).toBeUndefined();
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+    if (prevXdg === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+    if (prevEnv === undefined) {
+      delete process.env.AGENTS_CODE_REVIEW_INCLUDE_UNSUBSTANTIATED;
+    } else {
+      process.env.AGENTS_CODE_REVIEW_INCLUDE_UNSUBSTANTIATED = prevEnv;
     }
   }
 });

@@ -23,6 +23,8 @@ export interface CliOptions {
   readonly pr?: string;
   readonly postPr?: string;
   readonly reviewSummary?: string;
+  /** Comma-separated finding ids, or `all`, to publish despite being unsubstantiated. */
+  readonly includeUnsubstantiated?: string;
   /**
    * Explicit `.agents/` directory for harness resolution; flag/env only.
    * Repo JSON must not choose harness definitions for another checkout.

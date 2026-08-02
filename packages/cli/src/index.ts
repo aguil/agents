@@ -16,8 +16,10 @@ import {
   loadPullRequestDiffContext,
   loadStoredReviewResult,
   type PullRequestDiffContext,
+  parseIncludeUnsubstantiated,
   parsePrNumber,
   parseReviewSummaryStyle,
+  partitionForPublication,
   replacePendingPullRequestReview,
   resolvedResultPathIsUnderCodeReviewDryRunRoot,
   runCommand,
@@ -70,8 +72,10 @@ export {
   formatReviewProvenanceSectionLines,
   loadStoredReviewResult,
   type PullRequestDiffContext,
+  parseIncludeUnsubstantiated,
   parsePrNumber,
   parseReviewSummaryStyle,
+  partitionForPublication,
   replacePendingPullRequestReview,
   resolveAdapterModelFromMetadata,
   resolvedResultPathIsUnderCodeReviewDryRunRoot,
@@ -472,9 +476,28 @@ export async function main(
           console.error("Expected one of: triage, impact, evidence.");
           return 1;
         }
+        const includeUnsubstantiated = parseIncludeUnsubstantiated(
+          options.includeUnsubstantiated,
+        );
+        if (includeUnsubstantiated === undefined) {
+          console.error(
+            "--include-unsubstantiated needs finding ids or the word all.",
+          );
+          return 1;
+        }
+
+        // Fail on a mistyped promotion id before any posting work, and with a
+        // message rather than a stack trace.
+        try {
+          partitionForPublication(result.findings, includeUnsubstantiated);
+        } catch (error) {
+          console.error(error instanceof Error ? error.message : String(error));
+          return 1;
+        }
 
         const posted = await replacePendingPullRequestReview({
           findings: result.findings,
+          includeUnsubstantiated,
           prNumber: postingPrNumber,
           reviewSummaryStyle: reviewSummaryStyle ?? "impact",
           reviewedHeadSha: result.metadata?.pr_reviewed_head_sha,
@@ -902,6 +925,15 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     console.error("Expected one of: triage, impact, evidence.");
     return 1;
   }
+  const includeUnsubstantiated = parseIncludeUnsubstantiated(
+    options.includeUnsubstantiated,
+  );
+  if (includeUnsubstantiated === undefined) {
+    console.error(
+      "--include-unsubstantiated needs finding ids or the word all.",
+    );
+    return 1;
+  }
 
   const workspacePath = resolve(options.workspace ?? process.cwd());
   const resultPath =
@@ -936,6 +968,15 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     console.error(message);
     return 1;
   }
+  // Before PR resolution, so a mistyped promotion id fails immediately and
+  // with a message rather than a stack trace.
+  try {
+    partitionForPublication(loaded.findings, includeUnsubstantiated);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+
   const metadata = loaded.metadata ?? {};
   const metadataPrNumber = parsePrNumber(metadata.pr_number);
   const reviewedHeadShaFromMetadata =
@@ -991,6 +1032,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
 
   const posted = await replacePendingPullRequestReview({
     findings: loaded.findings,
+    includeUnsubstantiated,
     prNumber,
     reviewSummaryStyle: reviewSummaryStyle ?? "impact",
     reviewedHeadSha,

@@ -151,7 +151,32 @@ undermines the gate it feeds.
    through the `0.3` increment, because they use no surface newer than that and
    the schema describes one format across all accepted tokens (ADR 0015 §3).
 
-7. **The prompts teach the new field.** The envelope contract in
+7. **Unsubstantiated findings are withheld from pull request posting, and an
+   operator may promote them.** Clause 4 lists the surfaces where an uncounted
+   finding appears, and all of them are local to the person running the review.
+   A pull request is not: an inline comment is a change request addressed to the
+   author and read by everyone on the thread. Publishing a finding the gate
+   itself declines to count would ask a human to act on it while the automation
+   ignores it.
+
+   Measured over 103 recorded runs, publishing them by default would raise
+   postable inline comments from 138 to 182 — a 32% increase, with nine runs
+   going from posting nothing to opening a review with comments on it.
+
+   So the posting path withholds them, names them on the operator's terminal
+   with their ids, and accepts `--include-unsubstantiated <id>[,<id>...]` (or
+   `all`) to publish specific ones once a human has read them. An unrecognized
+   id is an error, because silently withholding the finding an operator asked to
+   publish is this ADR's own failure mode. The automated publish path takes the
+   default and offers no promotion, there being no operator to judge.
+
+   This is a withholding rule, which clause 3 otherwise forbids. The difference
+   is that nothing is withheld from the person who ran the review — the finding
+   is in `result.json`, in `report.md`, and named on their terminal. What is
+   withheld is the broadcast to other people, and only until one of those people
+   says otherwise.
+
+8. **The prompts teach the new field.** The envelope contract in
    `packages/execution/src/index.ts` and the four role prompts under
    `harnesses/code-review/prompts/` instruct agents to emit `evidence`. Until a
    model reliably does, clause 4 keeps its output visible rather than lost.
@@ -179,7 +204,7 @@ undermines the gate it feeds.
   accepted deliberately as a migration mechanism rather than a permanent shape.
   A later ADR should either promote unsubstantiated findings into the gate once
   emission is reliable, or record why they stay out.
-- Clause 2 leaves the envelope permissive, so a model that ignores clause 7
+- Clause 2 leaves the envelope permissive, so a model that ignores clause 8
   produces findings that are published-but-uncounted indefinitely, with no
   error. The signal for that is the unsubstantiated count in metadata, which is
   a metric someone has to look at rather than a failure someone cannot miss.

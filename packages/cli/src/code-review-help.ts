@@ -238,6 +238,7 @@ Posting interaction flags (with --pending-review):
   --no-confirm           Skip confirmation prompts around stale/heads or replacements
   --replace-pending-review Replace an existing pending review (explicit opt-in)
   --review-summary <id>  Summary body modes: triage | impact | evidence (default impact)
+  --include-unsubstantiated <ids> Publish findings marked unsubstantiated: comma-separated ids, or all (default: withheld)
 
 Backend / adapters:
 
@@ -306,6 +307,7 @@ Posting flags:
   --post-pr <number>     Alternate posting PR when differing from inferred/--pr pairing (rare)
   --pending-review       Accepted but ignored (post implies pending review semantics)
   --review-summary <id>  Summary body formatting: triage | impact | evidence (default impact)
+  --include-unsubstantiated <ids> Publish findings marked unsubstantiated: comma-separated ids, or all (default: withheld)
   --no-confirm           Skip interactive stale/consent prompts (recommended for CI)
   --replace-pending-review Explicitly opt in when replacing pending reviews
 

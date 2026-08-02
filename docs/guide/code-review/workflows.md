@@ -66,6 +66,15 @@ Creates an unsubmitted GitHub review on the target PR.
   stale postings require confirmation unless `--no-confirm` is set.
 - Use `--review-summary <triage|impact|evidence>` to choose the review body
   format (`impact` is the default).
+- Findings marked `unsubstantiated` are **not** posted. Those are findings the
+  run reported but did not count toward its status — either the reviewer did not
+  mark them `verified`, or they cite no `validation.evidence` (ADR 0019). They
+  remain in `result.json` and under "Reported but not counted" in `report.md`,
+  and the CLI names them on stderr when it withholds them.
+- To post one anyway, read it first, then re-run with
+  `--include-unsubstantiated <id>[,<id>...]` — or
+  `--include-unsubstantiated all` to publish every withheld finding. An id that
+  matches no finding in the result is an error rather than a silent skip.
 
 ### PR targeting
 

@@ -106,7 +106,7 @@ agents code-review inbox show --pr <n> [--repo owner/name] [--workspace <path>] 
 
 ```text
 agents code-review --pr <n> [--workspace <path>] [--repos-root <path>] [harness flags…]
-agents code-review post [--pr <n>] [--result <path>] [--workspace <path>] [--review-summary triage|impact|evidence] [--no-confirm]
+agents code-review post [--pr <n>] [--result <path>] [--workspace <path>] [--review-summary triage|impact|evidence] [--include-unsubstantiated <ids>|all] [--no-confirm]
 ```
 
 See **`agents code-review --help`** and **`agents code-review post --help`** for
@@ -226,6 +226,11 @@ before **`post`**.
   operator intends non-interactive publish (e.g. CI).
 - **`--review-summary`** controls summary formatting (**`triage`**,
   **`impact`**, **`evidence`**; default **`impact`**).
+- Findings marked **`unsubstantiated`** are withheld from the posted review and
+  named on stderr instead. They are in **`result.json`** and under "Reported but
+  not counted" in **`report.md`**. Promoting one is an **operator** decision:
+  read it, then re-run with **`--include-unsubstantiated <id>[,<id>...]`** (or
+  **`all`**). Agents must not promote findings on their own initiative.
 
 ## Optional: fzf picker with PR description preview
 

@@ -141,6 +141,28 @@ export async function loadStoredReviewResult(
   };
 }
 
+/**
+ * Read `--include-unsubstantiated`. An empty or whitespace-only value is a
+ * mistake rather than "promote nothing", so it returns undefined and the
+ * caller rejects it.
+ */
+export function parseIncludeUnsubstantiated(
+  value: string | undefined,
+): readonly string[] | "all" | undefined {
+  if (value === undefined) {
+    return [];
+  }
+  const trimmed = value.trim();
+  if (trimmed === "all") {
+    return "all";
+  }
+  const ids = trimmed
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+  return ids.length === 0 ? undefined : ids;
+}
+
 export function parseReviewSummaryStyle(
   value: string | undefined,
 ): ReviewSummaryStyle | undefined {
@@ -373,11 +395,98 @@ export interface ReplacePendingPullRequestReviewInput {
   /** From harness result metadata (result.json) for review coverage in the summary body. */
   readonly runMetadata?: Readonly<Record<string, string>>;
   readonly runId?: string;
+  /**
+   * Finding ids to publish despite being marked `unsubstantiated`, or `"all"`.
+   * Absent means none: an operator opts a finding in after reading it, and the
+   * automated publish path has no operator, so it takes the default.
+   */
+  readonly includeUnsubstantiated?: readonly string[] | "all";
+}
+
+/**
+ * Split findings into those the review may publish and those withheld for
+ * lacking substantiation (ADR 0019 §7).
+ *
+ * An inline review comment is a change request addressed to the author and
+ * read by everyone on the pull request. A finding the gate itself declines to
+ * count does not belong there unless a human has looked at it and decided
+ * otherwise — which is what the promotion list records.
+ */
+export function partitionForPublication(
+  findings: readonly Finding[],
+  include: readonly string[] | "all" | undefined,
+): {
+  readonly publishable: readonly Finding[];
+  readonly withheld: readonly Finding[];
+} {
+  const promoted = include === "all" ? undefined : new Set(include ?? []);
+  if (promoted !== undefined && promoted.size > 0) {
+    // Validated against the withheld findings, not all of them. Naming a
+    // substantiated id promotes nothing — it is already publishable — so
+    // accepting one would let a typo that happens to land on another finding
+    // pass preflight while the intended finding stays withheld and unmentioned.
+    const promotable = new Set(
+      findings
+        .filter((finding) => finding.unsubstantiated === true)
+        .map((finding) => finding.id),
+    );
+    const unknown = [...promoted].filter((id) => !promotable.has(id));
+    if (unknown.length > 0) {
+      throw new Error(
+        `--include-unsubstantiated names id(s) that are not withheld findings: ${unknown.join(", ")}.\n` +
+          `Withheld in this result: ${[...promotable].join(", ") || "(none)"}`,
+      );
+    }
+  }
+  const publishable: Finding[] = [];
+  const withheld: Finding[] = [];
+  for (const finding of findings) {
+    if (
+      finding.unsubstantiated !== true ||
+      promoted === undefined ||
+      promoted.has(finding.id)
+    ) {
+      publishable.push(finding);
+    } else {
+      withheld.push(finding);
+    }
+  }
+  return { publishable, withheld };
+}
+
+/**
+ * Say what was withheld, where to read it, and how to publish it. Printed for
+ * the operator rather than posted to the pull request: the point is that a
+ * person decides, and the person is here.
+ */
+function reportWithheldFindings(withheld: readonly Finding[]): void {
+  if (withheld.length === 0) {
+    return;
+  }
+  console.warn(
+    `Withheld ${withheld.length} unsubstantiated finding${withheld.length === 1 ? "" : "s"} from the review ` +
+      "(not verified, or citing no evidence):",
+  );
+  for (const finding of withheld) {
+    console.warn(`  - ${finding.id}: ${finding.title}`);
+  }
+  console.warn(
+    "Read them under \u201cReported but not counted\u201d in report.md. To publish, re-run with " +
+      "--include-unsubstantiated <id>[,<id>...] or --include-unsubstantiated all.",
+  );
 }
 
 export async function replacePendingPullRequestReview(
   input: ReplacePendingPullRequestReviewInput,
 ): Promise<PendingReviewPostResult> {
+  // Before any network call, so a mistyped promotion id fails immediately
+  // rather than after several round trips.
+  const { publishable, withheld } = partitionForPublication(
+    input.findings,
+    input.includeUnsubstantiated,
+  );
+  reportWithheldFindings(withheld);
+
   const workspacePath = resolveWorkspaceCwd(input.workspacePath);
   const repo = await getRepoNameWithOwner(workspacePath);
   const login = await getViewerLogin(workspacePath);
@@ -457,7 +566,7 @@ export async function replacePendingPullRequestReview(
   // Only pay the resolved-thread scan cost when we're actually replacing an
   // existing pending review. First-time pending review publishing should stay
   // lightweight.
-  let findings = input.findings;
+  let findings = publishable;
   if (pendingMine.length > 0) {
     if (!input.replacePendingReview) {
       const confirmed = await confirmReplacePendingReview({
