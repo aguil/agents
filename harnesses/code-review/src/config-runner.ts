@@ -23,6 +23,7 @@ import { FakeAgentAdapter } from "@aguil/agents-execution";
 import {
   applyFindingPipelines,
   filterEnabledRoles,
+  harnessDeclaresPolicy,
   type LoadedHarness,
   loadHarness,
   makePassGate,
@@ -204,6 +205,32 @@ export interface ConfigCodeReviewRunOptions {
 }
 
 /**
+ * Reject a harness whose `hooks` or `policy` this driver cannot honor (#156).
+ *
+ * Generating hook config is how policy is enforced, and this path accepts an
+ * arbitrary adapter, so there is nothing here to generate it against. Loading
+ * these keys and running anyway produced a review that looked policy-bound and
+ * was not — the failure mode a policy exists to prevent. `harness run` refuses
+ * the same way when its adapter cannot enforce.
+ */
+function assertEnforceableHere(loaded: LoadedHarness, agentsDir: string): void {
+  const declared = [
+    ...(Object.keys(loaded.hooks).length > 0 ? ["hooks"] : []),
+    ...(harnessDeclaresPolicy(loaded) ? ["policy"] : []),
+  ];
+  if (declared.length === 0) {
+    return;
+  }
+  throw new Error(
+    `code-review: harness declares ${declared.join(" and ")}, which this run cannot enforce ` +
+      "(hook config generation belongs to `agents harness run`, which owns the adapter). " +
+      `Remove ${declared.length === 1 ? "the key" : "those keys"} from ` +
+      `${join(agentsDir, "harnesses", CONFIG_HARNESS_ID, "harness.yaml")}, or run the harness through ` +
+      "`agents harness run code-review --adapter cursor`.",
+  );
+}
+
+/**
  * Config-driven code-review run (#73 Tier 1 pass condition): every
  * behavioral decision — providers, role gating, output schemas, finding
  * pipelines, report template — comes from the loaded harness.yaml and its
@@ -224,6 +251,7 @@ export async function runCodeReviewFromConfig(
     agentsDir: harnessSource.agentsDir,
     harnessId: CONFIG_HARNESS_ID,
   });
+  assertEnforceableHere(loaded, harnessSource.agentsDir);
   const runId = options.runId ?? createRunId("code-review");
   const scratchpadRoot = resolve(
     options.scratchpadRoot ?? agentsCodeReviewRunsRoot(workspacePath),

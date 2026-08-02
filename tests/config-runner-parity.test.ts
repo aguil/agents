@@ -290,6 +290,65 @@ test("a declared pass_check decides the run on the config path too", async () =>
   }
 });
 
+test("a harness this path cannot enforce is refused, not run inert", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-unenforceable-"));
+  try {
+    const agentsDir = join(workspacePath, "agents-dir");
+    const harnessDir = join(agentsDir, "harnesses", "code-review");
+    await mkdir(harnessDir, { recursive: true });
+    await mkdir(join(agentsDir, "policies"), { recursive: true });
+    await writeFile(
+      join(agentsDir, "policies", "readonly.yaml"),
+      [
+        "id: readonly",
+        "capabilities:",
+        "  filesystem:",
+        "    deny: ['**']",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const writeHarness = (extra: readonly string[]) =>
+      writeFile(
+        join(harnessDir, "harness.yaml"),
+        [
+          'spec_version: "0.4"',
+          "kind: harness",
+          "harness: { id: code-review }",
+          "roles:",
+          "  quality:",
+          "    description: Quality",
+          "    prompt: Review the change.",
+          "reporting: { template: builtin:code-review-markdown }",
+          ...extra,
+        ].join("\n"),
+        "utf8",
+      );
+    const run = () =>
+      runCodeReviewFromConfig({
+        agentsDir,
+        workspacePath,
+        runId: "code-review-unenforceable",
+        contextBundlePath,
+        adapter: scriptedAdapter({}),
+        scratchpadRoot: join(workspacePath, "configured"),
+      });
+
+    await writeHarness(["policy: readonly"]);
+    await expect(run()).rejects.toThrow("harness declares policy");
+
+    await writeHarness(["hooks:", "  pre_tool_call:", "    - command: 'true'"]);
+    await expect(run()).rejects.toThrow("harness declares hooks");
+
+    // The shipped harness declares neither, so the guard is not a change in
+    // behavior for anyone running the real thing.
+    await writeHarness([]);
+    expect((await run()).status).toBe("passed");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
 test("config-driven trivial tier schedules only quality", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-trivial-"));
   try {

@@ -187,6 +187,17 @@ export interface LoadedHarness {
   readonly harnessDir: string;
 }
 
+/**
+ * Whether the harness declares policy at either level. Policy enforcement is
+ * the hook mechanism, so a caller that cannot generate hook config cannot
+ * honor either key and has to say so rather than run inert.
+ */
+export function harnessDeclaresPolicy(loaded: LoadedHarness): boolean {
+  return (
+    loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0
+  );
+}
+
 export interface LoadHarnessOptions {
   /** Absolute or cwd-relative path to the `.agents/` directory. */
   readonly agentsDir: string;

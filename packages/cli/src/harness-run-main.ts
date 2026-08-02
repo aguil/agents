@@ -22,6 +22,7 @@ import type { LoadedHarness } from "@aguil/agents-harness-config";
 import {
   applyFindingPipelines,
   filterEnabledRoles,
+  harnessDeclaresPolicy,
   loadHarness,
   makePassGate,
   validateOutcomesAgainstSchemas,
@@ -147,12 +148,6 @@ async function writeCanonicalHooks(
   const tempPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
   await writeFile(tempPath, renderCursorHooksConfig(config));
   await rename(tempPath, finalPath);
-}
-
-function harnessDeclaresPolicy(loaded: LoadedHarness): boolean {
-  return (
-    loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0
-  );
 }
 
 /**
