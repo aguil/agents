@@ -10,8 +10,12 @@ hooks can tighten but never override a policy deny.
   allow
 - **Fail closed:** `evaluatePolicy` never throws; internal errors return `deny`
   with the reserved `policy-runtime-error` reason
-- **Confirmations:** `exec.unknown` and `filesystem.write` categories route to
-  `escalate` (approval path) instead of hard deny
+- **Confirmations:** `exec.unknown` and `filesystem.write` categories return
+  `escalate`, which the policy-eval bridge maps to hook `permission: "ask"`.
+  That only stops the tool call when the Cursor adapter is **not** passing
+  `--force` (ADR 0020). With `--force`, Cursor collapses `ask` into allow while
+  still honouring `deny` — so confirmation categories are inert under a forced
+  run. The safe default is force off plus `--sandbox enabled`.
 - **Hook adapter:** `createPolicyEvalHandler` speaks the hook JSON contract so
   the runtime can register it as the first handler per event
 

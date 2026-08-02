@@ -115,3 +115,7 @@ so it is upheld in review.
   the gate; the eleven-substring prose heuristic is deleted; spec increments to
   0.4, additive in format but not in behavior, partially superseding ADR 0015
   §4.
+- [0020-cursor-force-opt-in-and-sandbox-default.md](0020-cursor-force-opt-in-and-sandbox-default.md)
+  — ADR 0020: Cursor `--force` is opt-in; unforced runs default to
+  `--sandbox enabled` so hook `ask` / `exec.unknown` escalation remains
+  enforceable while policy-allowed writes still run (issue #159).

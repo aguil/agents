@@ -2760,6 +2760,63 @@ test("builds cursor command behind the adapter boundary", () => {
   expect(command.at(-1)).toContain("quality specialist");
 });
 
+test("cursor --force is opt-in; unforced default enables sandbox (#159)", () => {
+  const base = {
+    runId: "run-1",
+    roleId: "quality",
+    prompt: "Review this change.",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch/roles/quality",
+    timeoutMs: 1_000,
+    allowedCommands: ["bun test"],
+  } as const;
+  const requestPath = "/scratch/roles/quality/quality.request.json";
+
+  const omitted = buildCursorCommand(base, requestPath, {});
+  expect(omitted).not.toContain("--force");
+  expect(omitted).toContain("--sandbox");
+  expect(omitted).toContain("enabled");
+
+  const forceFalse = buildCursorCommand(base, requestPath, { force: false });
+  expect(forceFalse).not.toContain("--force");
+  expect(forceFalse).toContain("--sandbox");
+  expect(forceFalse).toContain("enabled");
+
+  const forceTrue = buildCursorCommand(base, requestPath, { force: true });
+  expect(forceTrue).toContain("--force");
+  expect(forceTrue).not.toContain("--sandbox");
+
+  const sandboxDisabled = buildCursorCommand(base, requestPath, {
+    sandbox: "disabled",
+  });
+  expect(sandboxDisabled).not.toContain("--force");
+  expect(sandboxDisabled).toContain("--sandbox");
+  expect(sandboxDisabled).toContain("disabled");
+});
+
+test("worker Cursor default follows the safe adapter posture (#159)", () => {
+  // createWorkflowAgentAdapter / createSubprocessAdapter pass no cursor
+  // options; this pins that empty options stay non-forcing.
+  const command = buildCursorCommand(
+    {
+      runId: "run-1",
+      roleId: "quality",
+      prompt: "Review this change.",
+      workspacePath: "/repo",
+      contextBundlePath: "/scratch/context.json",
+      scratchpadPath: "/scratch/roles/quality",
+      timeoutMs: 1_000,
+      allowedCommands: ["bun test"],
+    },
+    "/scratch/roles/quality/quality.request.json",
+    {},
+  );
+  expect(command).not.toContain("--force");
+  expect(command).toContain("--sandbox");
+  expect(command).toContain("enabled");
+});
+
 test("adds cursor --mode only for non-default modes", () => {
   const command = buildCursorCommand(
     {

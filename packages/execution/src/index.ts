@@ -970,8 +970,37 @@ export interface CursorAdapterOptions {
   readonly model?: string;
   readonly argsTemplate?: readonly string[];
   readonly mode?: "agent" | "plan" | "ask";
+  /**
+   * Pass Cursor's `--force` (auto-allow unless explicitly denied). Default
+   * off: an omitted flag must not collapse hook `ask` into allow (issue
+   * #159 / ADR 0020). Opt in only when the operator has stated a weaker
+   * posture.
+   */
   readonly force?: boolean;
+  /**
+   * Cursor `--sandbox` mode. When omitted and `force` is not true, defaults
+   * to `"enabled"` so policy-`allow` writes still run headlessly without
+   * `--force` (ADR 0020 §3.0). Explicit `"disabled"` turns that off.
+   */
   readonly sandbox?: "enabled" | "disabled";
+}
+
+/**
+ * Resolve the Cursor CLI approval flags from adapter options.
+ *
+ * `--force` only when `force === true`. Otherwise default `--sandbox enabled`
+ * so a hook `allow` can authorise non-read-only commands without defeating
+ * hook `ask` (measured on Cursor CLI `2026.07.23-e383d2b`; ADR 0020).
+ */
+export function resolveCursorApprovalFlags(
+  options: Pick<CursorAdapterOptions, "force" | "sandbox"> = {},
+): {
+  readonly force: boolean;
+  readonly sandbox: "enabled" | "disabled" | undefined;
+} {
+  const force = options.force === true;
+  const sandbox = options.sandbox ?? (force ? undefined : "enabled");
+  return { force, sandbox };
 }
 
 export class OpenCodeAdapter extends SubprocessAgentAdapter {
@@ -1232,6 +1261,7 @@ export function buildCursorCommand(
     prompt,
   };
 
+  const approval = resolveCursorApprovalFlags(options);
   const template = options.argsTemplate ?? [
     "--print",
     "--output-format",
@@ -1239,11 +1269,11 @@ export function buildCursorCommand(
     "--workspace",
     "{workspace}",
     "--trust",
-    ...(options.force === false ? [] : ["--force"]),
+    ...(approval.force ? ["--force"] : []),
     ...(options.mode !== undefined && options.mode !== "agent"
       ? ["--mode", options.mode]
       : []),
-    ...(options.sandbox !== undefined ? ["--sandbox", options.sandbox] : []),
+    ...(approval.sandbox !== undefined ? ["--sandbox", approval.sandbox] : []),
     ...(options.model !== undefined ? ["--model", "{model}"] : []),
     "{prompt}",
   ];

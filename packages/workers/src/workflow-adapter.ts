@@ -14,5 +14,8 @@ export function createWorkflowAgentAdapter(
   if (name === "fake") {
     return createFakeCodeReviewAdapter();
   }
+  // Deliberate (issue #159 / ADR 0020): no Cursor force opt-in. Passing no
+  // options adopts the safe adapter default (force off, sandbox enabled).
+  // Do not restore `{ force: true }` here without an explicit operator surface.
   return createCodeReviewAdapter(name);
 }

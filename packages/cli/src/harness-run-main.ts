@@ -11,12 +11,16 @@ import {
   isReviewTriageTier,
   writeJsonFile,
 } from "@aguil/agents-core";
-import type { AgentAdapter } from "@aguil/agents-execution";
+import type {
+  AgentAdapter,
+  CursorAdapterOptions,
+} from "@aguil/agents-execution";
 import {
   ClaudeCodeAdapter,
   CursorAdapter,
   FakeAgentAdapter,
   OpenCodeAdapter,
+  resolveCursorApprovalFlags,
 } from "@aguil/agents-execution";
 import type { LoadedHarness } from "@aguil/agents-harness-config";
 import {
@@ -51,12 +55,15 @@ interface HarnessRunArgs {
   readonly agentsCli?: string;
   readonly strict: boolean;
   readonly allowUnenforcedPolicy: boolean;
+  /** Opt into Cursor `--force` (issue #159 / ADR 0020). Default off. */
+  readonly forceToolCalls: boolean;
 }
 
 const USAGE = `Usage: agents harness run <id> --agents-dir <dir> --workspace <path>
                         [--adapter cursor|claude|opencode|fake]
                         [--agents-cli <cmd>] [--strict]
                         [--allow-unenforced-policy]
+                        [--force-tool-calls]
 
 Run a harness declared under <agents-dir>/harnesses/<id>.
 
@@ -71,6 +78,9 @@ Optional:
   --strict                 Fail the run on schema / enablement violations
   --allow-unenforced-policy
                            Permit adapters that cannot enforce a declared policy
+  --force-tool-calls       Pass Cursor --force (auto-allow unless denied).
+                           Defeats hook ask / exec.unknown escalation; prefer
+                           the default (sandbox enabled, force off).
 
 See also: agents harness --help  (install packaged harnesses)`;
 
@@ -85,6 +95,7 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
   let agentsCli: string | undefined;
   let strict = false;
   let allowUnenforcedPolicy = false;
+  let forceToolCalls = false;
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === "--agents-dir") {
@@ -103,6 +114,8 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
       strict = true;
     } else if (arg === "--allow-unenforced-policy") {
       allowUnenforcedPolicy = true;
+    } else if (arg === "--force-tool-calls") {
+      forceToolCalls = true;
     } else {
       return `harness run: unknown argument "${arg}"\n${USAGE}`;
     }
@@ -118,13 +131,28 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
     agentsCli,
     strict,
     allowUnenforcedPolicy,
+    forceToolCalls,
   };
 }
 
-function constructAdapter(name: AdapterName): AgentAdapter {
+/**
+ * Cursor options for `harness run`. Default is force off + sandbox enabled
+ * (via adapter defaults). `--force-tool-calls` is the explicit weaker posture
+ * (issue #159 / ADR 0020).
+ */
+export function cursorOptionsForHarnessRun(
+  forceToolCalls: boolean,
+): CursorAdapterOptions {
+  return forceToolCalls ? { force: true } : {};
+}
+
+function constructAdapter(
+  name: AdapterName,
+  forceToolCalls: boolean,
+): AgentAdapter {
   switch (name) {
     case "cursor":
-      return new CursorAdapter({ force: true });
+      return new CursorAdapter(cursorOptionsForHarnessRun(forceToolCalls));
     case "claude":
       return new ClaudeCodeAdapter({});
     case "opencode":
@@ -291,6 +319,22 @@ export async function runHarnessRunCli(
   const onRoleStart = enforcement.onRoleStart;
   const roleEnv = enforcement.roleEnv;
 
+  if (parsed.forceToolCalls) {
+    // Same audibility bar as --allow-unenforced-policy: weakening the Cursor
+    // approval posture must be stated on stderr, not inherited quietly.
+    if (harnessDeclaresPolicy(loaded)) {
+      console.warn(
+        "harness run: --force-tool-calls collapses hook ask into allow and " +
+          "defeats confirmations.requiredFor escalation (exec.unknown / " +
+          "filesystem.write) despite a declared policy (issue #159)",
+      );
+    } else {
+      console.warn(
+        "harness run: --force-tool-calls passes Cursor --force (auto-allow unless denied)",
+      );
+    }
+  }
+
   const workspacePath = resolve(parsed.workspace);
   const runId = createRunId(`harness-${parsed.harnessId}`);
   const scratchpadPath = join(workspacePath, ".agents-harness", "runs", runId);
@@ -368,7 +412,7 @@ export async function runHarnessRunCli(
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
-    adapter: constructAdapter(parsed.adapter),
+    adapter: constructAdapter(parsed.adapter, parsed.forceToolCalls),
     contextBundlePath,
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),
@@ -376,12 +420,27 @@ export async function runHarnessRunCli(
     ...(validateRoleOutcomes === undefined ? {} : { validateRoleOutcomes }),
   });
 
+  const cursorApproval =
+    parsed.adapter === "cursor"
+      ? resolveCursorApprovalFlags(
+          cursorOptionsForHarnessRun(parsed.forceToolCalls),
+        )
+      : undefined;
+
   const result = await orchestrator.run({
     runId,
     harnessId: parsed.harnessId,
     workspacePath,
     scratchpadPath,
     strictMode: parsed.strict,
+    ...(cursorApproval === undefined
+      ? {}
+      : {
+          metadata: {
+            cursor_force: cursorApproval.force ? "true" : "false",
+            cursor_sandbox: cursorApproval.sandbox ?? "",
+          },
+        }),
   });
 
   // Declared pipelines shape the reported findings the same way the
