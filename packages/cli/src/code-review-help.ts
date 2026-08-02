@@ -1,6 +1,19 @@
 /**
  * Contextual --help/-h for `agents code-review` (+ overview when no argv).
+ *
+ * Top-level commands that already print their own usage must return null here
+ * so `main` can dispatch to them. Otherwise `agents <cmd> --help` is swallowed
+ * as an "unknown" overview (issue #160). Only list commands whose handlers
+ * treat `--help`/`-h` as usage (exit 0); `hooks` and `policy-eval` still
+ * reject those flags, so they stay on the overview path until they grow help.
  */
+const TOP_LEVEL_COMMANDS_WITH_OWN_HELP = new Set([
+  "doctor",
+  "skills",
+  "triage",
+  "harness",
+  "pr-feedback",
+]);
 
 /** Return `null` to continue normal CLI execution. */
 export type CodeReviewHelpRequest =
@@ -57,6 +70,8 @@ export function resolveCodeReviewHelp(
     rest = rest.slice(2);
   } else if (rest[0] === "code-review") {
     rest = rest.slice(1);
+  } else if (TOP_LEVEL_COMMANDS_WITH_OWN_HELP.has(rest[0] ?? "")) {
+    return null;
   } else {
     return { kind: "overview", unknownFirstToken: rest[0] };
   }
@@ -180,6 +195,8 @@ Getting help (context-specific option lists):
 
   agents triage --help                     Normalize triage queues from producer output
   agents pr-feedback --help                Collect PR review threads / submit replies (author)
+  agents harness --help                    Install packaged harnesses
+  agents harness run --help                Run a declared harness
 
   agents doctor --help                     Check agents semver vs bundled docs/skills playbooks
   agents skills --help                     List or install Agent Skills playbooks (docs/skills/)
@@ -196,6 +213,7 @@ Commands:
   code-review inbox <cmd> [options]     List/show/draft/submit human PR reviews (GitHub)
   triage [options]                       Build triage-queue files (--from producer; code-review today)
   harness install code-review            Install packaged config harness into ~/.agents
+  harness run <id> …                     Run a harness declared under --agents-dir
   doctor                                 Verify agents --version vs docs/skills minAgentsVersion
   skills <command>                       List or install playbooks from docs/skills/`;
 }

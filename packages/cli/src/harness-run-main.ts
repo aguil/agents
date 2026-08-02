@@ -56,7 +56,23 @@ interface HarnessRunArgs {
 const USAGE = `Usage: agents harness run <id> --agents-dir <dir> --workspace <path>
                         [--adapter cursor|claude|opencode|fake]
                         [--agents-cli <cmd>] [--strict]
-                        [--allow-unenforced-policy]`;
+                        [--allow-unenforced-policy]
+
+Run a harness declared under <agents-dir>/harnesses/<id>.
+
+Required:
+  <id>                     Harness id
+  --agents-dir <dir>       Directory containing harnesses/ (and policies/)
+  --workspace <path>       Workspace the harness operates on
+
+Optional:
+  --adapter <name>         cursor (default) | claude | opencode | fake
+  --agents-cli <cmd>       agents CLI used by generated hooks (default: agents)
+  --strict                 Fail the run on schema / enablement violations
+  --allow-unenforced-policy
+                           Permit adapters that cannot enforce a declared policy
+
+See also: agents harness --help  (install packaged harnesses)`;
 
 function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
   const [harnessId, ...rest] = argv;
@@ -244,6 +260,10 @@ export function roleEffectivePolicyId(
 export async function runHarnessRunCli(
   argv: readonly string[],
 ): Promise<number> {
+  if (argv.some((t) => t === "--help" || t === "-h")) {
+    console.log(USAGE);
+    return 0;
+  }
   const parsed = parseHarnessRunArgv(argv);
   if (typeof parsed === "string") {
     console.error(parsed);

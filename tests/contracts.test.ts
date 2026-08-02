@@ -329,6 +329,19 @@ test("resolveCodeReviewHelp maps contextual help scopes", () => {
     kind: "run_replay",
     legacyRunSpelling: true,
   });
+  expect(resolveCodeReviewHelp(["harness", "run", "--help"])).toBeNull();
+  expect(resolveCodeReviewHelp(["harness", "--help"])).toBeNull();
+  expect(resolveCodeReviewHelp(["pr-feedback", "--help"])).toBeNull();
+  // hooks / policy-eval still reject --help; keep them on the overview path
+  // until those handlers grow usage (see quality-own-help-allowlist-without-handlers).
+  expect(resolveCodeReviewHelp(["hooks", "test", "--help"])).toEqual({
+    kind: "overview",
+    unknownFirstToken: "hooks",
+  });
+  expect(resolveCodeReviewHelp(["policy-eval", "--help"])).toEqual({
+    kind: "overview",
+    unknownFirstToken: "policy-eval",
+  });
 });
 
 test("codeReviewHelpStderrExtras surfaces unknown command hints", () => {
@@ -4139,7 +4152,7 @@ test("agents triage --stdout --format json prints envelope", async () => {
   }
 });
 
-test("code-review overview help mentions agents triage, doctor, and skills", () => {
+test("code-review overview help mentions agents triage, doctor, skills, and harness", () => {
   const overview = resolveCodeReviewHelp([]);
   expect(overview).not.toBeNull();
   if (overview !== null && overview.kind === "overview") {
@@ -4150,5 +4163,7 @@ test("code-review overview help mentions agents triage, doctor, and skills", () 
     expect(rendered).toContain("agents doctor --help");
     expect(rendered).toContain("agents skills --help");
     expect(rendered).toContain("skills <command>");
+    expect(rendered).toContain("agents harness run --help");
+    expect(rendered).toContain("harness run <id>");
   }
 });
