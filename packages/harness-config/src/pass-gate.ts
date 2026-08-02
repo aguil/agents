@@ -24,11 +24,14 @@ export function makePassGate(
   }
   const command = execution.passCheck;
   return async () => {
+    // Output is unused for the pass/fail decision. Piping without draining
+    // stalls both sides once the OS pipe buffer fills (realistic gates print
+    // a lot), so ignore rather than pipe.
     const proc = Bun.spawn({
       cmd: [...command],
       cwd: workspacePath,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdout: "ignore",
+      stderr: "ignore",
     });
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
