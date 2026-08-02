@@ -980,7 +980,7 @@ export interface CursorAdapterOptions {
   /**
    * Cursor `--sandbox` mode. When omitted and `force` is not true, defaults
    * to `"enabled"` so policy-`allow` writes still run headlessly without
-   * `--force` (ADR 0020 §3.0). Explicit `"disabled"` turns that off.
+   * `--force` (ADR 0020 Decision §2). Explicit `"disabled"` turns that off.
    */
   readonly sandbox?: "enabled" | "disabled";
 }
