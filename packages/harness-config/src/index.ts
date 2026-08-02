@@ -21,6 +21,7 @@ export {
   applyFindingPipelines,
   validateOutcomesAgainstSchemas,
 } from "./output-pipeline";
+export { makePassGate } from "./pass-gate";
 export type { JsonSchema } from "./schema-validation";
 export {
   findAllSchemaViolations,
@@ -184,6 +185,17 @@ export interface LoadedHarness {
   readonly reportingTemplate?: ReportTemplateName;
   /** Directory containing harness.yaml (prompt paths resolve against it). */
   readonly harnessDir: string;
+}
+
+/**
+ * Whether the harness declares policy at either level. Policy enforcement is
+ * the hook mechanism, so a caller that cannot generate hook config cannot
+ * honor either key and has to say so rather than run inert.
+ */
+export function harnessDeclaresPolicy(loaded: LoadedHarness): boolean {
+  return (
+    loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0
+  );
 }
 
 export interface LoadHarnessOptions {

@@ -23,8 +23,10 @@ import { FakeAgentAdapter } from "@aguil/agents-execution";
 import {
   applyFindingPipelines,
   filterEnabledRoles,
+  harnessDeclaresPolicy,
   type LoadedHarness,
   loadHarness,
+  makePassGate,
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
@@ -203,6 +205,90 @@ export interface ConfigCodeReviewRunOptions {
 }
 
 /**
+ * Reject a harness whose `hooks` or `policy` this driver cannot honor (#156).
+ *
+ * Generating hook config is how policy is enforced, and this path accepts an
+ * arbitrary adapter, so there is nothing here to generate it against. Loading
+ * these keys and running anyway produced a review that looked policy-bound and
+ * was not — the failure mode a policy exists to prevent. `harness run` refuses
+ * the same way when its adapter cannot enforce.
+ */
+function assertEnforceableHere(loaded: LoadedHarness, agentsDir: string): void {
+  const declared = [
+    ...(Object.keys(loaded.hooks).length > 0 ? ["hooks"] : []),
+    ...(harnessDeclaresPolicy(loaded) ? ["policy"] : []),
+  ];
+  if (declared.length === 0) {
+    return;
+  }
+  throw new Error(
+    `code-review: harness declares ${declared.join(" and ")}, which this run cannot enforce ` +
+      "(hook config generation belongs to `agents harness run`, which owns the adapter). " +
+      `Remove ${declared.length === 1 ? "the key" : "those keys"} from ` +
+      `${join(agentsDir, "harnesses", CONFIG_HARNESS_ID, "harness.yaml")}, or run the harness through ` +
+      "`agents harness run code-review --adapter cursor`.",
+  );
+}
+
+/**
+ * Refuse workspace-sourced harness declarations that execute host argv or
+ * flip status without a trusted gate.
+ *
+ * Resolution prefers `<workspace>/.agents` before user-global and package. For
+ * `agents code-review --pr` that workspace is the detached PR worktree, so a
+ * PR that plants `execution` (including `pass_check`), or a `shell-command`
+ * context provider, would otherwise run arbitrary argv on the reviewer's host
+ * or greenwash run status to findings-blind `passed` (findings
+ * `security-pass-check-workspace-harness-rce`,
+ * `security-workspace-shell-command-rce`,
+ * `quality-workspace-execution-blinds-status`). Package, user-global, and
+ * explicit `--agents-dir` sources remain trusted.
+ */
+function assertTrustedHostExec(
+  loaded: LoadedHarness,
+  source: ConfigHarnessSourceKind,
+  agentsDir: string,
+): void {
+  if (source !== "workspace") {
+    return;
+  }
+  const harnessPath = join(
+    agentsDir,
+    "harnesses",
+    CONFIG_HARNESS_ID,
+    "harness.yaml",
+  );
+  if (loaded.definition.execution !== undefined) {
+    throw new Error(
+      "code-review: harness declares `execution`, but the harness was loaded " +
+        "from the workspace `.agents` tree, which is untrusted " +
+        "(a `--pr` worktree can supply it). An `execution` block flips status " +
+        "to findings-blind and may run `pass_check` argv on the host. Remove " +
+        `\`execution\` from ${harnessPath}, install the harness with ` +
+        "`agents harness install code-review`, or pass `--agents-dir` pointing " +
+        "at a trusted `.agents` tree.",
+    );
+  }
+  const shellProviders = (loaded.contextProviders ?? []).filter(
+    (provider) => provider.use === "shell-command",
+  );
+  if (shellProviders.length > 0) {
+    const ids = shellProviders.map((provider) => {
+      const id = provider.params.id;
+      return typeof id === "string" && id.length > 0 ? id : "(unnamed)";
+    });
+    throw new Error(
+      "code-review: harness declares context.providers shell-command " +
+        `(${ids.join(", ")}), but the harness was loaded from the workspace ` +
+        "`.agents` tree, which is untrusted (a `--pr` worktree can supply it). " +
+        `Remove those providers from ${harnessPath}, install the harness with ` +
+        "`agents harness install code-review`, or pass `--agents-dir` pointing " +
+        "at a trusted `.agents` tree.",
+    );
+  }
+}
+
+/**
  * Config-driven code-review run (#73 Tier 1 pass condition): every
  * behavioral decision — providers, role gating, output schemas, finding
  * pipelines, report template — comes from the loaded harness.yaml and its
@@ -223,6 +309,8 @@ export async function runCodeReviewFromConfig(
     agentsDir: harnessSource.agentsDir,
     harnessId: CONFIG_HARNESS_ID,
   });
+  assertEnforceableHere(loaded, harnessSource.agentsDir);
+  assertTrustedHostExec(loaded, harnessSource.source, harnessSource.agentsDir);
   const runId = options.runId ?? createRunId("code-review");
   const scratchpadRoot = resolve(
     options.scratchpadRoot ?? agentsCodeReviewRunsRoot(workspacePath),
@@ -263,11 +351,30 @@ export async function runCodeReviewFromConfig(
   const enablement = filterEnabledRoles(loaded.definition, { tier: triage });
   const definition = {
     ...enablement.definition,
-    defaultAllowedCommands: defaultCommandsForVcsMode(vcsMode),
+    // Union, because the two lists answer different questions and neither may
+    // erase the other (#156). The declared list is what the harness author
+    // wants roles to be able to run; the VCS-derived one is capability
+    // discovery — `jj diff` exists in a jj workspace and not in a git one.
+    // Overwriting used to drop the declared list entirely.
+    defaultAllowedCommands: [
+      ...new Set([
+        ...(enablement.definition.defaultAllowedCommands ?? []),
+        ...defaultCommandsForVcsMode(vcsMode),
+      ]),
+    ],
   };
 
   const adapter = options.adapter ?? new FakeAgentAdapter();
   const outputSchemas = loaded.outputSchemas;
+  // `pass_check` belongs to the document, not to the driver that reads it, so
+  // it has to take effect here exactly as it does under `harness run` (#156) —
+  // but only after `assertTrustedHostExec` has refused workspace-sourced
+  // declarations that would execute host argv (a `--pr` worktree must not get
+  // RCE by planting `pass_check` or a `shell-command` provider). Trusted
+  // sources (package, user-global, explicit `--agents-dir`) still run the
+  // command in `workspacePath`, which for a `--pr` run is the detached
+  // worktree — checking the PR's own code is the point, not an accident.
+  const passGate = makePassGate(definition.execution, workspacePath);
   const fileEventSink = new JsonlFileEventSink(
     join(scratchpadPath, "events.jsonl"),
   );
@@ -284,6 +391,7 @@ export async function runCodeReviewFromConfig(
             },
           },
     contextBundlePath: writtenContext.jsonPath,
+    ...(passGate === undefined ? {} : { passGate }),
     ...(outputSchemas === undefined
       ? {}
       : {

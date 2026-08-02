@@ -133,10 +133,13 @@ Since **0.5.0** there is one code-review implementation: the declarative
 
 **This matters for review assignments:** the workspace layer wins, so a clone
 whose own **`.agents/harnesses/code-review/harness.yaml`** exists reviews
-**itself with its own prompts, roles, and policy**. That is intended for
-repositories that maintain a harness, but treat it as untrusted input on a PR
-from a fork or an unfamiliar repo—the PR branch can change that file. When the
-operator wants the harness they trust regardless of workspace:
+**itself with its own prompts and roles**. Declared **`hooks`**, **`policy`**,
+**`execution`** (including **`pass_check`**), and **`shell-command`** context
+providers are **refused** from that workspace tree (they would otherwise run on
+the reviewer's host, greenwash run status, or look enforced when they are
+not)—see the configuration guide. Treat the workspace harness as untrusted input
+on a PR from a fork or an unfamiliar repo—the PR branch can change that file.
+When the operator wants the harness they trust regardless of workspace:
 
 ```text
 agents harness install code-review            # writes ~/.agents/… (prompts before overwriting)

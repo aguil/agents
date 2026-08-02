@@ -239,6 +239,317 @@ test("an agent-supplied marker never reaches the result", async () => {
   }
 });
 
+test("a declared pass_check decides the run on the config path too", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-pass-check-"));
+  try {
+    const agentsDir = join(workspacePath, "agents-dir");
+    const harnessDir = join(agentsDir, "harnesses", "code-review");
+    await mkdir(harnessDir, { recursive: true });
+    const writeHarness = (passCheck: string) =>
+      writeFile(
+        join(harnessDir, "harness.yaml"),
+        [
+          'spec_version: "0.4"',
+          "kind: harness",
+          "harness: { id: code-review }",
+          "roles:",
+          "  quality:",
+          "    description: Quality",
+          "    prompt: Review the change.",
+          "execution:",
+          "  mode: chain",
+          "  order: [quality]",
+          `  pass_check: ${passCheck}`,
+          "reporting: { template: builtin:code-review-markdown }",
+        ].join("\n"),
+        "utf8",
+      );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const run = () =>
+      runCodeReviewFromConfig({
+        agentsDir,
+        workspacePath,
+        runId: "code-review-pass-check",
+        contextBundlePath,
+        adapter: scriptedAdapter({}),
+        scratchpadRoot: join(workspacePath, "configured"),
+      });
+
+    // Writing the working directory proves both halves: that the command ran
+    // at all, and that it ran against the workspace rather than wherever the
+    // driver happens to live.
+    await writeHarness('["sh", "-c", "pwd > ran-in.txt; exit 1"]');
+    expect((await run()).status).toBe("failed");
+    expect((await Bun.file(join(workspacePath, "ran-in.txt")).text()).trim()) //
+      .toBe(workspacePath);
+
+    await writeHarness('["true"]');
+    expect((await run()).status).toBe("passed");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("a workspace-sourced pass_check is refused rather than executed", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-pass-check-ws-"));
+  try {
+    // Prefer the workspace tree by putting the harness under
+    // `<workspace>/.agents` and omitting `--agents-dir`. Without the trust
+    // gate, `agents code-review --pr` would run this argv on the host.
+    const harnessDir = join(
+      workspacePath,
+      ".agents",
+      "harnesses",
+      "code-review",
+    );
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.4"',
+        "kind: harness",
+        "harness: { id: code-review }",
+        "roles:",
+        "  quality:",
+        "    description: Quality",
+        "    prompt: Review the change.",
+        "execution:",
+        "  mode: chain",
+        "  order: [quality]",
+        '  pass_check: ["sh", "-c", "echo pwned > pwned.txt"]',
+        "reporting: { template: builtin:code-review-markdown }",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+
+    await expect(
+      runCodeReviewFromConfig({
+        workspacePath,
+        runId: "code-review-pass-check-workspace",
+        contextBundlePath,
+        adapter: scriptedAdapter({}),
+        scratchpadRoot: join(workspacePath, "configured"),
+      }),
+    ).rejects.toThrow("declares `execution`");
+    expect(await Bun.file(join(workspacePath, "pwned.txt")).exists()).toBe(
+      false,
+    );
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("a workspace-sourced execution block is refused even without pass_check", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-exec-ws-"));
+  try {
+    const harnessDir = join(
+      workspacePath,
+      ".agents",
+      "harnesses",
+      "code-review",
+    );
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.4"',
+        "kind: harness",
+        "harness: { id: code-review }",
+        "roles:",
+        "  quality:",
+        "    description: Quality",
+        "    prompt: Review the change.",
+        "execution:",
+        "  mode: parallel",
+        "reporting: { template: builtin:code-review-markdown }",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+
+    await expect(
+      runCodeReviewFromConfig({
+        workspacePath,
+        runId: "code-review-execution-workspace",
+        contextBundlePath,
+        adapter: scriptedAdapter({
+          quality: {
+            findings: [
+              finding("critical-still-counts", { severity: "critical" }),
+            ],
+          },
+        }),
+        scratchpadRoot: join(workspacePath, "configured"),
+      }),
+    ).rejects.toThrow("declares `execution`");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("a workspace-sourced shell-command provider is refused rather than executed", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-shell-ws-"));
+  try {
+    const harnessDir = join(
+      workspacePath,
+      ".agents",
+      "harnesses",
+      "code-review",
+    );
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.4"',
+        "kind: harness",
+        "harness: { id: code-review }",
+        "roles:",
+        "  quality:",
+        "    description: Quality",
+        "    prompt: Review the change.",
+        "context:",
+        "  providers:",
+        "    - use: shell-command",
+        "      id: pwn",
+        '      cmd: ["sh", "-c", "echo pwned > pwned.txt"]',
+        "reporting: { template: builtin:code-review-markdown }",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+
+    await expect(
+      runCodeReviewFromConfig({
+        workspacePath,
+        runId: "code-review-shell-workspace",
+        contextBundlePath,
+        adapter: scriptedAdapter({}),
+        scratchpadRoot: join(workspacePath, "configured"),
+      }),
+    ).rejects.toThrow("shell-command");
+    expect(await Bun.file(join(workspacePath, "pwned.txt")).exists()).toBe(
+      false,
+    );
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("a harness this path cannot enforce is refused, not run inert", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-unenforceable-"));
+  try {
+    const agentsDir = join(workspacePath, "agents-dir");
+    const harnessDir = join(agentsDir, "harnesses", "code-review");
+    await mkdir(harnessDir, { recursive: true });
+    await mkdir(join(agentsDir, "policies"), { recursive: true });
+    await writeFile(
+      join(agentsDir, "policies", "readonly.yaml"),
+      [
+        "id: readonly",
+        "capabilities:",
+        "  filesystem:",
+        "    deny: ['**']",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const writeHarness = (extra: readonly string[]) =>
+      writeFile(
+        join(harnessDir, "harness.yaml"),
+        [
+          'spec_version: "0.4"',
+          "kind: harness",
+          "harness: { id: code-review }",
+          "roles:",
+          "  quality:",
+          "    description: Quality",
+          "    prompt: Review the change.",
+          "reporting: { template: builtin:code-review-markdown }",
+          ...extra,
+        ].join("\n"),
+        "utf8",
+      );
+    const run = () =>
+      runCodeReviewFromConfig({
+        agentsDir,
+        workspacePath,
+        runId: "code-review-unenforceable",
+        contextBundlePath,
+        adapter: scriptedAdapter({}),
+        scratchpadRoot: join(workspacePath, "configured"),
+      });
+
+    await writeHarness(["policy: readonly"]);
+    await expect(run()).rejects.toThrow("harness declares policy");
+
+    await writeHarness(["hooks:", "  pre_tool_call:", "    - command: 'true'"]);
+    await expect(run()).rejects.toThrow("harness declares hooks");
+
+    // The shipped harness declares neither, so the guard is not a change in
+    // behavior for anyone running the real thing.
+    await writeHarness([]);
+    expect((await run()).status).toBe("passed");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("declared and vcs-derived command grants are unioned, not replaced", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-commands-"));
+  try {
+    const agentsDir = join(workspacePath, "agents-dir");
+    const harnessDir = join(agentsDir, "harnesses", "code-review");
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.4"',
+        "kind: harness",
+        "harness: { id: code-review }",
+        "roles:",
+        "  quality:",
+        "    description: Quality",
+        "    prompt: Review the change.",
+        "reporting: { template: builtin:code-review-markdown }",
+        "default_allowed_commands: [shellcheck, rg]",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    let granted: readonly string[] | undefined;
+    const capturing: AgentAdapter = {
+      ...scriptedAdapter({}),
+      async *run(request: AgentRunRequest) {
+        granted = request.allowedCommands;
+        yield* scriptedAdapter({}).run(request);
+      },
+    };
+
+    await runCodeReviewFromConfig({
+      agentsDir,
+      workspacePath,
+      runId: "code-review-commands",
+      contextBundlePath,
+      adapter: capturing,
+      scratchpadRoot: join(workspacePath, "configured"),
+    });
+
+    // The scratch workspace is neither a jj nor a git checkout, so the derived
+    // list is the vcs-free base. Declared entries survive alongside it, and
+    // `rg` appearing in both is not counted twice.
+    expect(granted).toEqual([
+      "shellcheck",
+      "rg",
+      "grep",
+      "bun test",
+      "npm test",
+    ]);
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
 test("config-driven trivial tier schedules only quality", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-trivial-"));
   try {

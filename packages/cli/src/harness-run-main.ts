@@ -22,7 +22,9 @@ import type { LoadedHarness } from "@aguil/agents-harness-config";
 import {
   applyFindingPipelines,
   filterEnabledRoles,
+  harnessDeclaresPolicy,
   loadHarness,
+  makePassGate,
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
 import {
@@ -148,12 +150,6 @@ async function writeCanonicalHooks(
   await rename(tempPath, finalPath);
 }
 
-function harnessDeclaresPolicy(loaded: LoadedHarness): boolean {
-  return (
-    loaded.policy !== undefined || Object.keys(loaded.rolePolicies).length > 0
-  );
-}
-
 /**
  * Set up policy enforcement for this run (ADR 0008).
  *
@@ -235,42 +231,6 @@ function triageTierFromArtifacts(
   return content !== undefined && isReviewTriageTier(content)
     ? content
     : undefined;
-}
-
-/**
- * Build the orchestrator pass gate from `execution.pass_check`: run the
- * command in the workspace after roles complete; exit 0 => passed. Runtime-
- * evaluated so agent output cannot decide status. Undefined when the harness
- * declares no pass_check.
- */
-function makePassGate(
-  loaded: LoadedHarness,
-  workspacePath: string,
-): (() => Promise<boolean>) | undefined {
-  const execution = loaded.definition.execution;
-  if (
-    execution === undefined ||
-    execution.mode !== "chain" ||
-    execution.passCheck === undefined
-  ) {
-    return undefined;
-  }
-  const command = execution.passCheck;
-  return async () => {
-    const proc = Bun.spawn({
-      cmd: [...command],
-      cwd: workspacePath,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const exitCode = await proc.exited;
-    if (exitCode !== 0) {
-      console.warn(
-        `harness run: pass_check "${command.join(" ")}" exited ${exitCode}; run FAILED`,
-      );
-    }
-    return exitCode === 0;
-  };
 }
 
 /** Effective policy id for a role: role override, else harness default. */
@@ -378,7 +338,7 @@ export async function runHarnessRunCli(
     return 1;
   }
 
-  const passGate = makePassGate(loaded, workspacePath);
+  const passGate = makePassGate(loaded.definition.execution, workspacePath);
   const outputSchemas = loaded.outputSchemas;
   const validateRoleOutcomes =
     outputSchemas === undefined
