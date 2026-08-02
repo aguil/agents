@@ -231,6 +231,40 @@ function assertEnforceableHere(loaded: LoadedHarness, agentsDir: string): void {
 }
 
 /**
+ * Refuse `execution.pass_check` from a workspace-sourced harness.
+ *
+ * Resolution prefers `<workspace>/.agents` before user-global and package. For
+ * `agents code-review --pr` that workspace is the detached PR worktree, so a
+ * PR that plants a `pass_check` would otherwise run arbitrary argv on the
+ * reviewer's host with a full inherited environment (finding
+ * `security-pass-check-workspace-harness-rce`). Package, user-global, and
+ * explicit `--agents-dir` sources remain trusted and still honor the gate.
+ */
+function assertTrustedPassCheck(
+  loaded: LoadedHarness,
+  source: ConfigHarnessSourceKind,
+  agentsDir: string,
+): void {
+  const execution = loaded.definition.execution;
+  if (
+    source !== "workspace" ||
+    execution === undefined ||
+    execution.mode !== "chain" ||
+    execution.passCheck === undefined
+  ) {
+    return;
+  }
+  throw new Error(
+    "code-review: harness declares execution.pass_check, but the harness was " +
+      "loaded from the workspace `.agents` tree, which is untrusted " +
+      "(a `--pr` worktree can supply it). Remove `pass_check` from " +
+      `${join(agentsDir, "harnesses", CONFIG_HARNESS_ID, "harness.yaml")}, ` +
+      "install the harness with `agents harness install code-review`, or pass " +
+      "`--agents-dir` pointing at a trusted `.agents` tree.",
+  );
+}
+
+/**
  * Config-driven code-review run (#73 Tier 1 pass condition): every
  * behavioral decision — providers, role gating, output schemas, finding
  * pipelines, report template — comes from the loaded harness.yaml and its
@@ -252,6 +286,7 @@ export async function runCodeReviewFromConfig(
     harnessId: CONFIG_HARNESS_ID,
   });
   assertEnforceableHere(loaded, harnessSource.agentsDir);
+  assertTrustedPassCheck(loaded, harnessSource.source, harnessSource.agentsDir);
   const runId = options.runId ?? createRunId("code-review");
   const scratchpadRoot = resolve(
     options.scratchpadRoot ?? agentsCodeReviewRunsRoot(workspacePath),
@@ -308,8 +343,11 @@ export async function runCodeReviewFromConfig(
   const adapter = options.adapter ?? new FakeAgentAdapter();
   const outputSchemas = loaded.outputSchemas;
   // `pass_check` belongs to the document, not to the driver that reads it, so
-  // it has to take effect here exactly as it does under `harness run` (#156).
-  // The command runs in `workspacePath`, which for a `--pr` run is the detached
+  // it has to take effect here exactly as it does under `harness run` (#156) —
+  // but only after `assertTrustedPassCheck` has refused a workspace-sourced
+  // declaration (a `--pr` worktree must not get host RCE by planting one).
+  // Trusted sources (package, user-global, explicit `--agents-dir`) still run
+  // the command in `workspacePath`, which for a `--pr` run is the detached
   // worktree — checking the PR's own code is the point, not an accident.
   const passGate = makePassGate(definition.execution, workspacePath);
   const fileEventSink = new JsonlFileEventSink(

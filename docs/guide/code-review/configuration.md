@@ -174,14 +174,20 @@ Customizing the harness is only meaningful for keys this runner acts on. It
 reads roles and their enablement expressions, context providers, output schemas,
 the finding pipelines, the reporting template, `default_allowed_commands`
 (unioned with the commands your VCS makes available, so declaring grants never
-strips `jj diff` from a jj workspace), and `execution` including `pass_check`,
-which runs in the workspace after the roles finish and decides the run.
+strips `jj diff` from a jj workspace), and `execution` including `pass_check`.
 
-It refuses `hooks` and `policy`. Policy is enforced by generating hook config
-for a specific adapter, which is `agents harness run`'s job — this path accepts
-whatever adapter you hand it. A harness declaring either key errors rather than
-running without the enforcement it asked for. To review under a policy, run
-`agents harness run code-review --adapter cursor`.
+`pass_check` runs in the workspace after the roles finish and decides the run —
+but only when the harness came from a trusted source (the packaged tree, a
+user-global install, or an explicit `--agents-dir`). A `pass_check` in the
+workspace `.agents` tree is refused: that tree is preferred for resolution, and
+for `agents code-review --pr` it is the PR worktree, so planting a command there
+would otherwise execute on the reviewer's host.
+
+It also refuses `hooks` and `policy`. Policy is enforced by generating hook
+config for a specific adapter, which is `agents harness run`'s job — this path
+accepts whatever adapter you hand it. A harness declaring either key errors
+rather than running without the enforcement it asked for. To review under a
+policy, run `agents harness run code-review --adapter cursor`.
 
 For a one-off run, bypass layered lookup with an explicit `.agents` directory:
 
