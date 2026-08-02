@@ -575,6 +575,14 @@ function applyExplicitCliOptions(
     pr: stringOr("pr"),
     postPr: stringOr("postPr"),
     reviewSummary: stringOr("reviewSummary"),
+    // Deliberately CLI-only, not `stringOr`. Promoting an unsubstantiated
+    // finding into a pull request is a per-run judgement about specific finding
+    // ids (ADR 0019 §7); letting a config file or environment variable stand in
+    // for it would pre-authorize the publication this flag exists to make
+    // someone ask for.
+    includeUnsubstantiated: ex.has("includeUnsubstantiated")
+      ? o.includeUnsubstantiated
+      : undefined,
     agentsDir: stringOr("agentsDir"),
     postOnly: boolOr("postOnly", false),
     noConfirm: boolOr("noConfirm", false),

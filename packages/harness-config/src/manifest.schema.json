@@ -7,8 +7,8 @@
   "additionalProperties": false,
   "properties": {
     "specVersion": {
-      "description": "Version of the `.agents/` format this directory is written against, validated against the same set as a harness document's `spec_version` (ADR 0015 §4). Note the spelling: this field is camelCase while its harness counterpart is snake_case, an inconsistency that predates the schema and is preserved rather than corrected.",
-      "enum": ["0.1", "0.2", "0.3"]
+      "description": "Version of the `.agents/` format this directory is written against, validated against the same set as a harness document's `spec_version` (ADR 0015 §4, partially superseded by ADR 0019 §6). Note the spelling: this field is camelCase while its harness counterpart is snake_case, an inconsistency that predates the schema and is preserved rather than corrected.",
+      "enum": ["0.1", "0.2", "0.3", "0.4"]
     },
     "enabled": {
       "description": "What the runtime should load. Absent means nothing is enabled.",

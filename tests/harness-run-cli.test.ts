@@ -560,6 +560,45 @@ test("declared reporting template renders report.md into the scratchpad", async 
   }
 });
 
+test("status is recomputed against pipelined findings, not raw ones", async () => {
+  const { markUnsubstantiatedFindings, statusAfterFindingPipelines } =
+    await import("@aguil/agents-reporting");
+
+  const critical = markUnsubstantiatedFindings([
+    {
+      id: "f1",
+      severity: "critical",
+      title: "T",
+      description: "D",
+      evidence: "E",
+      sourceRole: "quality",
+      validation: { status: "verified", details: "Looked at it." },
+    },
+  ]);
+  const compose = (
+    rawStatus: "passed" | "warnings" | "failed" | "error",
+    overrides: { findingsBlind?: boolean; timedOut?: boolean } = {},
+  ) =>
+    statusAfterFindingPipelines({
+      rawStatus,
+      findings: critical,
+      findingsBlind: overrides.findingsBlind ?? false,
+      timedOut: overrides.timedOut ?? false,
+    });
+
+  // The orchestrator judged the raw finding and said "failed"; once the
+  // pipeline marks it unsubstantiated the run must not fail on it, or the exit
+  // code contradicts the report sitting beside it.
+  expect(compose("failed")).toBe("passed");
+
+  // Things a pipeline has no business overturning.
+  expect(compose("error")).toBe("error");
+  expect(compose("passed", { timedOut: true })).toBe("warnings");
+  // A harness with an execution block has findings-blind status (#157), so a
+  // pass_check failure stands regardless of what the pipeline decided.
+  expect(compose("failed", { findingsBlind: true })).toBe("failed");
+});
+
 test("harness run surfaces loader errors with a nonzero exit", async () => {
   const result = await runHarnessCli([
     "no-such-harness",

@@ -43,14 +43,28 @@ import {
   validatePolicyDocument,
 } from "./schema-validation";
 
-export const HARNESS_SPEC_VERSION = "0.3";
+export const HARNESS_SPEC_VERSION = "0.4";
 
 /**
- * Accepted `spec_version` values. Every increment so far is additive — v0.2
- * added per-handler `applies_to` event classes, v0.3 added role `ref:` — so
- * documents declaring an older version remain loadable unchanged.
+ * Accepted `spec_version` values. Every increment is additive *in format*:
+ * v0.2 added per-handler `applies_to` event classes and v0.3 added role
+ * `ref:`, so no document is parsed differently by version and this loader
+ * never branches on the declared one.
+ *
+ * That is a narrower guarantee than it used to be. v0.4 changed what
+ * `builtin:actionable` does without changing how it is spelled, and every
+ * older document gets the new behavior (ADR 0019 §6, partially superseding ADR
+ * 0015 §4). The rule to apply when adding a version: a change to what a
+ * construct *is* still needs branching or consolidation here; a correction to
+ * what a construct *does* may reach every version at once, and should say so
+ * in its ADR.
  */
-export const SUPPORTED_SPEC_VERSIONS: readonly string[] = ["0.1", "0.2", "0.3"];
+export const SUPPORTED_SPEC_VERSIONS: readonly string[] = [
+  "0.1",
+  "0.2",
+  "0.3",
+  "0.4",
+];
 
 /** Capability constraint lists (carried here, enforced by the policy layer). */
 export interface PolicyCapabilityRules {

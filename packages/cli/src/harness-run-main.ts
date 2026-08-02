@@ -31,7 +31,10 @@ import {
 } from "@aguil/agents-hooks";
 import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
 import { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
-import { resolveReportRenderer } from "@aguil/agents-reporting";
+import {
+  resolveReportRenderer,
+  statusAfterFindingPipelines,
+} from "@aguil/agents-reporting";
 
 export { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
 
@@ -401,15 +404,6 @@ export async function runHarnessRunCli(
     strictMode: parsed.strict,
   });
 
-  console.log(`run: ${result.runId}`);
-  console.log(`status: ${result.status}`);
-  console.log(`execution: ${result.metadata?.execution_mode ?? "parallel"}`);
-  console.log(
-    `roles completed: ${result.metadata?.completed_roles ?? "(none)"}`,
-  );
-  if ((result.metadata?.failed_roles ?? "") !== "") {
-    console.log(`roles failed: ${result.metadata?.failed_roles}`);
-  }
   // Declared pipelines shape the reported findings the same way the
   // code-review package does imperatively (it renders report.md AFTER
   // dedup/filter); the raw count stays visible so filtering is
@@ -427,10 +421,43 @@ export async function runHarnessRunCli(
           : { dedupers: loaded.findingDedupers }),
       })
     : result.findings;
+
+  // Only recompute when a classifier actually ran. Without pipelines the
+  // findings carry no marker this code put there, and re-deriving status from
+  // them would start honoring one an agent supplied.
+  const status = hasPipelines
+    ? statusAfterFindingPipelines({
+        rawStatus: result.status,
+        findings: reportedFindings,
+        findingsBlind: loaded.definition.execution !== undefined,
+        timedOut: (result.metadata?.timed_out_roles ?? "") !== "",
+      })
+    : result.status;
+
+  console.log(`run: ${result.runId}`);
+  console.log(`status: ${status}`);
+  console.log(`execution: ${result.metadata?.execution_mode ?? "parallel"}`);
+  console.log(
+    `roles completed: ${result.metadata?.completed_roles ?? "(none)"}`,
+  );
+  if ((result.metadata?.failed_roles ?? "") !== "") {
+    console.log(`roles failed: ${result.metadata?.failed_roles}`);
+  }
   if (hasPipelines) {
     console.log(
       `findings: ${reportedFindings.length} after pipelines (${result.findings.length} raw)`,
     );
+    // Reported but not counted toward status (ADR 0019 §4). Said out loud
+    // because the whole point of the classifier is that nothing it sets aside
+    // disappears quietly.
+    const unsubstantiated = reportedFindings.filter(
+      (finding) => finding.unsubstantiated === true,
+    ).length;
+    if (unsubstantiated > 0) {
+      console.log(
+        `findings reported but not counted: ${unsubstantiated} (unverified or citing no evidence)`,
+      );
+    }
   }
   for (const outcome of result.outcomes ?? []) {
     console.log(
@@ -443,11 +470,12 @@ export async function runHarnessRunCli(
       reportPath,
       resolveReportRenderer(loaded.reportingTemplate)({
         ...result,
+        status,
         findings: reportedFindings,
       }),
     );
     console.log(`report: ${reportPath}`);
   }
   console.log(`artifacts: ${scratchpadPath}`);
-  return result.status === "passed" ? 0 : 1;
+  return status === "passed" ? 0 : 1;
 }

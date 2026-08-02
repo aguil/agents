@@ -24,6 +24,7 @@ function finding(id: string, overrides: Partial<Finding> = {}): Finding {
     validation: {
       status: "verified",
       details: "Reproduced with deterministic test input.",
+      evidence: [{ kind: "command", command: "bun test", exitCode: 0 }],
     },
     file: "src/example.ts",
     line: 12,
@@ -116,7 +117,7 @@ async function runConfigured(
   });
 }
 
-test("config-driven code review filters non-actionable findings and dedupes by fingerprint", async () => {
+test("config-driven code review marks unevidenced findings and dedupes by fingerprint", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-parity-"));
   try {
     const contextBundlePath = await writeBundle(workspacePath, "full");
@@ -128,6 +129,10 @@ test("config-driven code review filters non-actionable findings and dedupes by f
           duplicate,
           finding("not-reproduced", {
             title: "Unconfirmed issue",
+            // A distinct file keeps this out of the fingerprint group above,
+            // so the assertion below is about classification rather than
+            // deduplication.
+            file: "src/other.ts",
             validation: {
               status: "not_reproduced",
               details: "Could not reproduce with deterministic test input.",
@@ -143,10 +148,92 @@ test("config-driven code review filters non-actionable findings and dedupes by f
       adapter,
     );
 
+    // The unevidenced finding survives to result.json — dropping it is the
+    // defect ADR 0019 corrects — while the fingerprint duplicate does not.
+    // Ordered by title, so the unconfirmed one leads.
     expect(result.findings.map((entry) => entry.id)).toEqual([
+      "not-reproduced",
       "verified-first",
     ]);
+    expect(
+      result.findings.map((entry) => entry.unsubstantiated === true),
+    ).toEqual([true, false]);
+    // Status counts only the substantiated one.
     expect(result.status).toBe("warnings");
+    expect(result.metadata?.unsubstantiated_findings).toBe("1");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("an unevidenced critical does not fail a config-driven run", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-critical-"));
+  try {
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const adapter = scriptedAdapter({
+      quality: {
+        findings: [
+          finding("unevidenced-critical", {
+            severity: "critical",
+            validation: {
+              status: "verified",
+              details: "Read the file and it looked wrong.",
+            },
+          }),
+        ],
+      },
+    });
+
+    const result = await runConfigured(
+      workspacePath,
+      contextBundlePath,
+      adapter,
+    );
+
+    // The orchestrator sees a raw critical and says "failed" before the
+    // pipeline classifies it. Letting that through would fail the run on a
+    // finding the same run reports as not counted — and only a critical
+    // reaches that branch, which is why a warning-only case missed it.
+    expect(result.findings.map((entry) => entry.unsubstantiated)).toEqual([
+      true,
+    ]);
+    expect(result.status).toBe("passed");
+    expect(result.metadata?.unsubstantiated_findings).toBe("1");
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
+test("an agent-supplied marker never reaches the result", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-supplied-"));
+  try {
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const adapter = scriptedAdapter({
+      quality: {
+        // Emitted as a direct finding event, which does not pass through the
+        // JSONL envelope coercion — the path three earlier fixes missed.
+        findings: [
+          finding("self-suppressed", {
+            severity: "critical",
+            unsubstantiated: true,
+          }),
+        ],
+      },
+    });
+
+    const result = await runConfigured(
+      workspacePath,
+      contextBundlePath,
+      adapter,
+    );
+
+    // The finding is evidenced, so honoring its marker would hide a critical
+    // from the gate on the agent's say-so.
+    expect(result.findings.map((entry) => entry.unsubstantiated)).toEqual([
+      undefined,
+    ]);
+    expect(result.status).toBe("failed");
+    expect(result.metadata?.unsubstantiated_findings).toBe("0");
   } finally {
     await rm(workspacePath, { recursive: true, force: true });
   }

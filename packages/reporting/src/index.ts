@@ -11,35 +11,79 @@ export interface ReportRenderer {
   render(result: HarnessRunResult): string | Promise<string>;
 }
 
-export function actionableFindings(
+/**
+ * Mark findings that lack structured backing, rather than removing them
+ * (ADR 0019 §3).
+ *
+ * This used to drop anything whose validation prose failed a keyword test,
+ * silently — which hid 43 verified findings across the recorded review
+ * history, two of them critical security findings. Nothing removes a finding
+ * from a published result now; an unsubstantiated one is reported and left
+ * out of run status and triage ingest instead.
+ */
+export function markUnsubstantiatedFindings(
   findings: readonly Finding[],
 ): readonly Finding[] {
-  return findings.filter(isActionableFinding);
+  return findings.map((finding) => {
+    if (!isSubstantiatedFinding(finding)) {
+      return { ...finding, unsubstantiated: true };
+    }
+    if (finding.unsubstantiated === undefined) {
+      return finding;
+    }
+    // Clear rather than pass through. The marker is derived state, and an
+    // input that already carries it — from an adapter emitting finding events
+    // directly, say — would otherwise take an evidenced finding out of run
+    // status and the triage queue. Writing it here means classified output
+    // never depends on what the input claimed.
+    const { unsubstantiated: _supplied, ...rest } = finding;
+    return rest;
+  });
 }
 
-export function isActionableFinding(finding: Finding): boolean {
+export function isSubstantiatedFinding(finding: Finding): boolean {
   if (finding.validation.status !== "verified") {
     return false;
   }
-  return hasSubstantiveValidationDetails(finding.validation.details);
+  return (finding.validation.evidence ?? []).length > 0;
 }
 
+/** Findings that count: published, substantiated, and gate-affecting. */
+export function substantiatedFindings(
+  findings: readonly Finding[],
+): readonly Finding[] {
+  return findings.filter((finding) => finding.unsubstantiated !== true);
+}
+
+/**
+ * Collapse findings sharing a fingerprint, keeping a substantiated one over an
+ * unsubstantiated one.
+ *
+ * The preference is load-bearing rather than cosmetic. Before ADR 0019 the
+ * actionable filter ran first and removed unsubstantiated findings outright, so
+ * whichever survived to here was substantiated by construction. Now that
+ * nothing is removed, a plain first-wins rule lets an unevidenced duplicate
+ * evict the evidenced original — and since unsubstantiated findings do not
+ * count toward status (§4), that would report a run clean while it held a real
+ * finding. That is the #158 failure mode reintroduced through a different door.
+ */
 export function dedupeFindings(
   findings: readonly Finding[],
 ): readonly Finding[] {
-  const seen = new Set<string>();
-  const deduped: Finding[] = [];
+  const chosen = new Map<string, Finding>();
 
   for (const finding of sortFindings(findings)) {
     const key = findingFingerprint(finding);
-    if (seen.has(key)) {
-      continue;
+    const incumbent = chosen.get(key);
+    if (
+      incumbent === undefined ||
+      (incumbent.unsubstantiated === true && finding.unsubstantiated !== true)
+    ) {
+      chosen.set(key, finding);
     }
-    seen.add(key);
-    deduped.push(finding);
   }
 
-  return deduped;
+  return [...chosen.values()];
 }
 
 export function findingFingerprint(finding: Finding): string {
@@ -66,13 +110,20 @@ export function findingFingerprint(finding: Finding): string {
   return [finding.sourceRole, semantic].join("|");
 }
 
+/**
+ * Unsubstantiated findings are reported but do not move the gate (ADR 0019
+ * §4) — counting them would flip most runs from clean to non-empty before
+ * agents emit structured evidence, and a gate that goes noisy overnight gets
+ * ignored rather than heeded.
+ */
 export function statusForFindings(
   findings: readonly Finding[],
 ): HarnessRunResult["status"] {
-  if (findings.some((finding) => finding.severity === "critical")) {
+  const counted = substantiatedFindings(findings);
+  if (counted.some((finding) => finding.severity === "critical")) {
     return "failed";
   }
-  if (findings.length > 0) {
+  if (counted.length > 0) {
     return "warnings";
   }
   return "passed";
@@ -84,12 +135,66 @@ export class MarkdownReportRenderer implements ReportRenderer {
   }
 }
 
+/**
+ * Run status once the declared finding pipelines have classified the findings.
+ *
+ * The orchestrator computes status before those pipelines run, so it judges
+ * raw findings that do not yet carry the `unsubstantiated` marker. Every entry
+ * point that applies pipelines must therefore recompute, or a finding excluded
+ * from the gate still fails the run — the report says "not counted" while the
+ * exit code says otherwise.
+ *
+ * This lives here, shared, because both entry points previously derived status
+ * independently and disagreed: `harness run` and `agents code-review` reached
+ * different answers for the same document, which is how the divergence went
+ * unnoticed.
+ *
+ * Only the findings-derived part moves. A failed or timed-out role stands, and
+ * `findingsBlind` (a harness declaring `execution`, whose status comes from
+ * role outcomes and its pass gate rather than findings) is returned untouched:
+ * no pipeline can talk a failed pass_check into success.
+ */
+export function statusAfterFindingPipelines(input: {
+  readonly rawStatus: HarnessRunResult["status"];
+  readonly findings: readonly Finding[];
+  readonly findingsBlind: boolean;
+  readonly timedOut: boolean;
+}): HarnessRunResult["status"] {
+  if (input.rawStatus === "error") {
+    return "error";
+  }
+  if (input.findingsBlind) {
+    return input.rawStatus;
+  }
+  const fromFindings = statusForFindings(input.findings);
+  if (fromFindings === "failed") {
+    return "failed";
+  }
+  if (fromFindings === "warnings" || input.timedOut) {
+    return "warnings";
+  }
+  return "passed";
+}
+
 export function renderMarkdownReport(result: HarnessRunResult): string {
-  const findings = sortFindings(result.findings);
-  const summary =
+  const all = sortFindings(result.findings);
+  const findings = all.filter((finding) => finding.unsubstantiated !== true);
+  const unsubstantiated = all.filter(
+    (finding) => finding.unsubstantiated === true,
+  );
+  // The uncounted findings belong in the summary even though they do not move
+  // the gate. Omitting them reproduces the defect ADR 0019 exists to fix, in
+  // the one line an operator is most likely to read and stop at.
+  const counted =
     findings.length === 0
       ? "No verified critical or warning findings."
       : `${findings.length} verified finding${findings.length === 1 ? "" : "s"}.`;
+  const summary =
+    unsubstantiated.length === 0
+      ? counted
+      : `${counted} ${unsubstantiated.length} further finding${
+          unsubstantiated.length === 1 ? "" : "s"
+        } reported but not counted.`;
 
   const sections = findings.map((finding, index) => {
     const location = finding.file
@@ -122,8 +227,46 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
     ...executionNotes,
     ...(executionNotes.length > 0 ? [""] : []),
     ...sections,
+    ...renderUnsubstantiatedSection(unsubstantiated),
     "",
   ].join("\n");
+}
+
+/**
+ * Findings the run produced but did not count (ADR 0019 §4). They are listed
+ * rather than dropped: withholding one silently is the defect this section
+ * exists to prevent.
+ */
+function renderUnsubstantiatedSection(
+  findings: readonly Finding[],
+): readonly string[] {
+  if (findings.length === 0) {
+    return [];
+  }
+  return [
+    "",
+    `## Reported but not counted (${findings.length})`,
+    "",
+    "Each of these is either not `validation.status: verified` or carries no",
+    "`validation.evidence`, so it is excluded from run status and from the",
+    "triage queue. They are listed here rather than discarded; judge them",
+    "yourself.",
+    "",
+    ...findings.flatMap((finding) => [
+      `### ${severityEmoji(finding.severity)} ${finding.title}`,
+      ...(finding.file === undefined
+        ? []
+        : [
+            `Location: ${finding.file}${finding.line === undefined ? "" : `:${finding.line}`}`,
+          ]),
+      `Source: ${finding.sourceRole}`,
+      "",
+      finding.description,
+      `Evidence: ${finding.evidence}`,
+      `Validation: ${finding.validation.status} - ${finding.validation.details}`,
+      "",
+    ]),
+  ];
 }
 
 export function renderOutcomesMarkdownReport(result: HarnessRunResult): string {
@@ -244,27 +387,6 @@ function parseRoleList(value: string | undefined): readonly string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function hasSubstantiveValidationDetails(details: string): boolean {
-  const normalized = details.trim().toLowerCase();
-  if (normalized.length < 18) {
-    return false;
-  }
-  const evidenceSignals = [
-    "reproduced",
-    "validated",
-    "verified",
-    "inspection",
-    "trace",
-    "command",
-    "output",
-    "test",
-    "line",
-    "diff",
-    "path",
-  ];
-  return evidenceSignals.some((signal) => normalized.includes(signal));
 }
 
 const STOP_WORDS = new Set([

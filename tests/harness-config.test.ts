@@ -1319,7 +1319,7 @@ test("the manifest rejects unknown keys and unsupported spec versions", async ()
     // The gap ADR 0015 §4 named: any string used to load.
     await manifest(['specVersion: "9.9"']);
     await expect(loadManifest(scratch)).rejects.toThrow(
-      'unsupported manifest specVersion "9.9" (supported: 0.1, 0.2, 0.3)',
+      'unsupported manifest specVersion "9.9" (supported: 0.1, 0.2, 0.3, 0.4)',
     );
 
     await manifest(["specVerison: '0.2'"]);

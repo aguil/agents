@@ -126,7 +126,11 @@ export async function buildEnvelopeFromCodeReviewResult(options: {
     throw new Error(`Invalid result envelope at ${reResolved}.`);
   }
   const doc = parsed as StoredHarnessResult;
-  const sorted = sortReviewFindings(doc.findings);
+  // Unsubstantiated findings are published for visibility but stay out of the
+  // queue (ADR 0019 §4), so an empty queue keeps meaning what it meant.
+  const sorted = sortReviewFindings(
+    doc.findings.filter((finding) => finding.unsubstantiated !== true),
+  );
   const canonicalKey = normalize(reResolved);
   const outputSlug = computeOutputSlug(CODE_REVIEW_FROM, canonicalKey);
 
