@@ -178,10 +178,11 @@ strips `jj diff` from a jj workspace), and `execution` including `pass_check`.
 
 `pass_check` runs in the workspace after the roles finish and decides the run —
 but only when the harness came from a trusted source (the packaged tree, a
-user-global install, or an explicit `--agents-dir`). A `pass_check` in the
-workspace `.agents` tree is refused: that tree is preferred for resolution, and
-for `agents code-review --pr` it is the PR worktree, so planting a command there
-would otherwise execute on the reviewer's host.
+user-global install, or an explicit `--agents-dir`). A `pass_check` or a
+`shell-command` context provider in the workspace `.agents` tree is refused:
+that tree is preferred for resolution, and for `agents code-review --pr` it is
+the PR worktree, so planting a command there would otherwise execute on the
+reviewer's host.
 
 It also refuses `hooks` and `policy`. Policy is enforced by generating hook
 config for a specific adapter, which is `agents harness run`'s job — this path

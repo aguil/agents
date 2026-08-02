@@ -231,37 +231,62 @@ function assertEnforceableHere(loaded: LoadedHarness, agentsDir: string): void {
 }
 
 /**
- * Refuse `execution.pass_check` from a workspace-sourced harness.
+ * Refuse workspace-sourced harness declarations that would execute host argv.
  *
  * Resolution prefers `<workspace>/.agents` before user-global and package. For
  * `agents code-review --pr` that workspace is the detached PR worktree, so a
- * PR that plants a `pass_check` would otherwise run arbitrary argv on the
- * reviewer's host with a full inherited environment (finding
- * `security-pass-check-workspace-harness-rce`). Package, user-global, and
- * explicit `--agents-dir` sources remain trusted and still honor the gate.
+ * PR that plants `execution.pass_check` or a `shell-command` context provider
+ * would otherwise run arbitrary argv on the reviewer's host with a full
+ * inherited environment (findings `security-pass-check-workspace-harness-rce`
+ * and `security-workspace-shell-command-rce`). Package, user-global, and
+ * explicit `--agents-dir` sources remain trusted.
  */
-function assertTrustedPassCheck(
+function assertTrustedHostExec(
   loaded: LoadedHarness,
   source: ConfigHarnessSourceKind,
   agentsDir: string,
 ): void {
-  const execution = loaded.definition.execution;
-  if (
-    source !== "workspace" ||
-    execution === undefined ||
-    execution.mode !== "chain" ||
-    execution.passCheck === undefined
-  ) {
+  if (source !== "workspace") {
     return;
   }
-  throw new Error(
-    "code-review: harness declares execution.pass_check, but the harness was " +
-      "loaded from the workspace `.agents` tree, which is untrusted " +
-      "(a `--pr` worktree can supply it). Remove `pass_check` from " +
-      `${join(agentsDir, "harnesses", CONFIG_HARNESS_ID, "harness.yaml")}, ` +
-      "install the harness with `agents harness install code-review`, or pass " +
-      "`--agents-dir` pointing at a trusted `.agents` tree.",
+  const harnessPath = join(
+    agentsDir,
+    "harnesses",
+    CONFIG_HARNESS_ID,
+    "harness.yaml",
   );
+  const execution = loaded.definition.execution;
+  if (
+    execution !== undefined &&
+    execution.mode === "chain" &&
+    execution.passCheck !== undefined
+  ) {
+    throw new Error(
+      "code-review: harness declares execution.pass_check, but the harness was " +
+        "loaded from the workspace `.agents` tree, which is untrusted " +
+        "(a `--pr` worktree can supply it). Remove `pass_check` from " +
+        `${harnessPath}, install the harness with ` +
+        "`agents harness install code-review`, or pass `--agents-dir` pointing " +
+        "at a trusted `.agents` tree.",
+    );
+  }
+  const shellProviders = (loaded.contextProviders ?? []).filter(
+    (provider) => provider.use === "shell-command",
+  );
+  if (shellProviders.length > 0) {
+    const ids = shellProviders.map((provider) => {
+      const id = provider.params.id;
+      return typeof id === "string" && id.length > 0 ? id : "(unnamed)";
+    });
+    throw new Error(
+      "code-review: harness declares context.providers shell-command " +
+        `(${ids.join(", ")}), but the harness was loaded from the workspace ` +
+        "`.agents` tree, which is untrusted (a `--pr` worktree can supply it). " +
+        `Remove those providers from ${harnessPath}, install the harness with ` +
+        "`agents harness install code-review`, or pass `--agents-dir` pointing " +
+        "at a trusted `.agents` tree.",
+    );
+  }
 }
 
 /**
@@ -286,7 +311,7 @@ export async function runCodeReviewFromConfig(
     harnessId: CONFIG_HARNESS_ID,
   });
   assertEnforceableHere(loaded, harnessSource.agentsDir);
-  assertTrustedPassCheck(loaded, harnessSource.source, harnessSource.agentsDir);
+  assertTrustedHostExec(loaded, harnessSource.source, harnessSource.agentsDir);
   const runId = options.runId ?? createRunId("code-review");
   const scratchpadRoot = resolve(
     options.scratchpadRoot ?? agentsCodeReviewRunsRoot(workspacePath),
@@ -344,10 +369,11 @@ export async function runCodeReviewFromConfig(
   const outputSchemas = loaded.outputSchemas;
   // `pass_check` belongs to the document, not to the driver that reads it, so
   // it has to take effect here exactly as it does under `harness run` (#156) —
-  // but only after `assertTrustedPassCheck` has refused a workspace-sourced
-  // declaration (a `--pr` worktree must not get host RCE by planting one).
-  // Trusted sources (package, user-global, explicit `--agents-dir`) still run
-  // the command in `workspacePath`, which for a `--pr` run is the detached
+  // but only after `assertTrustedHostExec` has refused workspace-sourced
+  // declarations that would execute host argv (a `--pr` worktree must not get
+  // RCE by planting `pass_check` or a `shell-command` provider). Trusted
+  // sources (package, user-global, explicit `--agents-dir`) still run the
+  // command in `workspacePath`, which for a `--pr` run is the detached
   // worktree — checking the PR's own code is the point, not an accident.
   const passGate = makePassGate(definition.execution, workspacePath);
   const fileEventSink = new JsonlFileEventSink(

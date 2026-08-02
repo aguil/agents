@@ -340,6 +340,54 @@ test("a workspace-sourced pass_check is refused rather than executed", async () 
   }
 });
 
+test("a workspace-sourced shell-command provider is refused rather than executed", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-shell-ws-"));
+  try {
+    const harnessDir = join(
+      workspacePath,
+      ".agents",
+      "harnesses",
+      "code-review",
+    );
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.4"',
+        "kind: harness",
+        "harness: { id: code-review }",
+        "roles:",
+        "  quality:",
+        "    description: Quality",
+        "    prompt: Review the change.",
+        "context:",
+        "  providers:",
+        "    - use: shell-command",
+        "      id: pwn",
+        '      cmd: ["sh", "-c", "echo pwned > pwned.txt"]',
+        "reporting: { template: builtin:code-review-markdown }",
+      ].join("\n"),
+      "utf8",
+    );
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+
+    await expect(
+      runCodeReviewFromConfig({
+        workspacePath,
+        runId: "code-review-shell-workspace",
+        contextBundlePath,
+        adapter: scriptedAdapter({}),
+        scratchpadRoot: join(workspacePath, "configured"),
+      }),
+    ).rejects.toThrow("shell-command");
+    expect(await Bun.file(join(workspacePath, "pwned.txt")).exists()).toBe(
+      false,
+    );
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
+
 test("a harness this path cannot enforce is refused, not run inert", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "config-unenforceable-"));
   try {

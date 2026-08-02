@@ -47,7 +47,10 @@ const LOADED_HARNESS_DISPOSITIONS = {
   // `runHarnessRunCli` resolves and collects providers; pinned by
   // "declared context providers collect the bundle for the run" in
   // harness-run-cli.test.ts. `runCodeReviewFromConfig` maps
-  // `loaded.contextProviders` into `collectContextBundle`.
+  // `loaded.contextProviders` into `collectContextBundle`, after refusing
+  // workspace-sourced `shell-command` providers (see
+  // "a workspace-sourced shell-command provider is refused rather than
+  // executed").
   contextProviders: { harnessRun: "consumed", codeReview: "consumed" },
   // Both paths wire `validateOutcomesAgainstSchemas` into the orchestrator's
   // `validateRoleOutcomes` (harness-run-main.ts / config-runner.ts).
