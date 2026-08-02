@@ -1,17 +1,17 @@
 /**
  * Contextual --help/-h for `agents code-review` (+ overview when no argv).
  *
- * Top-level commands that own their own help must return null here so
- * `main` can dispatch to them. Otherwise `agents <cmd> --help` is swallowed
- * as an "unknown" overview (issue #160).
+ * Top-level commands that already print their own usage must return null here
+ * so `main` can dispatch to them. Otherwise `agents <cmd> --help` is swallowed
+ * as an "unknown" overview (issue #160). Only list commands whose handlers
+ * treat `--help`/`-h` as usage (exit 0); `hooks` and `policy-eval` still
+ * reject those flags, so they stay on the overview path until they grow help.
  */
 const TOP_LEVEL_COMMANDS_WITH_OWN_HELP = new Set([
   "doctor",
   "skills",
   "triage",
-  "policy-eval",
   "harness",
-  "hooks",
   "pr-feedback",
 ]);
 
