@@ -215,8 +215,15 @@ function asRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/**
+ * Only a missing key is absent, here and in every `optional*` helper below. A
+ * key written with nothing after it parses as null, and reading that as "not
+ * declared" makes a typo indistinguishable from a deliberate omission. The
+ * published schemas type these fields and so reject null already; accepting it
+ * here would put the loader and the schema out of step (issue #152).
+ */
 function optionalString(value: unknown, label: string): string | undefined {
-  if (value === undefined || value === null) {
+  if (value === undefined) {
     return undefined;
   }
   if (typeof value !== "string" || value.length === 0) {
@@ -237,7 +244,7 @@ function optionalPositiveInt(
   value: unknown,
   label: string,
 ): number | undefined {
-  if (value === undefined || value === null) {
+  if (value === undefined) {
     return undefined;
   }
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
@@ -256,10 +263,6 @@ function optionalPositiveNumber(
   value: unknown,
   label: string,
 ): number | undefined {
-  // Only an absent key is absent. `cost_usd:` with nothing after it parses as
-  // null, and treating that as "no ceiling declared" would reinstate the hole
-  // in its easiest-to-write form. The schema types this as a number and so
-  // rejects null already; accepting it here would put the two out of step.
   if (value === undefined) {
     return undefined;
   }
@@ -273,7 +276,7 @@ function optionalStringArray(
   value: unknown,
   label: string,
 ): readonly string[] | undefined {
-  if (value === undefined || value === null) {
+  if (value === undefined) {
     return undefined;
   }
   if (

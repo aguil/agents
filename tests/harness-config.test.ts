@@ -1432,6 +1432,46 @@ test("a policy constraint written as an empty key fails rather than granting eve
   }
 });
 
+test("a key written with nothing after it is a mistake, not an omission", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    await mkdir(join(scratch, "harnesses", "blank"), { recursive: true });
+    const role = (field: string) =>
+      writeFile(
+        join(scratch, "harnesses", "blank", "harness.yaml"),
+        [
+          'spec_version: "0.4"',
+          "kind: harness",
+          "harness: { id: blank }",
+          "roles:",
+          "  a:",
+          "    description: A",
+          `    ${field}:`,
+        ].join("\n"),
+      );
+    const load = () => loadHarness({ agentsDir: scratch, harnessId: "blank" });
+
+    // One helper per shape. Each used to read null as an absent key, so a
+    // half-written line silently took the default instead of being reported.
+    const rejected = [
+      ["policy", "role a policy must be a non-empty string"],
+      ["timeout_ms", "role a timeout_ms must be a positive integer"],
+      [
+        "required_capabilities",
+        "role a required_capabilities must be a list of strings",
+      ],
+    ] as const;
+    for (const [field, message] of rejected) {
+      await role(field);
+      await expect(load()).rejects.toThrow(message);
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
 test("a policy spend ceiling must be a positive finite number", async () => {
   const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
