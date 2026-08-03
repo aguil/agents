@@ -493,10 +493,42 @@ test("generic outcome events are collected and flow through {previous}", async (
   });
 });
 
-test("generalized-harness status ignores finding severity (diagnostic findings do not fail the run)", async () => {
+test("bare execution without a gate keeps finding-severity status (#157)", async () => {
   await withScratchpad(async (scratchpadPath) => {
-    // A role emits a critical finding describing the problem it worked on;
-    // for a generalized harness that must NOT fail the run.
+    // Documenting scheduling (chain/parallel) must not silence critical findings.
+    const critical: Finding = {
+      ...makeFinding("scout", "scout-crit"),
+      severity: "critical",
+    };
+    const { adapter } = createScriptedAdapter({
+      scout: { findings: [critical] },
+      fix: {},
+    });
+    for (const execution of [
+      { mode: "chain" as const },
+      { mode: "parallel" as const },
+    ]) {
+      const definition: HarnessDefinition = {
+        id: "triage",
+        roles: [makeRole("scout", "Investigate."), makeRole("fix", "Fix.")],
+        execution,
+      };
+      const orchestrator = new NativeBunOrchestrator({
+        definition,
+        adapter,
+        contextBundlePath: join(scratchpadPath, "context.json"),
+      });
+      const result = await orchestrator.run(makeRequest(scratchpadPath));
+      expect(result.status).toBe("failed");
+      expect(result.findings).toHaveLength(1);
+      expect(result.outcomes).toBeDefined();
+      expect((result.outcomes ?? []).length).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
+test("passGate owns status: critical findings stay diagnostic (#157)", async () => {
+  await withScratchpad(async (scratchpadPath) => {
     const critical: Finding = {
       ...makeFinding("scout", "scout-crit"),
       severity: "critical",
@@ -508,12 +540,13 @@ test("generalized-harness status ignores finding severity (diagnostic findings d
     const definition: HarnessDefinition = {
       id: "triage",
       roles: [makeRole("scout", "Investigate."), makeRole("fix", "Fix.")],
-      execution: { mode: "chain" },
+      execution: { mode: "chain", passCheck: ["true"] },
     };
     const orchestrator = new NativeBunOrchestrator({
       definition,
       adapter,
       contextBundlePath: join(scratchpadPath, "context.json"),
+      passGate: () => true,
     });
     const result = await orchestrator.run(makeRequest(scratchpadPath));
     expect(result.status).toBe("passed");
@@ -522,7 +555,7 @@ test("generalized-harness status ignores finding severity (diagnostic findings d
   });
 });
 
-test("passGate false fails a generalized run; true passes it", async () => {
+test("passGate false fails a gate-owned run; true passes it", async () => {
   await withScratchpad(async (scratchpadPath) => {
     const definition: HarnessDefinition = {
       id: "triage",

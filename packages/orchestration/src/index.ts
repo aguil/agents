@@ -73,6 +73,40 @@ export type ExecutionConfig =
   | ChainExecution
   | ValidationLoopExecution;
 
+/**
+ * Whether finding severity is excluded from run status (issue #157 / ADR 0021).
+ *
+ * Scheduling (`execution`) and status ownership are separate decisions.
+ * Findings-blind status applies only when a gate owns the run: a chain
+ * `pass_check` (runtime `passGate`), or a validation-loop (internal
+ * convergence gate). Bare `execution: { mode: parallel }` (or chain without
+ * `pass_check`) keeps finding-driven status while still emitting `outcomes`.
+ */
+export function harnessStatusIsFindingsBlind(
+  execution: ExecutionConfig | undefined,
+  runtime?: {
+    readonly passGate?: unknown;
+    readonly internalGatePassed?: boolean;
+  },
+): boolean {
+  if (runtime?.passGate !== undefined) {
+    return true;
+  }
+  if (runtime?.internalGatePassed !== undefined) {
+    return true;
+  }
+  if (execution === undefined) {
+    return false;
+  }
+  if (execution.mode === "validation-loop") {
+    return true;
+  }
+  if (execution.mode === "chain" && execution.passCheck !== undefined) {
+    return true;
+  }
+  return false;
+}
+
 export interface HarnessDefinition {
   readonly id: string;
   readonly roles: readonly RoleDefinition[];
@@ -374,12 +408,24 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       ...extraMetadata,
     };
 
-    // Generic outcomes are the opt-in surface for execution-configured
-    // harnesses; legacy definitions keep the pre-generalization result
-    // shape (and its serialized size) untouched.
-    const isGeneralized = this.options.definition.execution !== undefined;
+    // Outcomes are the opt-in surface for execution-configured harnesses;
+    // legacy definitions keep the pre-generalization result shape. Status
+    // ownership is separate (issue #157): findings-blind only when a gate
+    // owns the run, not merely because `execution` is declared.
+    const emitOutcomes = this.options.definition.execution !== undefined;
+    const findingsBlind = harnessStatusIsFindingsBlind(
+      this.options.definition.execution,
+      {
+        ...(this.options.passGate === undefined
+          ? {}
+          : { passGate: this.options.passGate }),
+        ...(gates.internalGatePassed === undefined
+          ? {}
+          : { internalGatePassed: gates.internalGatePassed }),
+      },
+    );
     const harnessOutcomes = outcomes.flatMap(roleHarnessOutcomes);
-    const status = isGeneralized
+    const status = findingsBlind
       ? await this.generalizedStatus({
           findings,
           outcomes: harnessOutcomes,
@@ -397,7 +443,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       runId: request.runId,
       status,
       findings,
-      ...(isGeneralized ? { outcomes: harnessOutcomes } : {}),
+      ...(emitOutcomes ? { outcomes: harnessOutcomes } : {}),
       artifacts,
       metadata,
     };

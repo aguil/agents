@@ -35,7 +35,10 @@ import {
   generateCursorHooksConfig,
   renderCursorHooksConfig,
 } from "@aguil/agents-hooks";
-import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
+import {
+  harnessStatusIsFindingsBlind,
+  NativeBunOrchestrator,
+} from "@aguil/agents-orchestration";
 import { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
 import {
   resolveReportRenderer,
@@ -468,7 +471,12 @@ export async function runHarnessRunCli(
     ? statusAfterFindingPipelines({
         rawStatus: result.status,
         findings: reportedFindings,
-        findingsBlind: loaded.definition.execution !== undefined,
+        findingsBlind: harnessStatusIsFindingsBlind(
+          loaded.definition.execution,
+          {
+            ...(passGate === undefined ? {} : { passGate }),
+          },
+        ),
         timedOut: (result.metadata?.timed_out_roles ?? "") !== "",
       })
     : result.status;

@@ -29,7 +29,10 @@ import {
   makePassGate,
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
-import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
+import {
+  harnessStatusIsFindingsBlind,
+  NativeBunOrchestrator,
+} from "@aguil/agents-orchestration";
 import {
   resolveReportRenderer,
   statusAfterFindingPipelines,
@@ -262,9 +265,10 @@ function assertTrustedHostExec(
     throw new Error(
       "code-review: harness declares `execution`, but the harness was loaded " +
         "from the workspace `.agents` tree, which is untrusted " +
-        "(a `--pr` worktree can supply it). An `execution` block flips status " +
-        "to findings-blind and may run `pass_check` argv on the host. Remove " +
-        `\`execution\` from ${harnessPath}, install the harness with ` +
+        "(a `--pr` worktree can supply it). An `execution` block may run " +
+        "`pass_check` argv on the host and can make status gate-owned " +
+        "(findings-blind) when `pass_check` or validation-loop is declared. " +
+        `Remove \`execution\` from ${harnessPath}, install the harness with ` +
         "`agents harness install code-review`, or pass `--agents-dir` pointing " +
         "at a trusted `.agents` tree.",
     );
@@ -490,7 +494,7 @@ export async function runCodeReviewFromConfig(
     status: statusAfterFindingPipelines({
       rawStatus: rawResult.status,
       findings,
-      findingsBlind: loaded.definition.execution !== undefined,
+      findingsBlind: harnessStatusIsFindingsBlind(loaded.definition.execution),
       timedOut: (rawResult.metadata?.timed_out_roles ?? "") !== "",
     }),
     findings,
