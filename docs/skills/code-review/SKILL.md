@@ -135,11 +135,16 @@ Since **0.5.0** there is one code-review implementation: the declarative
 whose own **`.agents/harnesses/code-review/harness.yaml`** exists reviews
 **itself with its own prompts and roles**. Declared **`hooks`**, **`policy`**,
 **`execution`** (including **`pass_check`**), and **`shell-command`** context
-providers are **refused** from that workspace tree (they would otherwise run on
-the reviewer's host, greenwash run status, or look enforced when they are
-not)—see the configuration guide. Treat the workspace harness as untrusted input
-on a PR from a fork or an unfamiliar repo—the PR branch can change that file.
-When the operator wants the harness they trust regardless of workspace:
+providers are **refused** from that workspace tree: hooks/policy would look
+enforced when they are not on this path; `execution` / `shell-command` would
+otherwise run on the reviewer's host, or — when **`pass_check`** /
+validation-loop is declared — make status gate-owned (findings-blind). Bare
+**`execution`** without a gate does not blind status (ADR 0021 / issue #157),
+but the block is still refused because workspace-sourced **`pass_check`**
+remains host RCE — see the configuration guide. Treat the workspace harness as
+untrusted input on a PR from a fork or an unfamiliar repo—the PR branch can
+change that file. When the operator wants the harness they trust regardless of
+workspace:
 
 ```text
 agents harness install code-review            # writes ~/.agents/… (prompts before overwriting)
