@@ -201,6 +201,46 @@ test("loadKnowledgeStore refuses symlink escapes outside the workspace", async (
   });
 });
 
+test("loadKnowledgeStore bounds per-file reads", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const body = "x".repeat(80_000);
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/huge.md",
+      ["---", "id: huge", "context: auto", "---", body].join("\n"),
+    );
+    const loaded = await loadKnowledgeStore(workspacePath);
+    expect(loaded.notes).toHaveLength(1);
+    expect(loaded.notes[0]?.body.length).toBeLessThan(body.length);
+    expect(
+      Buffer.byteLength(loaded.notes[0]?.body ?? "", "utf8"),
+    ).toBeLessThanOrEqual(50_001);
+  });
+});
+
+test("loadKnowledgeStore reports scan truncation past the path cap", async () => {
+  await withWorkspace(async (workspacePath) => {
+    for (let i = 0; i < 5; i += 1) {
+      await writeNote(
+        workspacePath,
+        `.agents/knowledge/n${i}.md`,
+        ["---", `id: n${i}`, "---", "body"].join("\n"),
+      );
+    }
+    const loaded = await loadKnowledgeStore(
+      workspacePath,
+      ".agents/knowledge",
+      {
+        maxScanned: 3,
+      },
+    );
+    expect(loaded.notes.length).toBe(3);
+    expect(
+      loaded.skipped.some((skip) => skip.reason === "scan-truncated"),
+    ).toBe(true);
+  });
+});
+
 test("admission order is updatedAt desc then id asc", () => {
   const ordered = [
     note({ id: "b", updatedAt: "2026-01-01T00:00:00Z" }),

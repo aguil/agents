@@ -1,7 +1,11 @@
 import type { Dirent } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveWorkspacePath, truncateArtifactContent } from "./fs-bounds";
+import {
+  readBoundedFile,
+  resolveWorkspacePath,
+  truncateArtifactContent,
+} from "./fs-bounds";
 import type {
   ContextArtifact,
   ContextProvider,
@@ -23,6 +27,18 @@ export const DEFAULT_KNOWLEDGE_SEARCH_LIMIT = 5;
 /** Reserved machine-authored id prefix (ADR 0022 §9 / §10). */
 export const DEFAULT_MACHINE_ID_PREFIX = "harness:";
 
+/**
+ * Cap on Markdown paths visited per store load. Matches file-glob's default
+ * scan bound so a hostile or accidental tree cannot force unbounded walks.
+ */
+export const DEFAULT_KNOWLEDGE_MAX_SCANNED = 10_000;
+
+/**
+ * Per-file read cap when loading notes. Frontmatter sits at the top of the
+ * file; bodies beyond this bound are truncated before admission.
+ */
+export const DEFAULT_KNOWLEDGE_READ_BYTES = DEFAULT_KNOWLEDGE_MAX_BYTES;
+
 export type KnowledgeContextMode = "auto" | "search-only";
 
 export type KnowledgeProvenanceFilter = "any" | "machine" | "human";
@@ -35,7 +51,8 @@ export type KnowledgeSkipReason =
   | "missing-id"
   | "invalid-field"
   | "duplicate-id"
-  | "outside-workspace";
+  | "outside-workspace"
+  | "scan-truncated";
 
 export interface KnowledgeNote {
   readonly id: string;
@@ -274,9 +291,15 @@ export function noteMatchesProvenance(
  */
 async function listKnowledgeMarkdownFiles(
   root: string,
-): Promise<readonly string[]> {
+  maxScanned: number,
+): Promise<{ readonly files: readonly string[]; readonly truncated: boolean }> {
   const found: string[] = [];
+  let truncated = false;
   async function walk(relativeDir: string): Promise<void> {
+    if (truncated || found.length >= maxScanned) {
+      truncated = found.length >= maxScanned || truncated;
+      return;
+    }
     let entries: Dirent<string>[];
     try {
       entries = await readdir(join(root, relativeDir), { withFileTypes: true });
@@ -285,6 +308,10 @@ async function listKnowledgeMarkdownFiles(
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
+      if (found.length >= maxScanned) {
+        truncated = true;
+        return;
+      }
       const relative = relativeDir
         ? `${relativeDir}/${entry.name}`
         : entry.name;
@@ -301,7 +328,12 @@ async function listKnowledgeMarkdownFiles(
     }
   }
   await walk("");
-  return found;
+  return { files: found, truncated };
+}
+
+export interface LoadKnowledgeStoreOptions {
+  readonly maxScanned?: number;
+  readonly maxReadBytes?: number;
 }
 
 /**
@@ -312,7 +344,10 @@ async function listKnowledgeMarkdownFiles(
 export async function loadKnowledgeStore(
   workspacePath: string,
   storePath: string = DEFAULT_KNOWLEDGE_PATH,
+  options: LoadKnowledgeStoreOptions = {},
 ): Promise<KnowledgeStoreLoad> {
+  const maxScanned = options.maxScanned ?? DEFAULT_KNOWLEDGE_MAX_SCANNED;
+  const maxReadBytes = options.maxReadBytes ?? DEFAULT_KNOWLEDGE_READ_BYTES;
   const root = await resolveWorkspacePath(workspacePath, storePath, false);
   if (root === undefined) {
     return {
@@ -328,8 +363,11 @@ export async function loadKnowledgeStore(
   }
 
   let relativeMatches: readonly string[] = [];
+  let scanTruncated = false;
   try {
-    relativeMatches = await listKnowledgeMarkdownFiles(root);
+    const listed = await listKnowledgeMarkdownFiles(root, maxScanned);
+    relativeMatches = listed.files;
+    scanTruncated = listed.truncated;
   } catch {
     // Absent or unreadable root → empty store, not an error.
     return { notes: [], skipped: [] };
@@ -338,6 +376,14 @@ export async function loadKnowledgeStore(
   const notes: KnowledgeNote[] = [];
   const skipped: KnowledgeSkip[] = [];
   const seenIds = new Map<string, string>();
+
+  if (scanTruncated) {
+    skipped.push({
+      path: storePath,
+      reason: "scan-truncated",
+      detail: `store scan stopped after ${maxScanned} Markdown paths`,
+    });
+  }
 
   for (const relative of relativeMatches) {
     const candidate = join(storePath, relative);
@@ -355,7 +401,7 @@ export async function loadKnowledgeStore(
     }
     let source: string;
     try {
-      source = await readFile(absolute, "utf8");
+      source = await readBoundedFile(absolute, maxReadBytes);
     } catch {
       skipped.push({ path: candidate, reason: "unreadable" });
       continue;
