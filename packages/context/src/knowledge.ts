@@ -1,11 +1,7 @@
 import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  readBoundedFile,
-  resolveWorkspacePath,
-  truncateArtifactContent,
-} from "./fs-bounds";
+import { readBoundedFile, resolveWorkspacePath } from "./fs-bounds";
 import type {
   ContextArtifact,
   ContextProvider,
@@ -427,6 +423,41 @@ export async function loadKnowledgeStore(
   return { notes, skipped };
 }
 
+/**
+ * Truncate so the UTF-8 byte length of the result is ≤ maxBytes, including the
+ * truncation marker when one is needed. The shared truncateArtifactContent
+ * helper can overshoot by the marker length; aggregate admission cannot.
+ */
+function truncateWithinBudget(
+  content: string,
+  maxBytes: number,
+): string | undefined {
+  if (maxBytes <= 0) {
+    return undefined;
+  }
+  if (Buffer.byteLength(content, "utf8") <= maxBytes) {
+    return content;
+  }
+  const markerFor = (n: number): string => `\n[truncated at ${n} bytes]`;
+  // Worst-case marker length for this budget (digits grow slowly with n).
+  let cut = maxBytes;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const marker = markerFor(cut);
+    const markerBytes = Buffer.byteLength(marker, "utf8");
+    const headBudget = Math.max(0, maxBytes - markerBytes);
+    const head = Buffer.from(content, "utf8")
+      .subarray(0, headBudget)
+      .toString("utf8");
+    const actualCut = Buffer.byteLength(head, "utf8");
+    const result = `${head}${markerFor(actualCut)}`;
+    if (Buffer.byteLength(result, "utf8") <= maxBytes) {
+      return result;
+    }
+    cut = actualCut > 0 ? actualCut - 1 : 0;
+  }
+  return undefined;
+}
+
 function admitNotesByBudget(
   eligible: readonly KnowledgeNote[],
   options: {
@@ -454,13 +485,13 @@ function admitNotesByBudget(
       bound ??= options.limit !== undefined ? "limit" : "max_notes";
       continue;
     }
-    const content = truncateArtifactContent(note.body, options.maxBytes);
-    const size = Buffer.byteLength(content, "utf8");
-    if (size > remainingBytes) {
+    const content = truncateWithinBudget(note.body, remainingBytes);
+    if (content === undefined) {
       omitted.push(note);
       bound ??= "max_bytes";
       continue;
     }
+    const size = Buffer.byteLength(content, "utf8");
     admitted.push(note);
     contents.set(note.id, content);
     remainingBytes -= size;

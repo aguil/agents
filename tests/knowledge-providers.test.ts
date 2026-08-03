@@ -436,6 +436,31 @@ test("KnowledgeSearchProvider matches tags with AND and filters provenance", asy
   });
 });
 
+test("KnowledgeProvider admits oversized notes in truncated form", async () => {
+  await withWorkspace(async (workspacePath) => {
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/big.md",
+      ["---", "id: big", "context: auto", "---", "y".repeat(150)].join("\n"),
+    );
+    const artifacts = await new KnowledgeProvider({ maxBytes: 100 }).collect({
+      workspacePath,
+      scratchpadPath: join(workspacePath, ".scratch"),
+    });
+    const noteArtifact = artifacts.find(
+      (artifact) => artifact.id === "knowledge:big",
+    );
+    expect(noteArtifact).toBeDefined();
+    expect(noteArtifact?.content).toContain("[truncated at");
+    expect(
+      Buffer.byteLength(noteArtifact?.content ?? "", "utf8"),
+    ).toBeLessThanOrEqual(100);
+    expect(
+      artifacts.some((artifact) => artifact.id === "knowledge:admission"),
+    ).toBe(false);
+  });
+});
+
 test("KnowledgeSearchProvider honors limit without requiring context:auto", async () => {
   await withWorkspace(async (workspacePath) => {
     for (const id of ["a", "b", "c"]) {
