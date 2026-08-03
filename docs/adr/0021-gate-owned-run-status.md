@@ -1,10 +1,11 @@
 # ADR 0021: run status is gate-owned, not implied by `execution` presence
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-08-02 — Proposed.
+- 2026-08-02 — Accepted: merged in #169.
 
 **Context:** Declaring `execution:` in `harness.yaml` was meant to choose how
 roles are scheduled (`parallel`, `chain`, `validation-loop`). The orchestrator
