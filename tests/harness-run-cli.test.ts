@@ -404,6 +404,78 @@ test("declared context providers collect the bundle for the run", async () => {
   }
 });
 
+test("knowledge providers collect auto and search notes into the run bundle", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-knowledge-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-knowledge-agents-"));
+  try {
+    const {
+      mkdir: mkdirP,
+      writeFile: writeFileP,
+      cp: cpP,
+    } = await import("node:fs/promises");
+    await cpP(
+      join(
+        repoRoot,
+        "examples",
+        "incident-triage",
+        "fixture",
+        ".agents",
+        "knowledge",
+      ),
+      join(workspace, ".agents", "knowledge"),
+      { recursive: true },
+    );
+    // Knowledge providers resolve the store under the workspace; point the
+    // agents dir at a harness that declares both providers (ADR 0022).
+    const dir = join(agentsDir, "harnesses", "knowledge-demo");
+    await mkdirP(dir, { recursive: true });
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: knowledge-demo }",
+        "context:",
+        "  providers:",
+        "    - use: knowledge",
+        "    - use: knowledge-search",
+        "      tags: [incident, pagination]",
+        "      limit: 5",
+        "roles:",
+        "  a:",
+        "    description: A",
+        '    prompt: "use the injected knowledge"',
+        "execution: { mode: chain, order: [a] }",
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "knowledge-demo",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    expect(result.stdout).toContain("execution: chain");
+    const runsDir = join(workspace, ".agents-harness", "runs");
+    const { readdir: readdirP, readFile: readFileP } = await import(
+      "node:fs/promises"
+    );
+    const [runDir] = await readdirP(runsDir);
+    const bundle = JSON.parse(
+      await readFileP(join(runsDir, runDir, "context", "bundle.json"), "utf8"),
+    ) as { artifacts: Array<{ id: string }> };
+    const ids = bundle.artifacts.map((artifact) => artifact.id);
+    expect(ids).toContain("knowledge:pagination-off-by-one");
+    expect(ids).toContain("knowledge-search:support-desk-missing-last-row");
+    expect(ids).toContain("knowledge-search:pagination-off-by-one");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});
+
 test("context collection failures use the controlled error surface", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "harness-ctx-fail-"));
   const agentsDir = await mkdtemp(join(tmpdir(), "harness-ctx-fail-agents-"));

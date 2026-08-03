@@ -103,7 +103,8 @@ so it is upheld in review.
   runtime-written provenance, no builtin extractor, a reserved machine
   identifier namespace that makes human collisions impossible, and an enforced
   auto-context budget that degrades visibly. Decisions only; implementation
-  stays blocked on run-level hook dispatch.
+  stays blocked on run-level hook dispatch. Partially superseded by ADR 0022 on
+  §6's budget placement.
 - [0018-harness-schema-and-spec-0-3.md](0018-harness-schema-and-spec-0-3.md) —
   ADR 0018: hand-authored `harness.schema.json` validated with ajv, enforcing
   unknown-key rejection while the loader keeps its more specific messages;
@@ -122,3 +123,10 @@ so it is upheld in review.
 - [0021-gate-owned-run-status.md](0021-gate-owned-run-status.md) — ADR 0021: run
   status is findings-blind only when a gate owns the run (`pass_check` /
   validation-loop), not merely because `execution` is declared (issue #157).
+- [0022-knowledge-read-path.md](0022-knowledge-read-path.md) — ADR 0022:
+  `knowledge` and `knowledge-search` context providers; a workspace-confined
+  repository-local store, the note frontmatter a reader relies on, two
+  independent opt-ins for automatic injection, a provider-declared budget with
+  binding defaults, recency-then-identifier admission order, and overflow
+  recorded in the bundle rather than failing the run. Qualifies ADR 0017 §6 on
+  where the budget is declared.

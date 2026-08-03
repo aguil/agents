@@ -1,5 +1,5 @@
-import { open, readFile, realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 import type { ReviewTriageTier } from "@aguil/agents-core";
 import {
   ensureDirectory,
@@ -7,26 +7,60 @@ import {
   writeJsonFile,
   writeTextFile,
 } from "@aguil/agents-core";
+import {
+  DEFAULT_ARTIFACT_MAX_BYTES,
+  readBoundedFile,
+  resolveWorkspacePath,
+  truncateArtifactContent,
+} from "./fs-bounds";
+import {
+  type KnowledgeProvenanceFilter,
+  KnowledgeProvider,
+  KnowledgeSearchProvider,
+} from "./knowledge";
+import type {
+  ContextArtifact,
+  ContextProvider,
+  ContextProviderFactory,
+  ContextProviderParams,
+  ContextRequest,
+} from "./provider-types";
 
-export interface ContextRequest {
-  readonly workspacePath: string;
-  readonly scratchpadPath: string;
-  /**
-   * Harness-specific parameters. Generic providers read from here; the
-   * legacy top-level fields below are the code-review specialization and
-   * take precedence when both are set (migration window).
-   */
-  readonly params?: Readonly<Record<string, unknown>>;
-  /** @deprecated Use `params.diffPath`. */
-  readonly diffPath?: string;
-  /** @deprecated Use `params.pullRequestNumber`. */
-  readonly pullRequestNumber?: number;
-}
+export {
+  compareKnowledgeNotesForAdmission,
+  DEFAULT_KNOWLEDGE_MAX_BYTES,
+  DEFAULT_KNOWLEDGE_MAX_NOTES,
+  DEFAULT_KNOWLEDGE_MAX_SCANNED,
+  DEFAULT_KNOWLEDGE_PATH,
+  DEFAULT_KNOWLEDGE_READ_BYTES,
+  DEFAULT_KNOWLEDGE_SEARCH_LIMIT,
+  DEFAULT_MACHINE_ID_PREFIX,
+  type KnowledgeAdmission,
+  type KnowledgeBoundHit,
+  type KnowledgeContextMode,
+  type KnowledgeNote,
+  type KnowledgeProvenanceFilter,
+  KnowledgeProvider,
+  type KnowledgeProviderOptions,
+  KnowledgeSearchProvider,
+  type KnowledgeSearchProviderOptions,
+  type KnowledgeSkip,
+  type KnowledgeSkipReason,
+  type KnowledgeStoreLoad,
+  loadKnowledgeStore,
+  noteIsMachineAuthored,
+  noteMatchesProvenance,
+  noteMatchesTags,
+  parseKnowledgeNoteSource,
+} from "./knowledge";
+export type {
+  ContextArtifact,
+  ContextProvider,
+  ContextProviderFactory,
+  ContextProviderParams,
+  ContextRequest,
+} from "./provider-types";
 
-/**
- * Read a request parameter, preferring the legacy top-level field for the
- * two code-review keys during the migration window.
- */
 export function contextRequestParam(
   request: ContextRequest,
   key: string,
@@ -57,23 +91,6 @@ function stringRequestParam(
   const value = contextRequestParam(request, key);
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
-
-export interface ContextArtifact {
-  readonly id: string;
-  readonly title: string;
-  readonly path?: string;
-  readonly content: string;
-}
-
-export interface ContextProvider {
-  readonly name: string;
-  collect(request: ContextRequest): Promise<readonly ContextArtifact[]>;
-}
-
-export type ContextProviderParams = Readonly<Record<string, unknown>>;
-export type ContextProviderFactory = (
-  params: ContextProviderParams,
-) => ContextProvider;
 
 export interface ContextBundle {
   readonly id: string;
@@ -189,41 +206,6 @@ export interface StaticFileProviderOptions {
    * an explicit opt-in for e.g. fixture logs staged outside the repo.
    */
   readonly allowOutsideWorkspace?: boolean;
-}
-
-/**
- * Resolve a candidate path and enforce workspace containment. Returns
- * undefined when the resolved path escapes the workspace root and escaping
- * was not explicitly allowed. Symlinks are resolved via realpath before the
- * containment check (same pattern as collectLocalReferencedDoc), so a link
- * inside the workspace pointing outside the root is rejected.
- */
-async function resolveWorkspacePath(
-  workspacePath: string,
-  candidate: string,
-  allowOutsideWorkspace: boolean,
-): Promise<string | undefined> {
-  const resolved = isAbsolute(candidate)
-    ? resolve(candidate)
-    : resolve(workspacePath, candidate);
-  if (allowOutsideWorkspace) {
-    return resolved;
-  }
-  const root = await realpath(resolve(workspacePath));
-  let real: string;
-  try {
-    real = await realpath(resolved);
-  } catch {
-    // Leaf does not exist yet; contain via its closest existing ancestor so
-    // symlinked parent directories still cannot smuggle reads outside root.
-    try {
-      real = join(await realpath(dirname(resolved)), basename(resolved));
-    } catch {
-      // Nothing on disk to disclose; downstream reads fail with ENOENT.
-      return resolved;
-    }
-  }
-  return real === root || real.startsWith(root + sep) ? real : undefined;
 }
 
 /** Generic provider: read one file (relative to workspace or absolute). */
@@ -422,6 +404,8 @@ export const BUILTIN_CONTEXT_PROVIDER_NAMES: readonly string[] = [
   "static-file",
   "shell-command",
   "file-glob",
+  "knowledge",
+  "knowledge-search",
 ];
 
 const BUILD_TIME_ONLY_CONTEXT_PARAMS: ReadonlySet<string> = new Set([
@@ -519,6 +503,40 @@ function optionalContextBoolean(
   if (typeof value !== "boolean") {
     throw new Error(
       `context provider "${use}" param "${key}" must be a boolean`,
+    );
+  }
+  return value;
+}
+
+function requiredContextStringArray(
+  params: Record<string, unknown>,
+  key: string,
+  use: string,
+): readonly string[] {
+  const value = params[key];
+  if (
+    !Array.isArray(value) ||
+    value.some((entry) => typeof entry !== "string" || entry.length === 0)
+  ) {
+    throw new Error(
+      `context provider "${use}" param "${key}" must be a list of non-empty strings`,
+    );
+  }
+  return value as readonly string[];
+}
+
+function optionalContextProvenance(
+  params: Record<string, unknown>,
+  key: string,
+  use: string,
+): KnowledgeProvenanceFilter | undefined {
+  const value = params[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value !== "any" && value !== "machine" && value !== "human") {
+    throw new Error(
+      `context provider "${use}" param "${key}" must be "any", "machine", or "human"`,
     );
   }
   return value;
@@ -663,6 +681,70 @@ const CONTEXT_PROVIDER_FACTORIES: Readonly<
           }),
     });
   },
+  knowledge: (params) => {
+    const use = "knowledge";
+    const record = contextProviderParamsRecord(use, params);
+    validateContextProviderParamKeys(use, record, [
+      "path",
+      "max_notes",
+      "max_bytes",
+    ]);
+    return new KnowledgeProvider({
+      ...(optionalContextString(record, "path", use) === undefined
+        ? {}
+        : { path: optionalContextString(record, "path", use) }),
+      ...(optionalContextPositiveInt(record, "max_notes", use) === undefined
+        ? {}
+        : {
+            maxNotes: optionalContextPositiveInt(record, "max_notes", use),
+          }),
+      ...(optionalContextPositiveInt(record, "max_bytes", use) === undefined
+        ? {}
+        : {
+            maxBytes: optionalContextPositiveInt(record, "max_bytes", use),
+          }),
+    });
+  },
+  "knowledge-search": (params) => {
+    const use = "knowledge-search";
+    const record = contextProviderParamsRecord(use, params);
+    validateContextProviderParamKeys(use, record, [
+      "tags",
+      "limit",
+      "provenance",
+      "machine_id_prefix",
+      "path",
+      "max_bytes",
+    ]);
+    return new KnowledgeSearchProvider({
+      tags: requiredContextStringArray(record, "tags", use),
+      ...(optionalContextPositiveInt(record, "limit", use) === undefined
+        ? {}
+        : { limit: optionalContextPositiveInt(record, "limit", use) }),
+      ...(optionalContextProvenance(record, "provenance", use) === undefined
+        ? {}
+        : {
+            provenance: optionalContextProvenance(record, "provenance", use),
+          }),
+      ...(optionalContextString(record, "machine_id_prefix", use) === undefined
+        ? {}
+        : {
+            machineIdPrefix: optionalContextString(
+              record,
+              "machine_id_prefix",
+              use,
+            ),
+          }),
+      ...(optionalContextString(record, "path", use) === undefined
+        ? {}
+        : { path: optionalContextString(record, "path", use) }),
+      ...(optionalContextPositiveInt(record, "max_bytes", use) === undefined
+        ? {}
+        : {
+            maxBytes: optionalContextPositiveInt(record, "max_bytes", use),
+          }),
+    });
+  },
 };
 
 export function resolveContextProvider(
@@ -678,37 +760,11 @@ export function resolveContextProvider(
   return factory(params);
 }
 
-const DEFAULT_ARTIFACT_MAX_BYTES = 50_000;
-
-function truncateArtifactContent(
-  content: string,
-  maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
-): string {
-  if (Buffer.byteLength(content, "utf8") <= maxBytes) {
-    return content;
-  }
-  return `${Buffer.from(content, "utf8").subarray(0, maxBytes).toString("utf8")}\n[truncated at ${maxBytes} bytes]`;
-}
-
 /**
  * Read at most maxBytes+1 bytes so oversized files never load fully into
  * memory; the extra byte lets truncateArtifactContent detect overflow and
- * append its truncation marker.
+ * append its truncation marker. Re-exported helpers live in fs-bounds.ts.
  */
-async function readBoundedFile(
-  path: string,
-  maxBytes: number = DEFAULT_ARTIFACT_MAX_BYTES,
-): Promise<string> {
-  const handle = await open(path, "r");
-  try {
-    const buffer = Buffer.alloc(maxBytes + 1);
-    const { bytesRead } = await handle.read(buffer, 0, maxBytes + 1, 0);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } finally {
-    await handle.close();
-  }
-}
-
 async function runBoundedCommand(
   cmd: readonly string[],
   cwd: string,

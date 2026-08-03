@@ -1,12 +1,17 @@
 # ADR 0017: knowledge governance — staged-note schema, provenance namespacing, and a context budget
 
-**Status:** Accepted
+**Status:** Partially superseded by ADR 0022
 
 **Status history:**
 
 - 2026-07-26 — Proposed.
 - 2026-07-26 — Accepted: merged in #142. Decisions only; implementation stays
   blocked on run-level hook dispatch.
+- 2026-08-02 — Partially superseded by ADR 0022: §6's placement of the
+  automatic-injection budget in a `knowledge:` harness block. ADR 0022 Decision
+  §6 puts the read-path budget on provider params (`max_notes` / `max_bytes`)
+  until a write path lands the block; what §6 enforces (off by default, dual
+  bounds, runtime defaults, visible degradation) stands.
 
 **Context:** A knowledge write-back capability has been designed for this
 repository but not built. The intent is that a harness run can record what it

@@ -6,6 +6,8 @@ import {
   AgentsInstructionsProvider,
   BUILTIN_CONTEXT_PROVIDER_NAMES,
   FileGlobProvider,
+  KnowledgeProvider,
+  KnowledgeSearchProvider,
   PullRequestMetadataProvider,
   PullRequestReferencedDocsProvider,
   RepositoryDiffProvider,
@@ -23,6 +25,8 @@ test("builtin context provider names resolve to their provider classes", () => {
     "static-file",
     "shell-command",
     "file-glob",
+    "knowledge",
+    "knowledge-search",
   ]);
   expect(resolveContextProvider("git-diff", {})).toBeInstanceOf(
     RepositoryDiffProvider,
@@ -45,6 +49,12 @@ test("builtin context provider names resolve to their provider classes", () => {
   expect(
     resolveContextProvider("file-glob", { pattern: "**/*.md" }),
   ).toBeInstanceOf(FileGlobProvider);
+  expect(resolveContextProvider("knowledge", {})).toBeInstanceOf(
+    KnowledgeProvider,
+  );
+  expect(
+    resolveContextProvider("knowledge-search", { tags: ["security"] }),
+  ).toBeInstanceOf(KnowledgeSearchProvider);
 });
 
 test("zero-param context providers reject params", () => {
@@ -147,4 +157,19 @@ test("provider params are strictly typed", () => {
       max_files: 1.5,
     }),
   ).toThrow('param "max_files" must be a positive integer');
+  expect(() => resolveContextProvider("knowledge", { max_notes: 0 })).toThrow(
+    'param "max_notes" must be a positive integer',
+  );
+  expect(() =>
+    resolveContextProvider("knowledge-search", { tags: "security" }),
+  ).toThrow('param "tags" must be a list of non-empty strings');
+  expect(() =>
+    resolveContextProvider("knowledge-search", {
+      tags: ["security"],
+      provenance: "robot",
+    }),
+  ).toThrow('param "provenance" must be "any", "machine", or "human"');
+  expect(() => resolveContextProvider("knowledge", { extra: true })).toThrow(
+    "unsupported params: extra",
+  );
 });
