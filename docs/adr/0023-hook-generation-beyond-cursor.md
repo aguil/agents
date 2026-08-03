@@ -1,10 +1,14 @@
 # ADR 0023: hook generation beyond Cursor — per-adapter projection, run-scoped configuration, and a mechanical enforcement claim
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-08-03 — Proposed.
+- 2026-08-03 — Accepted: merged in #176, after the CLI verification its context
+  named as a precondition. `claude --settings` composes and its hooks fire and
+  deny; decision 3's mechanism holds. The probe results are recorded in the
+  context above rather than left in a working note.
 
 **Context:** `packages/hooks` exports one generator,
 `generateCursorHooksConfig`, which projects a harness's canonical `hooks:` block
@@ -66,11 +70,32 @@ edits config — so generating for it means emitting **executable JavaScript int
 a user's tree**, and `opencode run --pure` ("run without external plugins") is
 on the path `buildOpenCodeCommand` already uses.
 
-What has _not_ been measured is whether hooks supplied through
-`claude --settings` actually fire, and what response shape denies a tool call on
-that CLI. This ADR is `Proposed`; that verification is a precondition of
-accepting it, and if it refutes decision 3's mechanism the decision is revised
-before merge rather than after (ADR 0014: an unmerged ADR revises normally).
+Two facts decision 3 depends on were held open until they could be measured
+rather than inferred from help text, on the precedent ADR 0020 set: whether
+hooks supplied through `claude --settings` actually fire, and what response
+shape denies a tool call. Both were probed against Claude Code `2.1.220` on
+2026-08-03, headless
+(`-p --output-format stream-json --include-hook-events --verbose`) with a stub
+`PreToolUse` hook and a prompt that asks for exactly one `Bash` call.
+
+- **`--settings` composes rather than replaces.** With
+  `--setting-sources project` alongside a run-scoped `--settings` file, both
+  hooks fired. With `--setting-sources ''` and only `--settings`, the run-scoped
+  hook still fired — the named sources can be empty while `--settings` alone
+  supplies hooks, which is what makes a run-scoped file sufficient on its own.
+- **Hooks fire and can deny.** The hook process ran and received its payload on
+  stdin; the stream carried a `hook_response` with the deny,
+  `permission_denials` on the result, and a `tool_result` marked `is_error`;
+  debug output reported `Hook denied tool use for Bash`.
+- **The deny shape is nested and exits zero.** stdout is
+  `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "…"}}`
+  with exit code 0 — structurally unlike Cursor's flat `{"permission": "deny"}`,
+  which is why decision 6 makes the encoding explicit rather than shared.
+  Incoming payloads carry `hook_event_name` and `tool_name`.
+
+So decision 3's mechanism holds as written. Recorded here rather than left in a
+working note because the next person to add an adapter will want to know these
+were measured, not assumed.
 
 **Decision:**
 
