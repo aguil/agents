@@ -508,7 +508,7 @@ function metaArtifacts(
   const artifacts: ContextArtifact[] = [];
   if (skipped.length > 0) {
     artifacts.push({
-      id: `${idPrefix}:skipped`,
+      id: `${idPrefix}:_meta:skipped`,
       title: "Knowledge notes skipped",
       content: JSON.stringify({ skipped }, null, 2),
     });
@@ -518,7 +518,7 @@ function metaArtifacts(
     (admission.omitted.length > 0 || admission.bound !== undefined)
   ) {
     artifacts.push({
-      id: `${idPrefix}:admission`,
+      id: `${idPrefix}:_meta:admission`,
       title: "Knowledge admission",
       content: JSON.stringify(admission, null, 2),
     });

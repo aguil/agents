@@ -310,12 +310,12 @@ test("KnowledgeProvider injects only context:auto notes within budget", async ()
     });
     const noteIds = artifacts
       .filter((artifact) => artifact.id.startsWith("knowledge:"))
-      .filter((artifact) => !artifact.id.endsWith(":admission"))
-      .filter((artifact) => !artifact.id.endsWith(":skipped"))
+      .filter((artifact) => !artifact.id.endsWith(":_meta:admission"))
+      .filter((artifact) => !artifact.id.endsWith(":_meta:skipped"))
       .map((artifact) => artifact.id);
     expect(noteIds).toEqual(["knowledge:new", "knowledge:mid"]);
     const admission = artifacts.find(
-      (artifact) => artifact.id === "knowledge:admission",
+      (artifact) => artifact.id === "knowledge:_meta:admission",
     );
     expect(admission?.content).toContain('"omitted"');
     expect(admission?.content).toContain("old");
@@ -346,12 +346,12 @@ test("KnowledgeProvider does not fail when the store exceeds the budget", async 
     const notes = artifacts.filter(
       (artifact) =>
         artifact.id.startsWith("knowledge:") &&
-        !artifact.id.endsWith(":admission") &&
-        !artifact.id.endsWith(":skipped"),
+        !artifact.id.endsWith(":_meta:admission") &&
+        !artifact.id.endsWith(":_meta:skipped"),
     );
     expect(notes).toHaveLength(10);
     expect(
-      artifacts.some((artifact) => artifact.id === "knowledge:admission"),
+      artifacts.some((artifact) => artifact.id === "knowledge:_meta:admission"),
     ).toBe(true);
   });
 });
@@ -395,8 +395,8 @@ test("KnowledgeSearchProvider matches tags with AND and filters provenance", asy
     expect(
       andMatch
         .filter((artifact) => artifact.id.startsWith("knowledge-search:"))
-        .filter((artifact) => !artifact.id.includes(":admission"))
-        .filter((artifact) => !artifact.id.includes(":skipped"))
+        .filter((artifact) => !artifact.id.includes(":_meta:admission"))
+        .filter((artifact) => !artifact.id.includes(":_meta:skipped"))
         .map((artifact) => artifact.id),
     ).toEqual(["knowledge-search:human-sec"]);
 
@@ -429,8 +429,8 @@ test("KnowledgeSearchProvider matches tags with AND and filters provenance", asy
         .filter((artifact) => artifact.id.startsWith("knowledge-search:"))
         .filter(
           (artifact) =>
-            !artifact.id.endsWith(":admission") &&
-            !artifact.id.endsWith(":skipped"),
+            !artifact.id.endsWith(":_meta:admission") &&
+            !artifact.id.endsWith(":_meta:skipped"),
         ),
     ).toHaveLength(0);
   });
@@ -456,7 +456,7 @@ test("KnowledgeProvider admits oversized notes in truncated form", async () => {
       Buffer.byteLength(noteArtifact?.content ?? "", "utf8"),
     ).toBeLessThanOrEqual(100);
     expect(
-      artifacts.some((artifact) => artifact.id === "knowledge:admission"),
+      artifacts.some((artifact) => artifact.id === "knowledge:_meta:admission"),
     ).toBe(false);
   });
 });
@@ -480,8 +480,8 @@ test("KnowledgeSearchProvider honors limit without requiring context:auto", asyn
     const notes = artifacts.filter(
       (artifact) =>
         artifact.id.startsWith("knowledge-search:") &&
-        !artifact.id.endsWith(":admission") &&
-        !artifact.id.endsWith(":skipped"),
+        !artifact.id.endsWith(":_meta:admission") &&
+        !artifact.id.endsWith(":_meta:skipped"),
     );
     expect(notes).toHaveLength(2);
   });
