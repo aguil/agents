@@ -9,8 +9,8 @@
   regeneration-as-policy-carrier and §5's non-sequential coarsening rule.
   Everything else in this ADR stands.
 - 2026-08-02 — Partially superseded by ADR 0021: §7's rule that any
-  execution-configured harness is findings-blind (legacy = no `execution`).
-  ADR 0021 Decision §2 restricts findings-blind status to gate-owned runs
+  execution-configured harness is findings-blind (legacy = no `execution`). ADR
+  0021 Decision §2 restricts findings-blind status to gate-owned runs
   (`pass_check` / validation-loop); bare `execution` keeps finding-driven
   status. The ADR 0008 supersession of §3 and §5 stands.
 
