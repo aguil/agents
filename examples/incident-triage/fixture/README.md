@@ -9,6 +9,8 @@ Do not "fix" it in this repository — the injected bug **is** the fixture.
   bug is present, 0 once fixed (intentionally not a `*.test.ts` file so the
   repository test runner never picks it up)
 - `alert.log` — static alert/support context the scout role reads
+- `.agents/knowledge/` — promoted knowledge notes consumed by the harness
+  `knowledge` / `knowledge-search` context providers (ADR 0022)
 
 The harness chain (scout → diagnose → fix → verify) operates on a **copy** of
 this directory; see `../README.md`.

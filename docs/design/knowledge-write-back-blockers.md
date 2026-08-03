@@ -4,7 +4,7 @@ Companion to ADR 0017, which decides how knowledge write-back is governed. That
 ADR is immutable; this note is not, and it is the part that needs updating as
 the code moves.
 
-**Verified:** 2026-07-26, against `main`.
+**Verified:** 2026-08-02, against the knowledge read path (ADR 0022).
 
 Keep this current. If a line reference below has drifted, fix it. If a blocker
 listed here is removed, say so and date it — a reader needs to know whether
@@ -12,20 +12,21 @@ listed here is removed, say so and date it — a reader needs to know whether
 
 ## What exists today
 
-Almost none of the model ADR 0017 governs.
+| Surface                                          | State                                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------------------- |
+| `knowledge:` block in a harness definition       | Does not exist in any `harness.yaml`                                      |
+| Knowledge directory under either `.agents/` tree | Example store under `examples/incident-triage/fixture/.agents/knowledge/` |
+| Knowledge read path (context providers)          | **Exists** — `knowledge` and `knowledge-search` (ADR 0022)                |
+| Per-run shared working state                     | Does not exist; the identifier appears nowhere                            |
 
-| Surface                                          | State                                          |
-| ------------------------------------------------ | ---------------------------------------------- |
-| `knowledge:` block in a harness definition       | Does not exist in any `harness.yaml`           |
-| Knowledge directory under either `.agents/` tree | Does not exist                                 |
-| Any file with "knowledge" in its name            | None in the repository                         |
-| Knowledge read path (a context provider)         | Does not exist                                 |
-| Per-run shared working state                     | Does not exist; the identifier appears nowhere |
+The context provider registry (`packages/context/src/index.ts`,
+`BUILTIN_CONTEXT_PROVIDER_NAMES`) includes nine providers — the original seven
+plus `knowledge` and `knowledge-search`. The write path remains blocked; the
+read path does not need it (ADR 0022).
 
-The context provider registry (`packages/context/src/index.ts:417-424`) offers
-seven providers — `git-diff`, `pr-metadata`, `pr-referenced-docs`, `agents-md`,
-`static-file`, `shell-command`, `file-glob`. None reads a knowledge store, so
-even if notes existed nothing could read them back.
+Budget for injection is declared on the provider (`max_notes` / `max_bytes`),
+not via a `knowledge:` harness block — that block stays deferred to the write
+path (ADR 0022 §6 qualifies ADR 0017 clause 6's placement).
 
 ## Why the write path is blocked
 
@@ -81,11 +82,14 @@ work.
    orchestrator dispatches run-level events itself rather than delegating to the
    adapter.
 2. **Revise the skip contract.** `tests/hooks-generation.test.ts:66`.
-3. **A knowledge read path.** A provider registered in
-   `packages/context/src/index.ts`, conforming to the contract in ADR 0010.
+3. **A knowledge read path.** ~~A provider registered in
+   `packages/context/src/index.ts`, conforming to the contract in ADR 0010.~~
+   **Done (2026-08-02)** — `knowledge` and `knowledge-search` per ADR 0022.
 4. **A knowledge configuration and filesystem surface.** The `knowledge:` block,
-   a staging location, and a promoted store — none of which the loader parses
-   today.
+   a staging location, and a promoted store — the example ships a promoted store
+   under `examples/incident-triage/fixture/.agents/knowledge/`; the loader still
+   does not parse a `knowledge:` block (deferred with the write path, ADR 0022
+   §6).
 5. **Per-run shared state**, if the eventual design still depends on it.
 
 ## Related decisions
@@ -93,7 +97,9 @@ work.
 - **ADR 0017** — the governance this evidence supports: staged-note schema,
   runtime-written provenance, reserved machine identifier namespace, enforced
   auto-context budget.
-- **ADR 0010** — the context provider contract a read path would implement.
+- **ADR 0022** — the knowledge read path (store layout, frontmatter, bounded
+  admission) that implements the read half of ADR 0017's constraints.
+- **ADR 0010** — the context provider contract the read path implements.
 - **ADR 0009** — spec v0.2 hook scoping, and the `applies_to` mechanism.
 - **ADR 0008** — env-carried per-role policy enforcement and role-invariant
   generated hook configuration.

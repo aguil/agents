@@ -1,4 +1,4 @@
-spec_version: "0.1"
+spec_version: "0.2"
 kind: harness
 
 harness:
@@ -10,6 +10,16 @@ harness:
 
 # Harness default; roles may override with their own policy reference.
 policy: triage-readonly
+
+context:
+  providers:
+    # Auto-inject notes marked `context: auto` (budget defaults bind).
+    - use: knowledge
+    # Surface related search-only notes by tag; provenance can narrow to
+    # machine-authored ids under the reserved `harness:` prefix.
+    - use: knowledge-search
+      tags: [incident, pagination]
+      limit: 5
 
 roles:
   scout:
