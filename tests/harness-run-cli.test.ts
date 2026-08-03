@@ -674,8 +674,8 @@ test("status is recomputed against pipelined findings, not raw ones", async () =
   // Things a pipeline has no business overturning.
   expect(compose("error")).toBe("error");
   expect(compose("passed", { timedOut: true })).toBe("warnings");
-  // A harness with an execution block has findings-blind status (#157), so a
-  // pass_check failure stands regardless of what the pipeline decided.
+  // A gate-owned harness (`findingsBlind`) keeps a failed pass_check /
+  // role outcome regardless of what the pipeline decided (ADR 0021 / #157).
   expect(compose("failed", { findingsBlind: true })).toBe("failed");
 });
 

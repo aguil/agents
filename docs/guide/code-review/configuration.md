@@ -182,7 +182,10 @@ user-global install, or an explicit `--agents-dir`). Any `execution` block or
 `shell-command` context provider in the workspace `.agents` tree is refused:
 that tree is preferred for resolution, and for `agents code-review --pr` it is
 the PR worktree, so planting one would otherwise execute on the reviewer's host
-or flip status to findings-blind `passed`.
+(`pass_check` argv) or — when `pass_check` / validation-loop is declared — make
+status gate-owned (findings-blind). Bare `execution` without a gate does not
+blind status (ADR 0021 / issue #157), but the block is still refused because
+workspace-sourced `pass_check` remains host RCE.
 
 It also refuses `hooks` and `policy`. Policy is enforced by generating hook
 config for a specific adapter, which is `agents harness run`'s job — this path

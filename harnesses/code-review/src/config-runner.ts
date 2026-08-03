@@ -235,17 +235,20 @@ function assertEnforceableHere(loaded: LoadedHarness, agentsDir: string): void {
 
 /**
  * Refuse workspace-sourced harness declarations that execute host argv or
- * flip status without a trusted gate.
+ * make status gate-owned without a trusted source.
  *
  * Resolution prefers `<workspace>/.agents` before user-global and package. For
  * `agents code-review --pr` that workspace is the detached PR worktree, so a
  * PR that plants `execution` (including `pass_check`), or a `shell-command`
  * context provider, would otherwise run arbitrary argv on the reviewer's host
- * or greenwash run status to findings-blind `passed` (findings
+ * or — when `pass_check` / validation-loop is declared — make status
+ * gate-owned (findings-blind) (findings
  * `security-pass-check-workspace-harness-rce`,
  * `security-workspace-shell-command-rce`,
- * `quality-workspace-execution-blinds-status`). Package, user-global, and
- * explicit `--agents-dir` sources remain trusted.
+ * `quality-workspace-execution-blinds-status`). Bare `execution` without a
+ * gate no longer blinds status (ADR 0021 / issue #157), but the block is still
+ * refused here because workspace-sourced `pass_check` remains host RCE.
+ * Package, user-global, and explicit `--agents-dir` sources remain trusted.
  */
 function assertTrustedHostExec(
   loaded: LoadedHarness,
