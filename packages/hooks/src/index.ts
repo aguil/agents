@@ -66,28 +66,32 @@ export const CURSOR_EVENT_MAPPING: Readonly<
 })();
 
 /**
- * Lifecycle events that stay undispatchable for *every* adapter today
- * (ADR 0024): run-level events must never map onto a session. `role_start`
- * is adapter-dependent — Claude maps `SessionStart`; Cursor does not.
+ * Canonical lifecycle hook events that may be inert under a given adapter
+ * (ADR 0024). This is the checklist `undispatchableLifecycleHookWarnings`
+ * walks — not a claim that every entry is undispatchable on every adapter.
+ *
+ * - `run_start` / `run_end` are never mapped by any generator (orchestrator
+ *   territory; an adapter session cannot identify a run boundary).
+ * - `role_start` is adapter-dependent: Claude maps `SessionStart`; Cursor
+ *   has no equivalent. Whether a declared handler warns depends on the
+ *   active adapter's row in `ADAPTER_HOOK_CAPABILITIES`.
  */
-export const UNDISPATCHABLE_LIFECYCLE_EVENTS = [
+export const LIFECYCLE_HOOK_EVENTS = [
   "role_start",
   "run_start",
   "run_end",
 ] as const satisfies readonly HookEvent[];
 
-export type UndispatchableLifecycleEvent =
-  (typeof UNDISPATCHABLE_LIFECYCLE_EVENTS)[number];
+export type LifecycleHookEvent = (typeof LIFECYCLE_HOOK_EVENTS)[number];
 
-const LIFECYCLE_REASON: Readonly<Record<UndispatchableLifecycleEvent, string>> =
-  {
-    role_start:
-      "no adapter event mapping exists for role_start under the active generator",
-    run_start:
-      "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
-    run_end:
-      "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
-  };
+const LIFECYCLE_REASON: Readonly<Record<LifecycleHookEvent, string>> = {
+  role_start:
+    "no adapter event mapping exists for role_start under the active generator",
+  run_start:
+    "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
+  run_end:
+    "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
+};
 
 /**
  * Warnings for harness-declared lifecycle handlers that cannot fire under
@@ -100,7 +104,7 @@ export function undispatchableLifecycleHookWarnings(
 ): readonly string[] {
   const dispatchable = adapterDispatchableEvents(adapter);
   const warnings: string[] = [];
-  for (const event of UNDISPATCHABLE_LIFECYCLE_EVENTS) {
+  for (const event of LIFECYCLE_HOOK_EVENTS) {
     if ((hooks[event]?.length ?? 0) === 0) {
       continue;
     }

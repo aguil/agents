@@ -283,10 +283,8 @@ test("normalizeHookPayload maps Claude Code event names (ADR 0023)", () => {
 });
 
 test("policy-eval --format defaults to cursor and encodes claude deny", async () => {
-  const {
-    encodeClaudePolicyResponse,
-    encodeCursorPolicyResponse,
-  } = await import("../packages/cli/src/policy-eval-main");
+  const { encodeClaudePolicyResponse, encodeCursorPolicyResponse } =
+    await import("../packages/cli/src/policy-eval-main");
   expect(encodeCursorPolicyResponse({ permission: "deny" })).toEqual({
     permission: "deny",
   });
@@ -305,7 +303,11 @@ test("policy-eval --format defaults to cursor and encodes claude deny", async ()
 
   const cursorDefault = await runPolicyEval(
     ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
-    { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "rm -rf /" } },
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "rm -rf /" },
+    },
   );
   // Unknown/denied by policy still Cursor-shaped when --format omitted.
   const cursorBody = lastJsonLine(cursorDefault.stdout);
