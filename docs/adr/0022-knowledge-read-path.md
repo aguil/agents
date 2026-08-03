@@ -90,6 +90,13 @@ that placement is the substantive choice below.
    0017 clause 1. Rejecting unknown fields now would make that later addition a
    breaking change.
 
+   One part of the identifier space is not the note author's to use: an
+   identifier beginning `_meta:` is reserved for the providers' own report
+   artifacts under clause 8, and a note declaring one is skipped under clause 4
+   like any other unusable value. Without the reservation a note could take the
+   identifier the provider uses for its report about the store, and a document
+   inside the store would be able to impersonate the runtime's account of it.
+
 4. **Malformed data degrades; malformed configuration fails.** A note that
    cannot be parsed, carries no identifier, duplicates an identifier already
    seen, or gives an unusable value for a field the reader understands is
@@ -132,6 +139,14 @@ that placement is the substantive choice below.
    identifier tiebreak is what makes the result stable rather than merely
    plausible.
 
+   Admission walks that order and fills the budget. A note that does not fit in
+   what remains is truncated into it and admitted, with the truncation marked in
+   the content, rather than being skipped in favour of a smaller note behind it.
+   The admitted set is therefore always a prefix of the order, and the note the
+   order ranks highest is never the one dropped — which is the whole point of
+   ranking by recency. Once the budget is spent, everything after it is omitted
+   and reported under clause 8.
+
 8. **Overflow is recorded in the bundle and is not a failure.** When eligible
    notes exceed a bound, the collected bundle carries an additional artifact
    naming the admitted identifiers, the omitted identifiers, and which bound was
@@ -141,6 +156,12 @@ that placement is the substantive choice below.
    exported bundle type unchanged, so every existing consumer is unaffected. The
    run does not fail: per ADR 0017 clause 7, an unrelated success condition must
    not come to depend on how large the store has grown.
+
+   The identifiers are part of the contract, because a consumer reading a bundle
+   has to tell a note from an account of the notes. An admitted note is
+   `<provider>:<note-id>`; the skip and admission reports are
+   `<provider>:_meta:skipped` and `<provider>:_meta:admission`, in the namespace
+   clause 3 reserves for them.
 
 9. **Search is tags, bounded, with a provenance filter.** `knowledge-search`
    takes `tags` (matching notes that carry every listed tag, compared
