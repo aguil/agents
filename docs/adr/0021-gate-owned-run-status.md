@@ -35,7 +35,9 @@ harness that added the block for scheduling would hit it.
    `harnessStatusIsFindingsBlind`: true when a runtime `passGate` is set, when a
    validation-loop internal gate ran, or when the document declares chain
    `pass_check` / `validation-loop`. Bare `execution: { mode: parallel }` or
-   chain without `pass_check` keeps finding-driven status.
+   chain without `pass_check` keeps finding-driven status. This replaces ADR
+   0007 §7's broader rule that any execution-configured harness is
+   findings-blind.
 3. **Schema descriptions state the rule.** The `execution` and `pass_check`
    field descriptions in `harness.schema.json` say scheduling vs gate ownership
    explicitly so an author does not need an experiment.
@@ -61,6 +63,7 @@ harness that added the block for scheduling would hit it.
 
 - Issue #157
 - Issue #156 (companion: wiring `pass_check` on every path)
+- ADR 0007 §7 (partially superseded by Decision §2)
 - `packages/orchestration/src/index.ts` — `harnessStatusIsFindingsBlind`,
   `assembleResult`
 - `packages/reporting/src/index.ts` — `statusAfterFindingPipelines`
