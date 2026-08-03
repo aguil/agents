@@ -43,6 +43,7 @@ import {
   resolveGitAwarePath,
 } from "@aguil/agents-core";
 import {
+  assertClaudeHookEnforcementArgs,
   buildClaudeCodeCommand,
   buildCursorCommand,
   buildCursorPrompt,
@@ -2721,6 +2722,46 @@ test("builds claude command behind the adapter boundary", () => {
   expect(command).toContain("--model");
   expect(command).toContain("claude-sonnet");
   expect(command[2]).toContain("quality specialist");
+});
+
+test("claude command passes --settings and refuses bare/safe under policy (ADR 0023)", () => {
+  const request = {
+    runId: "run-1",
+    roleId: "quality",
+    prompt: "Review.",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch",
+    timeoutMs: 1_000,
+    allowedCommands: [] as string[],
+  };
+  const withSettings = buildClaudeCodeCommand(request, "/scratch/req.json", {
+    settingsPath: "/scratch/claude-settings.json",
+  });
+  expect(withSettings).toContain("--settings");
+  expect(withSettings).toContain("/scratch/claude-settings.json");
+
+  expect(() =>
+    assertClaudeHookEnforcementArgs(["-p", "{prompt}", "--bare"], {
+      requireHookEnforcement: true,
+      settingsPath: "/scratch/claude-settings.json",
+    }),
+  ).toThrow(/--bare/);
+
+  expect(() =>
+    assertClaudeHookEnforcementArgs(["-p", "{prompt}"], {
+      requireHookEnforcement: true,
+      settingsPath: "/scratch/claude-settings.json",
+    }),
+  ).toThrow(/--settings/);
+
+  expect(() =>
+    buildClaudeCodeCommand(request, "/scratch/req.json", {
+      settingsPath: "/scratch/claude-settings.json",
+      requireHookEnforcement: true,
+      argsTemplate: ["-p", "{prompt}"],
+    }),
+  ).toThrow(/--settings/);
 });
 
 test("builds cursor command behind the adapter boundary", () => {
