@@ -212,9 +212,10 @@ test("loadKnowledgeStore bounds per-file reads", async () => {
     const loaded = await loadKnowledgeStore(workspacePath);
     expect(loaded.notes).toHaveLength(1);
     expect(loaded.notes[0]?.body.length).toBeLessThan(body.length);
+    expect(loaded.notes[0]?.body).toContain("[truncated at");
     expect(
       Buffer.byteLength(loaded.notes[0]?.body ?? "", "utf8"),
-    ).toBeLessThanOrEqual(50_001);
+    ).toBeLessThanOrEqual(50_000 + 64);
   });
 });
 
@@ -249,6 +250,43 @@ test("admission order is updatedAt desc then id asc", () => {
     note({ id: "d", updatedAt: "2026-01-02T00:00:00Z" }),
   ].sort(compareKnowledgeNotesForAdmission);
   expect(ordered.map((entry) => entry.id)).toEqual(["a", "d", "b", "c"]);
+});
+
+test("KnowledgeProvider meta artifact ids do not collide with note ids", async () => {
+  await withWorkspace(async (workspacePath) => {
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/admission.md",
+      [
+        "---",
+        "id: admission",
+        "context: auto",
+        "updatedAt: 2026-01-01T00:00:00Z",
+        "---",
+        "note named admission",
+      ].join("\n"),
+    );
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/extra.md",
+      [
+        "---",
+        "id: extra",
+        "context: auto",
+        "updatedAt: 2025-01-01T00:00:00Z",
+        "---",
+        "older",
+      ].join("\n"),
+    );
+    const artifacts = await new KnowledgeProvider({ maxNotes: 1 }).collect({
+      workspacePath,
+      scratchpadPath: join(workspacePath, ".scratch"),
+    });
+    const ids = artifacts.map((artifact) => artifact.id);
+    expect(ids).toContain("knowledge:admission");
+    expect(ids).toContain("knowledge:_meta:admission");
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
 
 test("KnowledgeProvider injects only context:auto notes within budget", async () => {

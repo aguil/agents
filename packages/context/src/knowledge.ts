@@ -1,7 +1,11 @@
 import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { readBoundedFile, resolveWorkspacePath } from "./fs-bounds";
+import {
+  readBoundedFile,
+  resolveWorkspacePath,
+  truncateArtifactContent,
+} from "./fs-bounds";
 import type {
   ContextArtifact,
   ContextProvider,
@@ -397,7 +401,12 @@ export async function loadKnowledgeStore(
     }
     let source: string;
     try {
-      source = await readBoundedFile(absolute, maxReadBytes);
+      // readBoundedFile may return maxReadBytes+1 when the file is larger;
+      // truncateArtifactContent then marks the overshoot visibly.
+      source = truncateArtifactContent(
+        await readBoundedFile(absolute, maxReadBytes),
+        maxReadBytes,
+      );
     } catch {
       skipped.push({ path: candidate, reason: "unreadable" });
       continue;
