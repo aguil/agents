@@ -1,10 +1,13 @@
 # ADR 0022: knowledge read path — store layout, note frontmatter, and bounded context admission
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-08-02 — Proposed.
+- 2026-08-02 — Accepted: merged with the knowledge read-path implementation.
+  Partially supersedes ADR 0017 §6 on budget placement (provider params for the
+  read path; the `knowledge:` block remains deferred to the write path).
 
 **Context:** ADR 0017 governs how a harness run may _write_ knowledge notes. It
 answers three questions about staged notes — a required frontmatter schema whose
