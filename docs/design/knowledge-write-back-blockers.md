@@ -37,11 +37,14 @@ hook. That hook cannot fire. Four facts compose into the blockage.
 **1. The event is declarable.** `run_end` is a member of `HOOK_EVENTS`
 (`packages/harness-config/src/index.ts:106-113`) and of the policy intervention
 vocabulary (`packages/policy/src/index.ts:38-44`). The loader accepts a handler
-declared against it without complaint.
+declared against it. As of ADR 0024's honesty fix, `setUpHookEnforcement`
+**warns** naming `role_start` / `run_start` / `run_end` when declared — the
+document still loads and runs; the author is no longer left to discover the
+inertness by watching nothing happen.
 
 **2. Generation drops it.** `CURSOR_EVENT_MAPPING`
-(`packages/hooks/src/index.ts:20-26`) maps only three canonical events onto the
-one adapter that has a hook generator:
+(`packages/hooks/src/index.ts`) maps only three canonical events onto the one
+adapter that has a hook generator:
 
 | Canonical event                      | Cursor event(s)                              |
 | ------------------------------------ | -------------------------------------------- |
@@ -50,13 +53,11 @@ one adapter that has a hook generator:
 | `role_stop`                          | `stop`                                       |
 | `role_start`, `run_start`, `run_end` | none — reported as skipped                   |
 
-**3. A test pins the behavior.** `tests/hooks-generation.test.ts:66` asserts
-`expect(skippedEvents).toEqual(["run_end"])`. Any change that starts executing
-`run_end` has to revise this contract deliberately rather than by accident.
-
-Worth knowing: that assertion names only `run_end` because `run_end` is the only
-unmapped event the test's sample hooks declare. `run_start` and `role_start`
-would be skipped identically; the test simply does not exercise them.
+**3. A test pins the behavior.** `tests/hooks-generation.test.ts` enumerates
+every canonical `HookEvent` and its Cursor dispatchability (ADR 0024 §4). The
+fixture-local `skippedEvents === ["run_end"]` assertion remains, labeled as a
+fixture artifact, not the contract. `UNDISPATCHABLE_LIFECYCLE_EVENTS` names the
+three inert events explicitly.
 
 **4. The orchestrator does not close the gap.** Its only lifecycle callback is
 `onRoleStart` (declared `packages/orchestration/src/index.ts:188`, invoked
@@ -65,9 +66,9 @@ dispatches no run-level events and runs no hook commands itself — hook executi
 belongs entirely to the adapter, which is why decision 1 above is the
 orchestrator's to take.
 
-So a declared `run_end` handler is accepted, never generated, and never run.
-`run_start` and `role_start` are inert in exactly the same way. `role_stop` is
-the only lifecycle event that reaches an adapter today.
+So a declared `run_end` handler is accepted, warned about, never generated, and
+never run. `run_start` and `role_start` are inert in exactly the same way.
+`role_stop` is the only lifecycle event that reaches an adapter today.
 
 This trap is wider than knowledge write-back: the loader accepting handlers for
 events that can never fire will mislead anyone declaring a lifecycle hook, not
@@ -93,10 +94,13 @@ work.
    orchestrator's `run`. Building hook generators for further adapters is
    therefore not progress toward this blocker. ADR 0024 carries the argument and
    the near-counterexample (`session-agent-adapter.ts`) it has to dispose of.
-2. **Revise the skip contract.** `tests/hooks-generation.test.ts:66`. ADR 0024
+2. **Revise the skip contract.** ~~`tests/hooks-generation.test.ts:66`. ADR 0024
    §4 requires this become an enumeration of every canonical event and its
    dispatchability; today's assertion names only `run_end` because that is the
-   sole unmapped event its fixture declares.
+   sole unmapped event its fixture declares.~~ **Done with the ADR 0024 honesty
+   fix** — `cursorHookEventDispatchability()` / `UNDISPATCHABLE_LIFECYCLE_EVENTS`
+   enumerate the surface; declaring an inert lifecycle handler warns at
+   `setUpHookEnforcement`.
 3. **A knowledge read path.** ~~A provider registered in
    `packages/context/src/index.ts`, conforming to the contract in ADR 0010.~~
    **Done (2026-08-02)** — `knowledge` and `knowledge-search` per ADR 0022.
