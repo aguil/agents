@@ -1,10 +1,14 @@
 # ADR 0024: run-level lifecycle events are the orchestrator's to dispatch; declaring an undispatchable event is reported, not accepted
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-08-03 — Proposed.
+- 2026-08-03 — Accepted: merged in #175. Revised under review to separate
+  `role_start` (unmapped, per-adapter, fixable by a generator) from `run_start`
+  / `run_end` (structurally undispatchable by that route), after implementation
+  found Claude Code's `SessionStart` is a correct `role_start` native.
 
 **Context:** `HOOK_EVENTS` in `packages/harness-config/src/index.ts` declares
 six canonical hook events: `pre_tool_call`, `post_tool_call`, `role_start`,
@@ -12,14 +16,21 @@ six canonical hook events: `pre_tool_call`, `post_tool_call`, `role_start`,
 against any of them, validates its shape, and stores it. The policy layer's
 intervention vocabulary in `packages/policy/src/index.ts` names all six as well.
 
-Three of the six can never run. Hook generation maps `pre_tool_call`,
-`post_tool_call` and `role_stop`; the generator reports the rest as skipped, and
-the orchestrator dispatches no lifecycle events of its own beyond the
-`onRoleStart` callback its caller uses to regenerate adapter hook configuration.
-So a harness author who declares a `run_end` handler gets a document that loads
-cleanly, a run that completes normally, and a handler that never executes — with
-no diagnostic at any point. `run_start` and `role_start` are inert in exactly
-the same way.
+Three of the six do not run today, and they do not fail to run for the same
+reason — a distinction this ADR draws deliberately, because conflating them
+would freeze a claim that stops being true as soon as a second generator exists.
+`role_start` is merely **unmapped**: no adapter's generator projects it, and any
+adapter with a per-session start event could map it, at which point it fires
+correctly. `run_start` and `run_end` are **structurally undispatchable** by that
+route, for the reason set out below, and no generator can fix them. Hook
+generation maps `pre_tool_call`, `post_tool_call` and `role_stop`; the generator
+reports the rest as skipped, and the orchestrator dispatches no lifecycle events
+of its own beyond the `onRoleStart` callback its caller uses to regenerate
+adapter hook configuration. So a harness author who declares a `run_end` handler
+gets a document that loads cleanly, a run that completes normally, and a handler
+that never executes — with no diagnostic at any point. `run_start` is inert in
+exactly the same way, and `role_start` is inert for the weaker reason above:
+unmapped under the only generator that exists, not impossible.
 
 `tests/hooks-generation.test.ts` asserts that the set of skipped events equals
 `["run_end"]`. That reads like a contract and is a fixture artifact: `run_end`
@@ -94,6 +105,16 @@ absence.
    `run_end` and `role_start` together; closing one third of the trap because
    one third is what a test fixture happened to name is how it stayed open.
 
+   **The test is per-adapter, not global**, which is the practical form of the
+   distinction drawn in the context above. `run_start` and `run_end` are
+   undispatchable for every adapter and always will be, by decision 1.
+   `role_start` is undispatchable only where the active adapter's generator does
+   not map it, so an adapter that maps a per-session start event must stop
+   warning for it. A warning that fires when the handler would in fact run is
+   the same defect as silence, pointed the other way, and it is worse in one
+   respect: an author who learns to ignore these warnings stops reading the ones
+   that are true. The reason string names which case applies.
+
 3. **The report is a warning, not a load failure.** A harness declaring an inert
    lifecycle handler continues to load and run. The defect being corrected is
    that the author is not told; it is not that the document is invalid, and this
@@ -130,8 +151,8 @@ absence.
 
 **Consequences:**
 
-- An author who declares `run_end`, `run_start` or `role_start` learns
-  immediately that it will not fire. That is the whole of the user-visible
+- An author who declares a lifecycle handler that cannot fire under the adapter
+  they are running learns immediately. That is the whole of the user-visible
   change.
 - Knowledge write-back stays blocked, and is now blocked on something precisely
   named. The false hope that a newer adapter release could unblock it is
@@ -141,10 +162,19 @@ absence.
   adapter-mapping route. That note is maintained rather than immutable, which is
   why the finding is recorded here as well — a note can go stale, and this
   argument should outlive the line numbers it was derived from.
-- `role_stop` remains the only lifecycle event that reaches an adapter. That is
-  a real limitation on what a harness can express, and this decision accepts it
-  rather than papering over it with an event that fires at the wrong
-  granularity.
+- Under the generator that exists when this is written, `role_stop` is the only
+  lifecycle event reaching an adapter. That is a statement about the generator,
+  not a limit this decision imposes: an adapter with a per-session start event
+  can map `role_start`, and decision 2 requires the warning follow. What this
+  decision does refuse is papering over the run-level gap with an event that
+  fires at the wrong granularity — `role_stop` is not `run_end` no matter how
+  convenient the projection would be.
+- The two categories degrade differently over time, and that is the point of
+  separating them. The set of adapters mapping `role_start` can only grow, so
+  that half of the warning shrinks toward nothing. The run-level half does not
+  move at all until an orchestrator dispatch point exists, which is decision 6's
+  territory. An ADR that had called all three "inert" would have read as
+  progressively more wrong while being progressively less useful.
 - Decision 3 means a harness with an inert handler still runs, so an author who
   ignores warnings is no better off than before. A hard refusal was considered
   and rejected: it would break documents that load today for a defect that is
