@@ -29,7 +29,13 @@ Unknown fields are tolerated.
 
 `knowledge` params: `path`, `max_notes` (default 10), `max_bytes` (default
 50000, aggregate). Overflow is deterministic (`updatedAt` desc, `id` asc) and
-recorded in the bundle; it does not fail the run.
+recorded in the bundle; it does not fail the run. Admission fills the budget in
+that order and truncates the note that straddles the boundary rather than
+skipping it; everything after is omitted and reported.
+
+A note id may not begin `_meta:` — that prefix is reserved for the providers'
+own reports, emitted as `<provider>:_meta:skipped` and
+`<provider>:_meta:admission`.
 
 `knowledge-search` params: `tags` (AND, case-insensitive), `limit` (default 5),
 `provenance` (`any` \| `machine` \| `human`), `machine_id_prefix` (default

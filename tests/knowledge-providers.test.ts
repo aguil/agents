@@ -510,6 +510,80 @@ test("KnowledgeProvider admits oversized notes in truncated form", async () => {
   });
 });
 
+test("KnowledgeProvider truncates a leading oversized note and omits those behind it", async () => {
+  await withWorkspace(async (workspacePath) => {
+    // Oversized note ranks first by updatedAt; two small notes sit behind it.
+    // Truncate-to-fit must admit the leader truncated and omit the rest with
+    // bound: max_bytes — not skip the leader and fill with the smaller ones.
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/leader.md",
+      [
+        "---",
+        "id: leader",
+        "context: auto",
+        "updatedAt: 2026-06-01T00:00:00Z",
+        "---",
+        "L".repeat(200),
+      ].join("\n"),
+    );
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/mid.md",
+      [
+        "---",
+        "id: mid",
+        "context: auto",
+        "updatedAt: 2026-03-01T00:00:00Z",
+        "---",
+        "mid-body",
+      ].join("\n"),
+    );
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/tail.md",
+      [
+        "---",
+        "id: tail",
+        "context: auto",
+        "updatedAt: 2026-01-01T00:00:00Z",
+        "---",
+        "tail-body",
+      ].join("\n"),
+    );
+
+    const artifacts = await new KnowledgeProvider({ maxBytes: 100 }).collect({
+      workspacePath,
+      scratchpadPath: join(workspacePath, ".scratch"),
+    });
+    const noteArtifacts = artifacts.filter(
+      (artifact) =>
+        artifact.id.startsWith("knowledge:") &&
+        !artifact.id.endsWith(":_meta:admission") &&
+        !artifact.id.endsWith(":_meta:skipped"),
+    );
+    expect(noteArtifacts).toHaveLength(1);
+    expect(noteArtifacts[0]?.id).toBe("knowledge:leader");
+    expect(noteArtifacts[0]?.content).toContain("[truncated at");
+    expect(
+      Buffer.byteLength(noteArtifacts[0]?.content ?? "", "utf8"),
+    ).toBeLessThanOrEqual(100);
+
+    const admission = artifacts.find(
+      (artifact) => artifact.id === "knowledge:_meta:admission",
+    );
+    expect(admission).toBeDefined();
+    const record = JSON.parse(admission?.content ?? "{}") as {
+      admitted: string[];
+      omitted: string[];
+      bound?: string;
+    };
+    expect(record.admitted).toEqual(["leader"]);
+    expect(record.omitted).toEqual(["mid", "tail"]);
+    expect(record.bound).toBe("max_bytes");
+  });
+});
+
 test("KnowledgeSearchProvider honors limit without requiring context:auto", async () => {
   await withWorkspace(async (workspacePath) => {
     for (const id of ["a", "b", "c"]) {

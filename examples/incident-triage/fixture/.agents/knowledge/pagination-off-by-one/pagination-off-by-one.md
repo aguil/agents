@@ -13,5 +13,5 @@ index. Every page therefore silently omits its final item, which matches the
 support-desk reports in `alert.log` (export shows 4 of 5; synthetic check
 expects 5 and receives 3 across two pages).
 
-The fix is the inclusive end `cursor + pageSize`. Prefer confirming with
-`bun run check.ts` after the change — that is the harness pass gate.
+Prefer confirming with `bun run check.ts` after the change — that is the harness
+pass gate.
