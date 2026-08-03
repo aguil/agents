@@ -10,6 +10,13 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.1](https://github.com/aguil/agents/compare/v0.8.0...v0.8.1) (2026-08-03)
+
+
+### Added
+
+* **context:** knowledge read path (ADR 0022) ([#171](https://github.com/aguil/agents/issues/171)) ([867b509](https://github.com/aguil/agents/commit/867b50943bed38d8bad010224e45c0fa699bb155))
+
 ## [0.8.0](https://github.com/aguil/agents/compare/v0.7.0...v0.8.0) (2026-08-03)
 
 
