@@ -224,9 +224,11 @@ test("claude adapter enforces policy via run-scoped settings (ADR 0023)", async 
     expect(enforcement.claudeSettingsPath).toBe(
       join(scratchpadPath, "claude-settings.json"),
     );
-    const settings = JSON.parse(
-      await Bun.file(enforcement.claudeSettingsPath!).text(),
-    );
+    const settingsPath = enforcement.claudeSettingsPath;
+    if (settingsPath === undefined) {
+      throw new Error("expected claudeSettingsPath");
+    }
+    const settings = JSON.parse(await Bun.file(settingsPath).text());
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain(
       "policy-eval --format claude",
     );

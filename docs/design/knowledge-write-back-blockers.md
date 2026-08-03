@@ -56,7 +56,7 @@ adapter that has a hook generator:
 **3. A test pins the behavior.** `tests/hooks-generation.test.ts` enumerates
 every canonical `HookEvent` and its Cursor dispatchability (ADR 0024 §4). The
 fixture-local `skippedEvents === ["run_end"]` assertion remains, labeled as a
-fixture artifact, not the contract. `UNDISPATCHABLE_LIFECYCLE_EVENTS` names the
+fixture artifact, not the contract. `LIFECYCLE_HOOK_EVENTS` names the
 three inert events explicitly.
 
 **4. The orchestrator does not close the gap.** Its only lifecycle callback is
@@ -98,7 +98,7 @@ work.
    §4 requires this become an enumeration of every canonical event and its
    dispatchability; today's assertion names only `run_end` because that is the
    sole unmapped event its fixture declares.~~ **Done with the ADR 0024 honesty
-   fix** — `cursorHookEventDispatchability()` / `UNDISPATCHABLE_LIFECYCLE_EVENTS`
+   fix** — `cursorHookEventDispatchability()` / `LIFECYCLE_HOOK_EVENTS`
    enumerate the surface; declaring an inert lifecycle handler warns at
    `setUpHookEnforcement`.
 3. **A knowledge read path.** ~~A provider registered in

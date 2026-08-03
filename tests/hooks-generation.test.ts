@@ -11,8 +11,8 @@ import {
   generateCursorHooksConfig,
   HOOK_ADAPTER_IDS,
   hookEventAdapterDispatchability,
+  LIFECYCLE_HOOK_EVENTS,
   renderCursorHooksConfig,
-  UNDISPATCHABLE_LIFECYCLE_EVENTS,
   undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
 
@@ -105,11 +105,11 @@ test("every HookEvent has an explicit Cursor dispatchability (ADR 0024 skip cont
   // The three inert lifecycle events stay undispatchable until orchestrator
   // dispatch (run_*) or an adapter mapping (role_start) lands — never by
   // projecting a session-end onto a run boundary.
-  expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toContain("role_start");
-  expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toContain("run_start");
-  expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toContain("run_end");
-  expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toHaveLength(3);
-  for (const event of UNDISPATCHABLE_LIFECYCLE_EVENTS) {
+  expect(LIFECYCLE_HOOK_EVENTS).toContain("role_start");
+  expect(LIFECYCLE_HOOK_EVENTS).toContain("run_start");
+  expect(LIFECYCLE_HOOK_EVENTS).toContain("run_end");
+  expect(LIFECYCLE_HOOK_EVENTS).toHaveLength(3);
+  for (const event of LIFECYCLE_HOOK_EVENTS) {
     expect(expectedDispatchable.has(event)).toBe(false);
   }
 });
@@ -209,7 +209,6 @@ test("declaring undispatchable lifecycle handlers yields named warnings (ADR 002
   expect(claudeWarnings).toHaveLength(2);
   expect(claudeWarnings.join("\n")).not.toContain("role_start");
 });
-
 
 test("policyBridge false yields no bridge entries", () => {
   const { config } = generateCursorHooksConfig({

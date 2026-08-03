@@ -35,6 +35,9 @@ response encoding matches what the CLI expects
 
 ## Lifecycle honesty (ADR 0024)
 
-`undispatchableLifecycleHookWarnings(hooks, adapter)` names `run_start` /
-`run_end` (always) and `role_start` when the active generator does not map it.
-`run_*` must never be projected onto a session-end event.
+`LIFECYCLE_HOOK_EVENTS` is the checklist of lifecycle events that *may* be
+inert (`role_start`, `run_start`, `run_end`).
+`undispatchableLifecycleHookWarnings(hooks, adapter)` warns for each declared
+member that the active adapter does not map — `run_*` always, `role_start`
+only when the generator has no native equivalent (Cursor today; Claude maps
+`SessionStart`). `run_*` must never be projected onto a session-end event.
