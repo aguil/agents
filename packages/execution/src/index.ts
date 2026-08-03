@@ -963,6 +963,19 @@ export interface ClaudeCodeAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
   readonly argsTemplate?: readonly string[];
+  /**
+   * Path to a run-scoped Claude Code settings JSON file passed via
+   * `--settings` (ADR 0023 decision 3 / JC-3). When set, the default argv
+   * template includes `--settings {settings}` unless `argsTemplate` is
+   * supplied.
+   */
+  readonly settingsPath?: string;
+  /**
+   * When true, refuse argv that would disable hooks (`--bare`, `--safe-mode`)
+   * or omit the settings flag while a policy is declared (ADR 0023 decision 5).
+   * Set by harness-run when the harness declares a policy.
+   */
+  readonly requireHookEnforcement?: boolean;
 }
 
 export interface CursorAdapterOptions {
@@ -1178,9 +1191,17 @@ export function buildClaudeCodeCommand(
     request: requestPath,
     role: request.roleId,
     prompt,
+    ...(options.settingsPath === undefined
+      ? {}
+      : { settings: options.settingsPath }),
   };
 
-  const template = options.argsTemplate ?? ["-p", "{prompt}"];
+  const defaultTemplate: readonly string[] =
+    options.settingsPath === undefined
+      ? ["-p", "{prompt}"]
+      : ["-p", "{prompt}", "--settings", "{settings}"];
+  const template = options.argsTemplate ?? defaultTemplate;
+  assertClaudeHookEnforcementArgs(template, options);
   const args = template.map((arg) => substituteTemplateArg(arg, substitutions));
   const hasPrompt = template.some((arg) => arg.includes("{prompt}"));
   const cmd = [options.executable ?? "claude", ...args];
@@ -1193,6 +1214,43 @@ export function buildClaudeCodeCommand(
   }
 
   return cmd;
+}
+
+/**
+ * Under a declared policy, refuse argv that disables hooks or drops the
+ * settings flag (ADR 0023 decision 5). Without `requireHookEnforcement`, this
+ * is a no-op so non-policy runs keep working.
+ */
+export function assertClaudeHookEnforcementArgs(
+  template: readonly string[],
+  options: Pick<
+    ClaudeCodeAdapterOptions,
+    "requireHookEnforcement" | "settingsPath"
+  >,
+): void {
+  if (options.requireHookEnforcement !== true) {
+    return;
+  }
+  for (const arg of template) {
+    if (
+      arg === "--bare" ||
+      arg === "--safe-mode" ||
+      arg.includes("--bare") ||
+      arg.includes("--safe-mode")
+    ) {
+      throw new Error(
+        "claude adapter: argsTemplate mentions --bare or --safe-mode, which disable hooks; refused under a declared policy (ADR 0023)",
+      );
+    }
+  }
+  const passesSettings =
+    template.some((arg) => arg === "--settings") ||
+    template.some((arg) => arg.includes("{settings}"));
+  if (!passesSettings || options.settingsPath === undefined) {
+    throw new Error(
+      "claude adapter: under a declared policy, argv must pass --settings {settings} with a settingsPath (ADR 0023)",
+    );
+  }
 }
 
 export function buildClaudeCodePrompt(

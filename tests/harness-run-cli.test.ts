@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -192,8 +192,120 @@ test("a policy-declaring harness fails closed on a non-cursor adapter", async ()
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("cannot enforce it");
     expect(result.stderr).toContain("--allow-unenforced-policy");
+    expect(result.stderr).not.toContain("cursor-only");
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("claude adapter enforces policy via run-scoped settings (ADR 0023)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const loaded = await loadHarness({
+    agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+    harnessId: "incident-triage",
+  });
+  const workspace = await mkdtemp(join(tmpdir(), "harness-claude-hooks-"));
+  const scratchpadPath = join(workspace, "scratch");
+  await mkdir(scratchpadPath, { recursive: true });
+  try {
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "claude",
+      agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+      workspace,
+      scratchpadPath,
+      allowUnenforcedPolicy: false,
+    });
+    if ("error" in enforcement) {
+      throw new Error(enforcement.error);
+    }
+    expect(enforcement.claudeSettingsPath).toBe(
+      join(scratchpadPath, "claude-settings.json"),
+    );
+    const settingsPath = enforcement.claudeSettingsPath;
+    if (settingsPath === undefined) {
+      throw new Error("expected claudeSettingsPath");
+    }
+    const settings = JSON.parse(await Bun.file(settingsPath).text());
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain(
+      "policy-eval --format claude",
+    );
+    // Workspace must not gain a .claude/settings mutation.
+    expect(
+      await Bun.file(join(workspace, ".claude", "settings.json")).exists(),
+    ).toBe(false);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("declaring run_end / run_start / role_start warns rather than failing (ADR 0024)", async () => {
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const workspace = await mkdtemp(join(tmpdir(), "harness-lifecycle-warn-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-lifecycle-agents-"));
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "));
+  };
+  try {
+    const harnessDir = join(agentsDir, "harnesses", "lifecycle-warn");
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness:",
+        "  id: lifecycle-warn",
+        "roles:",
+        "  solo:",
+        "    description: noop role for lifecycle warning coverage",
+        "    prompt: |",
+        "      noop",
+        "hooks:",
+        "  role_start:",
+        "    - command: echo role_start",
+        "  run_start:",
+        "    - command: echo run_start",
+        "  run_end:",
+        "    - command: echo run_end",
+        "  role_stop:",
+        "    - command: echo role_stop",
+        "",
+      ].join("\n"),
+    );
+    const { loadHarness } = await import("@aguil/agents-harness-config");
+    const loaded = await loadHarness({
+      agentsDir,
+      harnessId: "lifecycle-warn",
+    });
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "cursor",
+      agentsDir,
+      workspace,
+      scratchpadPath: workspace,
+      allowUnenforcedPolicy: false,
+    });
+    expect("error" in enforcement).toBe(false);
+    const joined = warnings.join("\n");
+    expect(joined).toContain("hooks.role_start:");
+    expect(joined).toContain("hooks.run_start:");
+    expect(joined).toContain("hooks.run_end:");
+    expect(joined).toContain("ADR 0024");
+    // Still generates mapped events — warning does not refuse the run.
+    const hooksPath = join(workspace, ".cursor", "hooks.json");
+    const rendered = await Bun.file(hooksPath).text();
+    expect(rendered).toContain("echo role_stop");
+    expect(rendered).toContain('"stop"');
+  } finally {
+    console.warn = originalWarn;
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
   }
 });
 
@@ -212,6 +324,7 @@ test("enforcement provides per-role env in every mode; hooks file is role-invari
       adapter: "cursor",
       agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
       workspace,
+      scratchpadPath: workspace,
       allowUnenforcedPolicy: false,
     });
     if ("error" in enforcement) {
@@ -266,6 +379,7 @@ test("a role tampering with hooks.json cannot weaken the next role's enforcement
       adapter: "cursor",
       agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
       workspace,
+      scratchpadPath: workspace,
       allowUnenforcedPolicy: false,
     });
     if ("error" in enforcement) {
@@ -298,6 +412,7 @@ test("concurrent runs sharing a workspace converge on identical enforcement byte
       adapter: "cursor" as const,
       agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
       workspace,
+      scratchpadPath: workspace,
       allowUnenforcedPolicy: false,
     };
     const [a, b] = await Promise.all([
