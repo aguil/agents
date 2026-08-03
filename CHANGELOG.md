@@ -10,6 +10,17 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.0](https://github.com/aguil/agents/compare/v0.7.0...v0.8.0) (2026-08-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **orchestration:** Declaring `execution:` without a pass gate no longer switches the run to findings-blind status. Status ignores finding severity only when a gate owns the run (chain `pass_check` / runtime passGate, or validation-loop). Outcomes still emit when `execution` is present.
+
+### Fixed
+
+* **orchestration:** gate-owned status, not bare execution presence ([#169](https://github.com/aguil/agents/issues/169)) ([2ebe4b4](https://github.com/aguil/agents/commit/2ebe4b4db5ce7171cc96c85eb38c8119aa2b0b4c))
+
 ## [0.7.0](https://github.com/aguil/agents/compare/v0.6.0...v0.7.0) (2026-08-02)
 
 
