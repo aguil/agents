@@ -122,3 +122,10 @@ so it is upheld in review.
 - [0021-gate-owned-run-status.md](0021-gate-owned-run-status.md) — ADR 0021: run
   status is findings-blind only when a gate owns the run (`pass_check` /
   validation-loop), not merely because `execution` is declared (issue #157).
+- [0022-knowledge-read-path.md](0022-knowledge-read-path.md) — ADR 0022:
+  `knowledge` and `knowledge-search` context providers; a workspace-confined
+  repository-local store, the note frontmatter a reader relies on, two
+  independent opt-ins for automatic injection, a provider-declared budget with
+  binding defaults, recency-then-identifier admission order, and overflow
+  recorded in the bundle rather than failing the run. Qualifies ADR 0017 §6 on
+  where the budget is declared.
