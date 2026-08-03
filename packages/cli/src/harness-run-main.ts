@@ -34,6 +34,7 @@ import {
 import {
   generateCursorHooksConfig,
   renderCursorHooksConfig,
+  undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
 import {
   harnessStatusIsFindingsBlind,
@@ -220,6 +221,12 @@ export async function setUpHookEnforcement(
 > {
   const hasHooks = Object.keys(loaded.hooks).length > 0;
   const hasAnyPolicy = harnessDeclaresPolicy(loaded);
+  // ADR 0024: tell the author when a declared lifecycle handler cannot fire,
+  // before any adapter-specific enforcement path. Warning, not a hard refuse —
+  // the document is valid; the defect is silence.
+  for (const warning of undispatchableLifecycleHookWarnings(loaded.hooks)) {
+    console.warn(`harness run: ${warning}`);
+  }
   if (!hasHooks && !hasAnyPolicy) {
     return {};
   }

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -194,6 +194,73 @@ test("a policy-declaring harness fails closed on a non-cursor adapter", async ()
     expect(result.stderr).toContain("--allow-unenforced-policy");
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("declaring run_end / run_start / role_start warns rather than failing (ADR 0024)", async () => {
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const workspace = await mkdtemp(join(tmpdir(), "harness-lifecycle-warn-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-lifecycle-agents-"));
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "));
+  };
+  try {
+    const harnessDir = join(agentsDir, "harnesses", "lifecycle-warn");
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness:",
+        "  id: lifecycle-warn",
+        "roles:",
+        "  solo:",
+        "    description: noop role for lifecycle warning coverage",
+        "    prompt: |",
+        "      noop",
+        "hooks:",
+        "  role_start:",
+        "    - command: echo role_start",
+        "  run_start:",
+        "    - command: echo run_start",
+        "  run_end:",
+        "    - command: echo run_end",
+        "  role_stop:",
+        "    - command: echo role_stop",
+        "",
+      ].join("\n"),
+    );
+    const { loadHarness } = await import("@aguil/agents-harness-config");
+    const loaded = await loadHarness({
+      agentsDir,
+      harnessId: "lifecycle-warn",
+    });
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "cursor",
+      agentsDir,
+      workspace,
+      allowUnenforcedPolicy: false,
+    });
+    expect("error" in enforcement).toBe(false);
+    const joined = warnings.join("\n");
+    expect(joined).toContain("hooks.role_start:");
+    expect(joined).toContain("hooks.run_start:");
+    expect(joined).toContain("hooks.run_end:");
+    expect(joined).toContain("ADR 0024");
+    // Still generates mapped events — warning does not refuse the run.
+    const hooksPath = join(workspace, ".cursor", "hooks.json");
+    const rendered = await Bun.file(hooksPath).text();
+    expect(rendered).toContain("echo role_stop");
+    expect(rendered).toContain('"stop"');
+  } finally {
+    console.warn = originalWarn;
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
   }
 });
 
