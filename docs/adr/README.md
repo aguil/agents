@@ -119,3 +119,6 @@ so it is upheld in review.
   — ADR 0020: Cursor `--force` is opt-in; unforced runs default to
   `--sandbox enabled` so hook `ask` / `exec.unknown` escalation remains
   enforceable while policy-allowed writes still run (issue #159).
+- [0021-gate-owned-run-status.md](0021-gate-owned-run-status.md) — ADR 0021: run
+  status is findings-blind only when a gate owns the run (`pass_check` /
+  validation-loop), not merely because `execution` is declared (issue #157).

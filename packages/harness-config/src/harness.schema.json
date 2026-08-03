@@ -39,7 +39,7 @@
       "additionalProperties": { "$ref": "#/definitions/role" }
     },
     "execution": {
-      "description": "How roles are scheduled. Absent means the runtime's default scheduling.",
+      "description": "How roles are scheduled. Absent means the runtime's default scheduling (parallel). Declaring this block emits generic `outcomes` on the result; it does not by itself change how run status is computed. Status ignores finding severity only when a gate owns the run: chain `pass_check`, or `validation-loop`. See ADR 0021 / issue #157.",
       "$ref": "#/definitions/execution"
     },
     "hooks": {
@@ -226,7 +226,7 @@
           "items": { "$ref": "#/definitions/nonEmptyString" }
         },
         "pass_check": {
-          "description": "chain only. Command run in the workspace after all roles complete; exit 0 means the run passed. The authoritative success gate.",
+          "description": "chain only. Command run in the workspace after all roles complete; exit 0 means the run passed. The authoritative success gate — when present, finding severity does not drive status (ADR 0021).",
           "type": "array",
           "minItems": 1,
           "items": { "type": "string" }

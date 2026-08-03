@@ -150,9 +150,10 @@ export class MarkdownReportRenderer implements ReportRenderer {
  * unnoticed.
  *
  * Only the findings-derived part moves. A failed or timed-out role stands, and
- * `findingsBlind` (a harness declaring `execution`, whose status comes from
- * role outcomes and its pass gate rather than findings) is returned untouched:
- * no pipeline can talk a failed pass_check into success.
+ * `findingsBlind` (a harness whose status is owned by a gate — chain
+ * `pass_check` or validation-loop — rather than finding severity) is returned
+ * untouched: no pipeline can talk a failed pass_check into success. Bare
+ * `execution` without a gate stays findings-driven (issue #157 / ADR 0021).
  */
 export function statusAfterFindingPipelines(input: {
   readonly rawStatus: HarnessRunResult["status"];

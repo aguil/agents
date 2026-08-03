@@ -73,6 +73,40 @@ export type ExecutionConfig =
   | ChainExecution
   | ValidationLoopExecution;
 
+/**
+ * Whether finding severity is excluded from run status (issue #157 / ADR 0021).
+ *
+ * Scheduling (`execution`) and status ownership are separate decisions.
+ * Findings-blind status applies only when a gate owns the run: a chain
+ * `pass_check` (runtime `passGate`), or a validation-loop (internal
+ * convergence gate). Bare `execution: { mode: parallel }` (or chain without
+ * `pass_check`) keeps finding-driven status while still emitting `outcomes`.
+ */
+export function harnessStatusIsFindingsBlind(
+  execution: ExecutionConfig | undefined,
+  runtime?: {
+    readonly passGate?: unknown;
+    readonly internalGatePassed?: boolean;
+  },
+): boolean {
+  if (runtime?.passGate !== undefined) {
+    return true;
+  }
+  if (runtime?.internalGatePassed !== undefined) {
+    return true;
+  }
+  if (execution === undefined) {
+    return false;
+  }
+  if (execution.mode === "validation-loop") {
+    return true;
+  }
+  if (execution.mode === "chain" && execution.passCheck !== undefined) {
+    return true;
+  }
+  return false;
+}
+
 export interface HarnessDefinition {
   readonly id: string;
   readonly roles: readonly RoleDefinition[];
@@ -162,17 +196,18 @@ export interface NativeBunOrchestratorOptions {
     roleId: string,
   ) => Readonly<Record<string, string>> | undefined;
   /**
-   * Authoritative pass gate for execution-configured (generalized)
-   * harnesses. Evaluated after all roles complete without failing/timing
-   * out; `false` makes the run `failed`, `true`/absent makes it `passed`.
+   * Authoritative pass gate. When set, finding severity does not drive
+   * status (ADR 0021 / issue #157): evaluated after all roles complete
+   * without failing/timing out; `false` makes the run `failed`,
+   * `true` makes it `passed`.
    *
    * Deliberately runtime-evaluated rather than inferred from role output:
-   * findings/outcomes emitted by a real agent are diagnostic narrative and
-   * must not drive status (a healed incident whose scout described the bug
-   * as "critical" must still pass). Callers wire this to a deterministic
-   * check — e.g. running the harness's `pass_check` command in the
-   * workspace. Ignored for legacy harnesses (no `execution` config), which
-   * keep finding-severity status.
+   * findings/outcomes emitted by a real agent are diagnostic narrative
+   * (a healed incident whose scout described the bug as "critical" must
+   * still pass when the gate says so). Callers wire this to a
+   * deterministic check — e.g. running the harness's `pass_check` command
+   * in the workspace. Presence of this option is itself the status-ownership
+   * signal; bare `execution` without a gate keeps finding-driven status.
    */
   readonly passGate?: (result: {
     readonly findings: readonly Finding[];
@@ -374,12 +409,24 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       ...extraMetadata,
     };
 
-    // Generic outcomes are the opt-in surface for execution-configured
-    // harnesses; legacy definitions keep the pre-generalization result
-    // shape (and its serialized size) untouched.
-    const isGeneralized = this.options.definition.execution !== undefined;
+    // Outcomes are the opt-in surface for execution-configured harnesses;
+    // legacy definitions keep the pre-generalization result shape. Status
+    // ownership is separate (issue #157): findings-blind only when a gate
+    // owns the run, not merely because `execution` is declared.
+    const emitOutcomes = this.options.definition.execution !== undefined;
+    const findingsBlind = harnessStatusIsFindingsBlind(
+      this.options.definition.execution,
+      {
+        ...(this.options.passGate === undefined
+          ? {}
+          : { passGate: this.options.passGate }),
+        ...(gates.internalGatePassed === undefined
+          ? {}
+          : { internalGatePassed: gates.internalGatePassed }),
+      },
+    );
     const harnessOutcomes = outcomes.flatMap(roleHarnessOutcomes);
-    const status = isGeneralized
+    const status = findingsBlind
       ? await this.generalizedStatus({
           findings,
           outcomes: harnessOutcomes,
@@ -397,7 +444,7 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       runId: request.runId,
       status,
       findings,
-      ...(isGeneralized ? { outcomes: harnessOutcomes } : {}),
+      ...(emitOutcomes ? { outcomes: harnessOutcomes } : {}),
       artifacts,
       metadata,
     };
@@ -410,9 +457,10 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
   }
 
   /**
-   * Run status for execution-configured harnesses. Findings and outcomes are
-   * diagnostic payload and never drive status; role-execution problems and an
-   * optional runtime pass gate do.
+   * Run status when a gate owns the run (passGate / validation-loop /
+   * declared chain `pass_check`). Findings and outcomes are diagnostic
+   * payload and never drive status; role-execution problems and the gate do
+   * (ADR 0021 / issue #157).
    */
   private async generalizedStatus(input: {
     readonly findings: readonly Finding[];

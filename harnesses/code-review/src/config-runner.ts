@@ -29,7 +29,10 @@ import {
   makePassGate,
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
-import { NativeBunOrchestrator } from "@aguil/agents-orchestration";
+import {
+  harnessStatusIsFindingsBlind,
+  NativeBunOrchestrator,
+} from "@aguil/agents-orchestration";
 import {
   resolveReportRenderer,
   statusAfterFindingPipelines,
@@ -232,17 +235,20 @@ function assertEnforceableHere(loaded: LoadedHarness, agentsDir: string): void {
 
 /**
  * Refuse workspace-sourced harness declarations that execute host argv or
- * flip status without a trusted gate.
+ * make status gate-owned without a trusted source.
  *
  * Resolution prefers `<workspace>/.agents` before user-global and package. For
  * `agents code-review --pr` that workspace is the detached PR worktree, so a
  * PR that plants `execution` (including `pass_check`), or a `shell-command`
  * context provider, would otherwise run arbitrary argv on the reviewer's host
- * or greenwash run status to findings-blind `passed` (findings
+ * or — when `pass_check` / validation-loop is declared — make status
+ * gate-owned (findings-blind) (findings
  * `security-pass-check-workspace-harness-rce`,
  * `security-workspace-shell-command-rce`,
- * `quality-workspace-execution-blinds-status`). Package, user-global, and
- * explicit `--agents-dir` sources remain trusted.
+ * `quality-workspace-execution-blinds-status`). Bare `execution` without a
+ * gate no longer blinds status (ADR 0021 / issue #157), but the block is still
+ * refused here because workspace-sourced `pass_check` remains host RCE.
+ * Package, user-global, and explicit `--agents-dir` sources remain trusted.
  */
 function assertTrustedHostExec(
   loaded: LoadedHarness,
@@ -262,9 +268,10 @@ function assertTrustedHostExec(
     throw new Error(
       "code-review: harness declares `execution`, but the harness was loaded " +
         "from the workspace `.agents` tree, which is untrusted " +
-        "(a `--pr` worktree can supply it). An `execution` block flips status " +
-        "to findings-blind and may run `pass_check` argv on the host. Remove " +
-        `\`execution\` from ${harnessPath}, install the harness with ` +
+        "(a `--pr` worktree can supply it). An `execution` block may run " +
+        "`pass_check` argv on the host and can make status gate-owned " +
+        "(findings-blind) when `pass_check` or validation-loop is declared. " +
+        `Remove \`execution\` from ${harnessPath}, install the harness with ` +
         "`agents harness install code-review`, or pass `--agents-dir` pointing " +
         "at a trusted `.agents` tree.",
     );
@@ -490,7 +497,7 @@ export async function runCodeReviewFromConfig(
     status: statusAfterFindingPipelines({
       rawStatus: rawResult.status,
       findings,
-      findingsBlind: loaded.definition.execution !== undefined,
+      findingsBlind: harnessStatusIsFindingsBlind(loaded.definition.execution),
       timedOut: (rawResult.metadata?.timed_out_roles ?? "") !== "",
     }),
     findings,

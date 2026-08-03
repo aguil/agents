@@ -96,11 +96,12 @@ const HARNESS_DEFINITION_DISPOSITIONS = {
   defaultAllowedCommands: { harnessRun: "consumed", codeReview: "consumed" },
   // Both paths call `makePassGate(execution, workspacePath)` for
   // `pass_check`, pass the block to the orchestrator for mode/order, and use
-  // `execution !== undefined` for findings-blind status. The config path first
-  // refuses a workspace-sourced `pass_check` (trusted sources still consume
-  // it); pinned by "a declared pass_check decides the run on the config path
-  // too", "a workspace-sourced pass_check is refused rather than executed",
-  // and "harness run executes the full chain via the CLI; pass_check fails an
+  // `harnessStatusIsFindingsBlind` (gate-owned, not bare presence) for
+  // findings-blind status (issue #157). The config path first refuses a
+  // workspace-sourced `execution` block (trusted sources still consume it);
+  // pinned by "a declared pass_check decides the run on the config path too",
+  // "a workspace-sourced pass_check is refused rather than executed", and
+  // "harness run executes the full chain via the CLI; pass_check fails an
   // unhealed run".
   execution: { harnessRun: "consumed", codeReview: "consumed" },
 } as const satisfies Record<keyof HarnessDefinition, KeyDisposition>;
