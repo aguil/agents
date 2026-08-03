@@ -130,6 +130,13 @@ so it is upheld in review.
   binding defaults, recency-then-identifier admission order, and overflow
   recorded in the bundle rather than failing the run. Qualifies ADR 0017 §6 on
   where the budget is declared.
+- [0023-hook-generation-beyond-cursor.md](0023-hook-generation-beyond-cursor.md)
+  — ADR 0023: hook generation becomes per-adapter and table-driven; the
+  enforcement refusal consults a can-this-adapter-deny capability instead of the
+  adapter name; generated configuration is run-scoped rather than written into
+  the workspace, and is validated because the Claude Code CLI ignores an invalid
+  settings file silently; the bridge's response encoding is selected explicitly,
+  never inferred from hook stdin.
 - [0024-undispatchable-lifecycle-events.md](0024-undispatchable-lifecycle-events.md)
   — ADR 0024: run-level events are the orchestrator's to dispatch and no adapter
   mapping can supply them, because an adapter is invoked once per role
