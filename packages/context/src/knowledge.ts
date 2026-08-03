@@ -143,6 +143,21 @@ export function parseKnowledgeNoteSource(
     };
   }
   const id = idValue.trim();
+  // Reserved for provider meta artifacts (admission / skipped reports).
+  if (
+    id === "_meta:admission" ||
+    id === "_meta:skipped" ||
+    id.startsWith("_meta:")
+  ) {
+    return {
+      ok: false,
+      skip: {
+        path: sourcePath,
+        reason: "invalid-field",
+        detail: 'note id must not use the reserved "_meta:" prefix',
+      },
+    };
+  }
 
   let context: KnowledgeContextMode = "search-only";
   if (front.context !== undefined) {

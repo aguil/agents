@@ -48,6 +48,17 @@ function note(
   };
 }
 
+test("parseKnowledgeNoteSource rejects reserved _meta: ids", () => {
+  const parsed = parseKnowledgeNoteSource(
+    ["---", "id: _meta:admission", "---", "body"].join("\n"),
+    "meta.md",
+  );
+  expect(parsed.ok).toBe(false);
+  if (!parsed.ok) {
+    expect(parsed.skip.reason).toBe("invalid-field");
+  }
+});
+
 test("parseKnowledgeNoteSource accepts a well-formed note", () => {
   const parsed = parseKnowledgeNoteSource(
     [
