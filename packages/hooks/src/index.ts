@@ -1,8 +1,9 @@
-import type {
-  HookEvent,
-  HookEventClass,
-  HookHandlerSpec,
-  HooksSpec,
+import {
+  HOOK_EVENTS,
+  type HookEvent,
+  type HookEventClass,
+  type HookHandlerSpec,
+  type HooksSpec,
 } from "@aguil/agents-harness-config";
 
 /** Cursor hook events we target (subset relevant to command handlers). */
@@ -16,14 +17,81 @@ export type CursorHookEvent =
  * Canonical → Cursor event projection (dotagents-compatible mapping).
  * Events with no Cursor equivalent are reported as skipped, never silently
  * dropped.
+ *
+ * Exported for the skip-contract test (ADR 0024 §4): every `HookEvent` must
+ * appear here as mapped or be explicitly undispatchable — not inferred from
+ * whatever a fixture happens to declare.
  */
-const CURSOR_EVENT_MAPPING: Readonly<
+export const CURSOR_EVENT_MAPPING: Readonly<
   Partial<Record<HookEvent, readonly CursorHookEvent[]>>
 > = {
   pre_tool_call: ["beforeShellExecution", "beforeMCPExecution"],
   post_tool_call: ["afterFileEdit"],
   role_stop: ["stop"],
 };
+
+/**
+ * Lifecycle events no current adapter generator maps (ADR 0024).
+ * `run_start` / `run_end` must never be mapped onto an adapter session event;
+ * `role_start` has no Cursor equivalent today. Declaring a handler for any of
+ * these is accepted by the loader and warned at setup rather than silently
+ * dropped.
+ */
+export const UNDISPATCHABLE_LIFECYCLE_EVENTS = [
+  "role_start",
+  "run_start",
+  "run_end",
+] as const satisfies readonly HookEvent[];
+
+export type UndispatchableLifecycleEvent =
+  (typeof UNDISPATCHABLE_LIFECYCLE_EVENTS)[number];
+
+const UNDISPATCHABLE_LIFECYCLE_REASON: Readonly<
+  Record<UndispatchableLifecycleEvent, string>
+> = {
+  role_start:
+    "no adapter event mapping exists for role_start under current generators",
+  run_start:
+    "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
+  run_end:
+    "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
+};
+
+/**
+ * Warnings for harness-declared lifecycle handlers that cannot fire (ADR 0024).
+ * Empty when none of the three events are declared. Pure — callers decide
+ * whether to print (typically `console.warn` at harness-run setup).
+ */
+export function undispatchableLifecycleHookWarnings(
+  hooks: HooksSpec,
+): readonly string[] {
+  const warnings: string[] = [];
+  for (const event of UNDISPATCHABLE_LIFECYCLE_EVENTS) {
+    if ((hooks[event]?.length ?? 0) === 0) {
+      continue;
+    }
+    warnings.push(
+      `hooks.${event}: declared handler cannot fire — ${UNDISPATCHABLE_LIFECYCLE_REASON[event]} (ADR 0024)`,
+    );
+  }
+  return warnings;
+}
+
+/** Whether Cursor generation maps this canonical event onto at least one native event. */
+export function cursorMapsHookEvent(event: HookEvent): boolean {
+  return (CURSOR_EVENT_MAPPING[event]?.length ?? 0) > 0;
+}
+
+/** Every canonical hook event and whether Cursor generation can dispatch it. */
+export function cursorHookEventDispatchability(): ReadonlyArray<{
+  readonly event: HookEvent;
+  readonly dispatchable: boolean;
+}> {
+  return HOOK_EVENTS.map((event) => ({
+    event,
+    dispatchable: cursorMapsHookEvent(event),
+  }));
+}
 
 /**
  * Event-class classification of Cursor tool events (spec v0.2
