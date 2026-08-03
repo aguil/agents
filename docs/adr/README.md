@@ -103,8 +103,8 @@ so it is upheld in review.
   runtime-written provenance, no builtin extractor, a reserved machine
   identifier namespace that makes human collisions impossible, and an enforced
   auto-context budget that degrades visibly. Decisions only; implementation
-  stays blocked on run-level hook dispatch. Partially superseded by ADR 0022
-  on §6's budget placement.
+  stays blocked on run-level hook dispatch. Partially superseded by ADR 0022 on
+  §6's budget placement.
 - [0018-harness-schema-and-spec-0-3.md](0018-harness-schema-and-spec-0-3.md) —
   ADR 0018: hand-authored `harness.schema.json` validated with ajv, enforcing
   unknown-key rejection while the loader keeps its more specific messages;
