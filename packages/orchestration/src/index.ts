@@ -196,17 +196,18 @@ export interface NativeBunOrchestratorOptions {
     roleId: string,
   ) => Readonly<Record<string, string>> | undefined;
   /**
-   * Authoritative pass gate for execution-configured (generalized)
-   * harnesses. Evaluated after all roles complete without failing/timing
-   * out; `false` makes the run `failed`, `true`/absent makes it `passed`.
+   * Authoritative pass gate. When set, finding severity does not drive
+   * status (ADR 0021 / issue #157): evaluated after all roles complete
+   * without failing/timing out; `false` makes the run `failed`,
+   * `true` makes it `passed`.
    *
    * Deliberately runtime-evaluated rather than inferred from role output:
-   * findings/outcomes emitted by a real agent are diagnostic narrative and
-   * must not drive status (a healed incident whose scout described the bug
-   * as "critical" must still pass). Callers wire this to a deterministic
-   * check — e.g. running the harness's `pass_check` command in the
-   * workspace. Ignored for legacy harnesses (no `execution` config), which
-   * keep finding-severity status.
+   * findings/outcomes emitted by a real agent are diagnostic narrative
+   * (a healed incident whose scout described the bug as "critical" must
+   * still pass when the gate says so). Callers wire this to a
+   * deterministic check — e.g. running the harness's `pass_check` command
+   * in the workspace. Presence of this option is itself the status-ownership
+   * signal; bare `execution` without a gate keeps finding-driven status.
    */
   readonly passGate?: (result: {
     readonly findings: readonly Finding[];
@@ -456,9 +457,10 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
   }
 
   /**
-   * Run status for execution-configured harnesses. Findings and outcomes are
-   * diagnostic payload and never drive status; role-execution problems and an
-   * optional runtime pass gate do.
+   * Run status when a gate owns the run (passGate / validation-loop /
+   * declared chain `pass_check`). Findings and outcomes are diagnostic
+   * payload and never drive status; role-execution problems and the gate do
+   * (ADR 0021 / issue #157).
    */
   private async generalizedStatus(input: {
     readonly findings: readonly Finding[];
