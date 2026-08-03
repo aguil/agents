@@ -5,6 +5,35 @@ import {
   type HookHandlerSpec,
   type HooksSpec,
 } from "@aguil/agents-harness-config";
+import {
+  ADAPTER_HOOK_CAPABILITIES,
+  adapterDispatchableEvents,
+  adapterHookCapabilities,
+} from "./adapter-table";
+
+export {
+  ADAPTER_HOOK_CAPABILITIES,
+  type AdapterHookCapabilities,
+  adapterCanDeny,
+  adapterDispatchableEvents,
+  adapterHookCapabilities,
+  adapterProbeEventNames,
+  allEnforceableProbeEventNames,
+  HOOK_ADAPTER_IDS,
+  type HookAdapterId,
+} from "./adapter-table";
+
+export {
+  assertWellFormedClaudeSettings,
+  type ClaudeHookEvent,
+  type ClaudeHookHandler,
+  type ClaudeMatcherGroup,
+  type ClaudeSettingsConfig,
+  type GenerateClaudeHooksOptions,
+  type GeneratedClaudeHooks,
+  generateClaudeHooksConfig,
+  renderClaudeSettingsConfig,
+} from "./claude";
 
 /** Cursor hook events we target (subset relevant to command handlers). */
 export type CursorHookEvent =
@@ -15,27 +44,31 @@ export type CursorHookEvent =
 
 /**
  * Canonical → Cursor event projection (dotagents-compatible mapping).
- * Events with no Cursor equivalent are reported as skipped, never silently
- * dropped.
- *
- * Exported for the skip-contract test (ADR 0024 §4): every `HookEvent` must
- * appear here as mapped or be explicitly undispatchable — not inferred from
- * whatever a fixture happens to declare.
+ * Derived from `ADAPTER_HOOK_CAPABILITIES` so the generator and the drift
+ * matrix cannot disagree (ADR 0023 decision 1).
  */
 export const CURSOR_EVENT_MAPPING: Readonly<
   Partial<Record<HookEvent, readonly CursorHookEvent[]>>
-> = {
-  pre_tool_call: ["beforeShellExecution", "beforeMCPExecution"],
-  post_tool_call: ["afterFileEdit"],
-  role_stop: ["stop"],
-};
+> = (() => {
+  const row = adapterHookCapabilities("cursor");
+  if (row === undefined) {
+    return {};
+  }
+  const out: Partial<Record<HookEvent, readonly CursorHookEvent[]>> = {};
+  for (const [event, natives] of Object.entries(row.nativeEvents) as Array<
+    [HookEvent, readonly string[]]
+  >) {
+    if (natives.length > 0) {
+      out[event] = natives as readonly CursorHookEvent[];
+    }
+  }
+  return out;
+})();
 
 /**
- * Lifecycle events no current adapter generator maps (ADR 0024).
- * `run_start` / `run_end` must never be mapped onto an adapter session event;
- * `role_start` has no Cursor equivalent today. Declaring a handler for any of
- * these is accepted by the loader and warned at setup rather than silently
- * dropped.
+ * Lifecycle events that stay undispatchable for *every* adapter today
+ * (ADR 0024): run-level events must never map onto a session. `role_start`
+ * is adapter-dependent — Claude maps `SessionStart`; Cursor does not.
  */
 export const UNDISPATCHABLE_LIFECYCLE_EVENTS = [
   "role_start",
@@ -46,32 +79,36 @@ export const UNDISPATCHABLE_LIFECYCLE_EVENTS = [
 export type UndispatchableLifecycleEvent =
   (typeof UNDISPATCHABLE_LIFECYCLE_EVENTS)[number];
 
-const UNDISPATCHABLE_LIFECYCLE_REASON: Readonly<
-  Record<UndispatchableLifecycleEvent, string>
-> = {
-  role_start:
-    "no adapter event mapping exists for role_start under current generators",
-  run_start:
-    "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
-  run_end:
-    "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
-};
+const LIFECYCLE_REASON: Readonly<Record<UndispatchableLifecycleEvent, string>> =
+  {
+    role_start:
+      "no adapter event mapping exists for role_start under the active generator",
+    run_start:
+      "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
+    run_end:
+      "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
+  };
 
 /**
- * Warnings for harness-declared lifecycle handlers that cannot fire (ADR 0024).
- * Empty when none of the three events are declared. Pure — callers decide
- * whether to print (typically `console.warn` at harness-run setup).
+ * Warnings for harness-declared lifecycle handlers that cannot fire under
+ * the active adapter's generator (ADR 0024). Defaults to Cursor when no
+ * adapter is named (the historical path).
  */
 export function undispatchableLifecycleHookWarnings(
   hooks: HooksSpec,
+  adapter: string = "cursor",
 ): readonly string[] {
+  const dispatchable = adapterDispatchableEvents(adapter);
   const warnings: string[] = [];
   for (const event of UNDISPATCHABLE_LIFECYCLE_EVENTS) {
     if ((hooks[event]?.length ?? 0) === 0) {
       continue;
     }
+    if (dispatchable.has(event)) {
+      continue;
+    }
     warnings.push(
-      `hooks.${event}: declared handler cannot fire — ${UNDISPATCHABLE_LIFECYCLE_REASON[event]} (ADR 0024)`,
+      `hooks.${event}: declared handler cannot fire — ${LIFECYCLE_REASON[event]} (ADR 0024)`,
     );
   }
   return warnings;
@@ -91,6 +128,35 @@ export function cursorHookEventDispatchability(): ReadonlyArray<{
     event,
     dispatchable: cursorMapsHookEvent(event),
   }));
+}
+
+/**
+ * Drift matrix: every HookEvent × every adapter row, for the contract test
+ * (ADR 0023 JC-7 / ADR 0024 §4).
+ */
+export function hookEventAdapterDispatchability(): ReadonlyArray<{
+  readonly adapter: string;
+  readonly event: HookEvent;
+  readonly dispatchable: boolean;
+  readonly canDeny: boolean;
+}> {
+  const rows: Array<{
+    readonly adapter: string;
+    readonly event: HookEvent;
+    readonly dispatchable: boolean;
+    readonly canDeny: boolean;
+  }> = [];
+  for (const caps of ADAPTER_HOOK_CAPABILITIES) {
+    for (const event of HOOK_EVENTS) {
+      rows.push({
+        adapter: caps.adapter,
+        event,
+        dispatchable: (caps.nativeEvents[event]?.length ?? 0) > 0,
+        canDeny: caps.canDeny,
+      });
+    }
+  }
+  return rows;
 }
 
 /**
@@ -159,7 +225,7 @@ function policyBridgeEntry(
   }
   // Defense in depth: this command lands in a shell-executed config file,
   // so quote the CLI token, which may be an operator-supplied path with spaces
-  // or metacharacters.
+  // or metacharacters. Default format stays Cursor (ADR 0023 decision 6).
   const cli = JSON.stringify(options.agentsCli ?? "agents");
   return { command: `${cli} policy-eval` };
 }
@@ -221,7 +287,7 @@ export function generateCursorHooksConfig(
     options.hooks,
   ) as ReadonlyArray<[HookEvent, readonly HookHandlerSpec[]]>) {
     const cursorEvents = CURSOR_EVENT_MAPPING[event];
-    if (cursorEvents === undefined) {
+    if (cursorEvents === undefined || cursorEvents.length === 0) {
       skippedEvents.push(event);
       continue;
     }
