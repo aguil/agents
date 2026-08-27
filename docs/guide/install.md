@@ -4,9 +4,9 @@
 
 Official releases publish
 [`@aguil/agents`](https://www.npmjs.com/package/@aguil/agents). The published
-bin is a Node shim (Node **`>= 20`**) that runs the Bun-targeted bundle with
-Bun **`>= 1.3.13`**. Fresh `npm install -g` installs the pinned `bun`
-dependency, so Bun does not need to be on `PATH` beforehand.
+bin is a Node shim (Node **`>= 20`**) that runs the Bun-targeted bundle with Bun
+**`>= 1.3.13`**. Fresh `npm install -g` installs the pinned `bun` dependency, so
+Bun does not need to be on `PATH` beforehand.
 
 ```bash
 npm install -g @aguil/agents

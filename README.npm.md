@@ -8,9 +8,8 @@ first, then `PATH` / `BUN_INSTALL`) and runs the inlined Bun bundle.
 ## Requirements
 
 - **Node.js** `>= 20` (used by the published bin shim and by npm/pnpm)
-- **[Bun](https://bun.sh)** `>= 1.3.13` — pulled in automatically as the
-  package dependency `bun@1.3.13` on install; a system Bun on `PATH` is also
-  fine
+- **[Bun](https://bun.sh)** `>= 1.3.13` — pulled in automatically as the package
+  dependency `bun@1.3.13` on install; a system Bun on `PATH` is also fine
 
 ## Install
 
