@@ -29,11 +29,13 @@ sections below describe the underlying tarball/publish mechanics.
 ## npm tarball
 
 The workspace root `package.json` is **private**. A thin publishable tarball
-ships only `dist/` + `README.npm.md` + `LICENSE`. The helper script copies the
-built bundle and merges metadata from
-`distribution/npm/cli-package.manifest.json`. Published semver comes from the
-**git tag** in CI, not from committed `package.json` fields; the root `version`
-is kept in sync by the release-please release PR.
+ships only `dist/` + `README.npm.md` + `LICENSE` (plus packaged harness/skills
+trees). The helper script copies the built bundle and merges metadata from
+`distribution/npm/cli-package.manifest.json`, including a pinned **`bun`**
+dependency so `npm install -g @aguil/agents` supplies the runtime the Node bin
+shim re-execs. Published semver comes from the **git tag** in CI, not from
+committed `package.json` fields; the root `version` is kept in sync by the
+release-please release PR.
 
 ```bash
 bun run publish:npm:verify
