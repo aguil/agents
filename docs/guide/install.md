@@ -3,8 +3,10 @@
 ## From npm (released builds)
 
 Official releases publish
-[`@aguil/agents`](https://www.npmjs.com/package/@aguil/agents). The launcher
-requires Bun **`>= 1.3.13`**.
+[`@aguil/agents`](https://www.npmjs.com/package/@aguil/agents). The published
+bin is a Node shim (Node **`>= 20`**) that runs the Bun-targeted bundle with
+Bun **`>= 1.3.13`**. Fresh `npm install -g` installs the pinned `bun`
+dependency, so Bun does not need to be on `PATH` beforehand.
 
 ```bash
 npm install -g @aguil/agents
@@ -50,7 +52,7 @@ for the full pre-commit gate list.
 1. `prebuild` — embeds role prompts into
    `harnesses/code-review/src/embedded-prompts.ts`
 2. `build` — bundles the CLI to `dist/index.js` with `--target=bun`
-3. `postbuild` — creates the executable Bun launcher at `dist/agents`
+3. `postbuild` — creates the executable Node→Bun launcher at `dist/agents`
 
 ```bash
 ./dist/agents --help
