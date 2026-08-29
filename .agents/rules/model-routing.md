@@ -10,23 +10,34 @@ routing preferences, using the mechanisms below.
 
 ## What the harness does and does not enforce
 
-The harness supports exactly **one adapter and one model per run**, shared by
-every role. Role definitions (`harness.yaml`, `.agents/agents/<id>/agent.md`)
-have a closed key surface with no `model` or `adapter` field, and adding one is
-rejected by validation. There is no per-role enforcement; anything role-shaped
-below is a **preference**, honored where a tool or an LLM is in a position to
-honor it.
+The harness supports **one adapter per run**, shared by every role. Role
+definitions (`harness.yaml`, `.agents/agents/<id>/agent.md`) have a closed key
+surface with no `model` or `adapter` field, and adding one is rejected by
+validation — model routing is configured on the run, not on the role definition.
+
+Models route per role through run configuration: alongside the global `model` /
+`--model`, the `models` surface maps harness role ids to models
+(`--models security=provider/strong,quality=provider/fast`, the
+`AGENTS_CODE_REVIEW_MODELS` env var, or a `models` object in a code-review
+config file; `agents harness run` takes the same `--model` / `--models` flags).
+A role's entry wins, other roles fall back to `model`, then to the spawned CLI's
+own default. This resolves into the spawned tool's `--model` at spawn time and
+is the **enforced** routing mechanism. Everything else role-shaped below is a
+**preference**, honored where a tool or an LLM is in a position to honor it.
 
 ## Routing layers, strongest first
 
-1. **Harness run configuration** — enforced, global per run. The code-review
-   CLI's `--model` flag, `AGENTS_CODE_REVIEW_MODEL`, or the `model` key in user
-   or repo `.agents-code-review/config.json`. When set, the adapter passes
-   `--model` to the spawned tool and overrides everything below.
+1. **Harness run configuration** — enforced. Global: the `--model` flag,
+   `AGENTS_CODE_REVIEW_MODEL`, or the `model` key in user or repo
+   `.agents-code-review/config.json`. Per role: the `--models` flag,
+   `AGENTS_CODE_REVIEW_MODELS`, or the `models` key in the same config files
+   (`agents harness run` accepts `--model` / `--models` too). When set, the
+   harness passes `--model` to the spawned tool and overrides everything below.
 2. **Workspace-native tool settings** — enforced by the spawned tool, not by the
    harness. Adapters spawn with the workspace as the working directory, so the
    target repo's own tool config applies whenever the harness does not pass
-   `--model` (always true for `agents harness run`, which sets no model):
+   `--model` (the default for `agents harness run` when neither `--model` nor
+   `--models` is given):
    - Claude Code: `model` in `.claude/settings.json`; per-agent-type `model:`
      frontmatter in `.claude/agents/*.md`.
    - opencode: model and per-agent models in its own config file.
@@ -58,6 +69,11 @@ Keep model identifiers exact (the string the tool accepts, e.g. a full model id
 or a provider/model pair), and prefer naming a tier ("strongest available",
 "inexpensive") plus the current concrete id, so the table survives model
 releases with a one-line edit.
+
+Where a table row names a harness role id, also set it in the repo's
+`.agents-code-review/config.json` `models` key so the preference is enforced by
+layer 1 rather than carried only as guidance; keep the table as the
+human-readable record of intent.
 
 LLM contributors in that repo should honor the table whenever they control a
 model choice — subagent launches, generated settings files, harness invocation

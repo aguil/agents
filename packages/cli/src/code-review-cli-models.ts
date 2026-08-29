@@ -10,6 +10,13 @@ export interface CliOptions {
   readonly consensus?: string;
   readonly adapter?: string;
   readonly model?: string;
+  /**
+   * Per-role model overrides as comma-separated `role=model` pairs
+   * (`security=provider/x,quality=provider/y`). Merged JSON may supply an
+   * object mapping role ids to models instead; it is normalized to this
+   * string form. A role's entry beats `model`; unmapped roles fall back.
+   */
+  readonly models?: string;
   readonly variant?: string;
   readonly agent?: string;
   readonly opencode?: string;

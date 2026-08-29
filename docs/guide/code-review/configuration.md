@@ -65,6 +65,7 @@ All keys use **camelCase**. Omit any key you don't need.
 | `result`        | `--result`         |                                          |
 | `consensus`     | `--consensus`      |                                          |
 | `model`         | `--model`          |                                          |
+| `models`        | `--models`         | Per-role models; see below               |
 | `variant`       | `--variant`        |                                          |
 | `agent`         | `--agent`          |                                          |
 | `log`           | `--log`            | `none` / `summary` / `commands` / `all`  |
@@ -105,11 +106,43 @@ etc.), use the `=` binding form to keep the template in one argv cell:
 --claude-args="--verbose,--model,claude-sonnet-4"
 ```
 
+## `models` — per-role model overrides
+
+`models` maps harness role ids to models. A role's entry wins over `model`;
+roles without an entry fall back to `model`, then to the adapter CLI's own
+default. The override is resolved into the spawned CLI's `--model` argv at spawn
+time.
+
+On the CLI and in `AGENTS_CODE_REVIEW_MODELS`, use comma-separated `role=model`
+pairs:
+
+```bash
+--models security=provider/strong,quality=provider/fast
+```
+
+In JSON config files, either that string or an object:
+
+```json
+{
+  "models": {
+    "security": "provider/strong",
+    "quality": "provider/fast"
+  }
+}
+```
+
+Role ids are the harness's role ids (for the packaged code-review harness:
+`security`, `performance`, `quality`, `compliance`). Unknown role ids are
+ignored by resolution — they match no spawn.
+
 ## Example repo config
 
 ```json
 {
   "model": "opencode/gpt-5.3-codex",
+  "models": {
+    "security": "opencode/gpt-5.3-codex-high"
+  },
   "presets": {
     "ci": {
       "dryRun": true,

@@ -262,6 +262,9 @@ Backend / adapters:
 
   --adapter <name>       fake | opencode | claude | cursor (defaults from harness package + config layers)
   --model <id>           Model selector for adapters that accept it
+  --models <pairs>       Per-role models as role=model pairs, comma-separated
+                         (e.g. security=provider/strong,quality=provider/fast);
+                         a role's entry beats --model, unmapped roles fall back
   --variant <id>         OpenCode variant / effort profile
   --agent <name>         OpenCode agent name override
   --opencode <path>      Executable (default: opencode)
@@ -354,7 +357,7 @@ Replay reuses harness execution with saved context bundle:
 
 Adapter + workspace knobs match full runs (see agents code-review --help for exhaustive list):
 
-  --adapter/--model/--variant/--agent/--opencode/--claude/--claude-args/--cursor/--cursor-args/--cursor-mode
+  --adapter/--model/--models/--variant/--agent/--opencode/--claude/--claude-args/--cursor/--cursor-args/--cursor-mode
   --pure, --print-logs, --no-deterministic, --strict
 
 Shared run flags remain available:

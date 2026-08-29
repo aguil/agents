@@ -48,6 +48,7 @@ import {
   peelCodeReviewSubcommand,
   resolveEffectivePostOnly,
 } from "./parse-code-review-argv";
+import { parseRoleModels } from "./role-models";
 import { readAgentsMonorepoVersion } from "./skills-pack";
 import {
   renderTriageHelp,
@@ -257,16 +258,23 @@ export async function main(
       console.error("Expected one of: agent, plan, ask.");
       return 1;
     }
+    const roleModelsParsed = parseRoleModels(options.models);
+    if (!roleModelsParsed.ok) {
+      console.error(`Invalid --models value: ${roleModelsParsed.error}`);
+      return 1;
+    }
     const deterministicEnabled = !options.noDeterministic;
     const effectiveAdapter = resolveEffectiveAdapterOptions(
       options,
       adapterName,
       deterministicEnabled,
+      roleModelsParsed.models,
     );
     const adapter = createCodeReviewAdapter(adapterName, {
       opencode: {
         executable: options.opencode,
         model: effectiveAdapter.opencode.model,
+        models: effectiveAdapter.opencode.models,
         variant: effectiveAdapter.opencode.variant,
         agent: effectiveAdapter.opencode.agent,
         pure: effectiveAdapter.opencode.pure,
@@ -275,11 +283,13 @@ export async function main(
       claude: {
         executable: options.claude,
         model: effectiveAdapter.claude.model,
+        models: effectiveAdapter.claude.models,
         argsTemplate: effectiveAdapter.claude.argsTemplate,
       },
       cursor: {
         executable: options.cursor,
         model: effectiveAdapter.cursor.model,
+        models: effectiveAdapter.cursor.models,
         argsTemplate: effectiveAdapter.cursor.argsTemplate,
         mode: cursorMode ?? effectiveAdapter.cursor.mode,
         force: effectiveAdapter.cursor.force,
@@ -549,22 +559,27 @@ export async function main(
 interface EffectiveAdapterOptions {
   readonly opencode: {
     readonly model?: string;
+    readonly models?: Readonly<Record<string, string>>;
     readonly variant?: string;
     readonly agent?: string;
     readonly pure: boolean;
   };
   readonly claude: {
     readonly model?: string;
+    readonly models?: Readonly<Record<string, string>>;
     readonly argsTemplate?: readonly string[];
   };
   readonly cursor: {
     readonly model?: string;
+    readonly models?: Readonly<Record<string, string>>;
     readonly argsTemplate?: readonly string[];
     readonly mode?: "agent" | "plan" | "ask";
     readonly force: boolean;
     readonly sandbox?: "enabled" | "disabled";
   };
 }
+
+export { parseRoleModels } from "./role-models";
 
 function resolveScratchpadRootForRun(
   options: CliOptions,
@@ -795,10 +810,12 @@ function resolveEffectiveAdapterOptions(
   options: CliOptions,
   adapterName: CodeReviewAdapterName,
   deterministicEnabled: boolean,
+  roleModels?: Readonly<Record<string, string>>,
 ): EffectiveAdapterOptions {
   return {
     opencode: {
       model: options.model,
+      models: roleModels,
       variant: options.variant,
       agent: options.agent,
       pure:
@@ -806,10 +823,12 @@ function resolveEffectiveAdapterOptions(
     },
     claude: {
       model: options.model,
+      models: roleModels,
       argsTemplate: coerceAdapterArgsTemplate(options.claudeArgs),
     },
     cursor: {
       model: options.model,
+      models: roleModels,
       argsTemplate: coerceAdapterArgsTemplate(options.cursorArgs),
       mode: parseCursorMode(options.cursorMode),
       // Safe default (issue #159 / ADR 0020): no --force; sandbox enabled via
@@ -832,6 +851,7 @@ async function buildDeterminismMetadata(
 
   if (adapterName === "opencode") {
     metadata.opencode_model = effective.opencode.model ?? "";
+    metadata.opencode_models = canonicalRoleModels(effective.opencode.models);
     metadata.opencode_variant = effective.opencode.variant ?? "";
     metadata.opencode_agent = effective.opencode.agent ?? "";
     metadata.opencode_pure = effective.opencode.pure ? "true" : "false";
@@ -842,6 +862,7 @@ async function buildDeterminismMetadata(
 
   if (adapterName === "claude") {
     metadata.claude_model = effective.claude.model ?? "";
+    metadata.claude_models = canonicalRoleModels(effective.claude.models);
     metadata.claude_args_template =
       effective.claude.argsTemplate === undefined ||
       effective.claude.argsTemplate.length === 0
@@ -854,6 +875,7 @@ async function buildDeterminismMetadata(
 
   if (adapterName === "cursor") {
     metadata.cursor_model = effective.cursor.model ?? "";
+    metadata.cursor_models = canonicalRoleModels(effective.cursor.models);
     metadata.cursor_args_template =
       effective.cursor.argsTemplate === undefined ||
       effective.cursor.argsTemplate.length === 0
@@ -869,6 +891,19 @@ async function buildDeterminismMetadata(
   }
 
   return metadata;
+}
+
+/** Canonical `role=model` serialization (sorted by role) for determinism metadata. */
+function canonicalRoleModels(
+  models: Readonly<Record<string, string>> | undefined,
+): string {
+  if (models === undefined) {
+    return "";
+  }
+  return Object.keys(models)
+    .sort()
+    .map((role) => `${role}=${models[role]}`)
+    .join(",");
 }
 
 async function detectExecutableVersion(executable: string): Promise<string> {

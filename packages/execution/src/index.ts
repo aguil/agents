@@ -953,6 +953,13 @@ function hasAborted(data: unknown): boolean {
 export interface OpenCodeAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
+  /**
+   * Per-role model overrides keyed by `AgentRunRequest.roleId`. A matching
+   * entry beats `model`; roles without one fall back to `model`, then to
+   * the CLI's own default. Resolution happens at spawn time — the session
+   * itself can never re-route (`.agents/rules/model-routing.md`).
+   */
+  readonly models?: Readonly<Record<string, string>>;
   readonly variant?: string;
   readonly agent?: string;
   readonly pure?: boolean;
@@ -962,12 +969,16 @@ export interface OpenCodeAdapterOptions {
 export interface ClaudeCodeAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
+  /** Per-role model overrides; see {@link OpenCodeAdapterOptions.models}. */
+  readonly models?: Readonly<Record<string, string>>;
   readonly argsTemplate?: readonly string[];
 }
 
 export interface CursorAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
+  /** Per-role model overrides; see {@link OpenCodeAdapterOptions.models}. */
+  readonly models?: Readonly<Record<string, string>>;
   readonly argsTemplate?: readonly string[];
   readonly mode?: "agent" | "plan" | "ask";
   /**
@@ -1060,11 +1071,26 @@ export class CursorAdapter extends SubprocessAgentAdapter {
   }
 }
 
+/**
+ * Pick the model for one spawn: the role's `models` entry, else the global
+ * `model`, else undefined (the CLI's own default applies).
+ */
+export function resolveModelForRole(
+  roleId: string,
+  options: {
+    readonly model?: string;
+    readonly models?: Readonly<Record<string, string>>;
+  },
+): string | undefined {
+  return options.models?.[roleId] ?? options.model;
+}
+
 export function buildOpenCodeCommand(
   request: AgentRunRequest,
   requestPath: string,
   options: OpenCodeAdapterOptions = {},
 ): readonly string[] {
+  const model = resolveModelForRole(request.roleId, options);
   const cmd = [
     options.executable ?? "opencode",
     "run",
@@ -1080,8 +1106,8 @@ export function buildOpenCodeCommand(
     `code-review:${request.roleId}`,
   ];
 
-  if (options.model !== undefined) {
-    cmd.push("--model", options.model);
+  if (model !== undefined) {
+    cmd.push("--model", model);
   }
   if (options.variant !== undefined) {
     cmd.push("--variant", options.variant);
@@ -1180,13 +1206,14 @@ export function buildClaudeCodeCommand(
     prompt,
   };
 
+  const model = resolveModelForRole(request.roleId, options);
   const template = options.argsTemplate ?? ["-p", "{prompt}"];
   const args = template.map((arg) => substituteTemplateArg(arg, substitutions));
   const hasPrompt = template.some((arg) => arg.includes("{prompt}"));
   const cmd = [options.executable ?? "claude", ...args];
 
-  if (options.model !== undefined) {
-    cmd.push("--model", options.model);
+  if (model !== undefined) {
+    cmd.push("--model", model);
   }
   if (!hasPrompt) {
     cmd.push(prompt);
@@ -1315,12 +1342,13 @@ export function buildCursorCommand(
   options: CursorAdapterOptions = {},
 ): readonly string[] {
   const prompt = buildCursorPrompt(request, requestPath);
+  const model = resolveModelForRole(request.roleId, options);
   const substitutions: Record<string, string> = {
     workspace: request.workspacePath,
     context_bundle: request.contextBundlePath,
     request: requestPath,
     role: request.roleId,
-    model: options.model ?? "",
+    model: model ?? "",
     prompt,
   };
 
@@ -1337,7 +1365,7 @@ export function buildCursorCommand(
       ? ["--mode", options.mode]
       : []),
     ...(approval.sandbox !== undefined ? ["--sandbox", approval.sandbox] : []),
-    ...(options.model !== undefined ? ["--model", "{model}"] : []),
+    ...(model !== undefined ? ["--model", "{model}"] : []),
     "{prompt}",
   ];
 

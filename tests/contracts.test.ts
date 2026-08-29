@@ -50,6 +50,7 @@ import {
   buildOpenCodePrompt,
   collectAgentRun,
   normalizeAgentOutputLine,
+  resolveModelForRole,
   SubprocessAgentAdapter,
   validateFinding,
 } from "@aguil/agents-execution";
@@ -99,6 +100,7 @@ import {
   resolveEffectivePostOnly,
 } from "../packages/cli/src/parse-code-review-argv";
 import { parseTriageArgv } from "../packages/cli/src/parse-triage-argv";
+import { parseRoleModels } from "../packages/cli/src/role-models";
 import { runTriageCli } from "../packages/cli/src/triage-main";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -2669,6 +2671,68 @@ test("builds opencode command behind the adapter boundary", () => {
   expect(command.at(-1)).toContain("security code-review specialist");
 });
 
+test("per-role models entry beats the global model, absent role falls back", () => {
+  expect(
+    resolveModelForRole("security", {
+      model: "provider/default",
+      models: { security: "provider/strong" },
+    }),
+  ).toBe("provider/strong");
+  expect(
+    resolveModelForRole("quality", {
+      model: "provider/default",
+      models: { security: "provider/strong" },
+    }),
+  ).toBe("provider/default");
+  // No model anywhere: undefined, so no --model flag and the CLI's own
+  // default applies.
+  expect(
+    resolveModelForRole("quality", { models: { security: "provider/strong" } }),
+  ).toBeUndefined();
+});
+
+test("builders route per-role models into --model at spawn time", () => {
+  const request = {
+    runId: "run-1",
+    roleId: "security",
+    prompt: "Review this change.",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch/roles/security",
+    timeoutMs: 1_000,
+    allowedCommands: ["bun test"],
+  };
+  const requestPath = "/scratch/roles/security/security.request.json";
+  const options = {
+    model: "provider/default",
+    models: { security: "provider/strong" },
+  };
+
+  const opencode = buildOpenCodeCommand(request, requestPath, options);
+  expect(opencode).toContain("provider/strong");
+  expect(opencode).not.toContain("provider/default");
+
+  const claude = buildClaudeCodeCommand(request, requestPath, options);
+  expect(claude).toContain("provider/strong");
+  expect(claude).not.toContain("provider/default");
+
+  const cursor = buildCursorCommand(request, requestPath, options);
+  const modelFlag = cursor.indexOf("--model");
+  expect(cursor[modelFlag + 1]).toBe("provider/strong");
+
+  // A role with no entry still gets the global model.
+  const other = { ...request, roleId: "quality" };
+  expect(buildOpenCodeCommand(other, requestPath, options)).toContain(
+    "provider/default",
+  );
+
+  // A models map alone must not emit --model for unmapped roles.
+  const unmapped = buildCursorCommand(other, requestPath, {
+    models: { security: "provider/strong" },
+  });
+  expect(unmapped).not.toContain("--model");
+});
+
 test("adds jj guidance to opencode prompt when workspace is jj", () => {
   const prompt = buildOpenCodePrompt({
     runId: "run-1",
@@ -3555,6 +3619,56 @@ test("mergePresetMaps merges each named preset user then repo (repo wins on over
   ).toEqual({
     ci: { dryRun: true, model: "m0", adapter: "fake" },
   });
+});
+
+test("parseRoleModels parses role=model pairs and rejects malformed entries", () => {
+  expect(parseRoleModels(undefined)).toEqual({ ok: true });
+  expect(parseRoleModels(" , ")).toEqual({ ok: true });
+  expect(
+    parseRoleModels("security=provider/strong, quality=provider/fast"),
+  ).toEqual({
+    ok: true,
+    models: { security: "provider/strong", quality: "provider/fast" },
+  });
+  expect(parseRoleModels("security").ok).toBe(false);
+  expect(parseRoleModels("=provider/strong").ok).toBe(false);
+  expect(parseRoleModels("security=").ok).toBe(false);
+  // Conflicting duplicates are an error; identical duplicates are not.
+  expect(parseRoleModels("security=a,security=b").ok).toBe(false);
+  expect(parseRoleModels("security=a,security=a")).toEqual({
+    ok: true,
+    models: { security: "a" },
+  });
+});
+
+test("parseCodeReviewArgv parses --models as an explicit string option", () => {
+  const parsed = parseCodeReviewArgv(["--models", "security=provider/strong"]);
+  expect(parsed.options.models).toBe("security=provider/strong");
+  expect(parsed.explicitKeys.has("models")).toBe(true);
+});
+
+test("extractConfigDocument normalizes a models object to role=model pairs", () => {
+  const doc = extractConfigDocument({
+    models: { security: "provider/strong", quality: "provider/fast" },
+  });
+  expect(doc.ok).toBe(true);
+  if (doc.ok) {
+    expect(doc.flat.models).toBe(
+      "security=provider/strong,quality=provider/fast",
+    );
+  }
+
+  const stringForm = extractConfigDocument({
+    models: "security=provider/strong",
+  });
+  expect(stringForm.ok).toBe(true);
+  if (stringForm.ok) {
+    expect(stringForm.flat.models).toBe("security=provider/strong");
+  }
+
+  expect(extractConfigDocument({ models: ["security"] }).ok).toBe(false);
+  expect(extractConfigDocument({ models: { security: 3 } }).ok).toBe(false);
+  expect(extractConfigDocument({ models: { security: "a,b" } }).ok).toBe(false);
 });
 
 test("extractConfigDocument rejects nested presets inside a preset body", () => {

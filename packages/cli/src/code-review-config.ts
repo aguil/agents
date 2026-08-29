@@ -26,6 +26,7 @@ const STRING_FIELDS: readonly (keyof CliOptions & string)[] = [
   "consensus",
   "adapter",
   "model",
+  "models",
   "variant",
   "agent",
   "opencode",
@@ -112,6 +113,58 @@ export function normalizeAdapterArgsTemplateField(
   return { ok: true, normalized: parts };
 }
 
+/**
+ * Validate and normalize `models` from JSON: a comma-separated
+ * `role=model` string kept verbatim, or an object mapping role ids to model
+ * strings folded into that string form.
+ */
+export function normalizeRoleModelsField(
+  value: unknown,
+):
+  | { readonly ok: true; readonly normalized?: string }
+  | { readonly ok: false; readonly error: string } {
+  if (value === undefined) {
+    return { ok: true };
+  }
+  if (typeof value === "string") {
+    const t = value.trim();
+    return t.length === 0 ? { ok: true } : { ok: true, normalized: t };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {
+      ok: false,
+      error:
+        "'models' must be a comma-separated role=model string or an object mapping role ids to model strings",
+    };
+  }
+  const pairs: string[] = [];
+  for (const [role, model] of Object.entries(value)) {
+    if (typeof model !== "string" || model.trim().length === 0) {
+      return {
+        ok: false,
+        error: `'models.${role}' must be a non-empty model string`,
+      };
+    }
+    const roleTrimmed = role.trim();
+    if (roleTrimmed.length === 0 || roleTrimmed.includes("=")) {
+      return {
+        ok: false,
+        error: `'models' role ids must be non-empty and must not contain '=' (got '${role}')`,
+      };
+    }
+    if (model.includes(",") || model.includes("=")) {
+      return {
+        ok: false,
+        error: `'models.${role}' must not contain ',' or '=' (got '${model}')`,
+      };
+    }
+    pairs.push(`${roleTrimmed}=${model.trim()}`);
+  }
+  return pairs.length === 0
+    ? { ok: true }
+    : { ok: true, normalized: pairs.join(",") };
+}
+
 function unknownFlatKeys(record: Record<string, unknown>): string[] {
   return Object.keys(record)
     .filter((key) => !ALLOWED_JSON_FLAT_KEYS.has(key))
@@ -127,6 +180,7 @@ const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
   CONSENSUS: "consensus",
   ADAPTER: "adapter",
   MODEL: "model",
+  MODELS: "models",
   VARIANT: "variant",
   AGENT: "agent",
   OPENCODE: "opencode",
@@ -318,8 +372,20 @@ function extractFlatFields(
 
   const out: CodeReviewMergedPartial = {};
   const plainStringFields = STRING_FIELDS.filter(
-    (f) => !(ARGS_TEMPLATE_FIELDS as readonly string[]).includes(f),
+    (f) =>
+      !(ARGS_TEMPLATE_FIELDS as readonly string[]).includes(f) &&
+      f !== "models",
   );
+
+  if ("models" in raw) {
+    const normModels = normalizeRoleModelsField(raw.models);
+    if (!normModels.ok) {
+      return { ok: false, error: `${diagnosticsPrefix}: ${normModels.error}` };
+    }
+    if (normModels.normalized !== undefined) {
+      (out as Record<string, unknown>).models = normModels.normalized;
+    }
+  }
 
   for (const field of plainStringFields) {
     if (field in raw) {
@@ -563,6 +629,7 @@ function applyExplicitCliOptions(
     consensus: stringOr("consensus"),
     adapter: stringOr("adapter"),
     model: stringOr("model"),
+    models: stringOr("models"),
     variant: stringOr("variant"),
     agent: stringOr("agent"),
     opencode: stringOr("opencode"),
