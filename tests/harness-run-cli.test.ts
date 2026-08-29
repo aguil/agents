@@ -53,6 +53,24 @@ test("harness run -h matches --help", async () => {
   expect(result.stdout).toContain("--force-tool-calls");
 });
 
+test("harness run documents --model/--models and rejects malformed --models", async () => {
+  const help = await runHarnessCli(["--help"]);
+  expect(help.stdout).toContain("--model <model>");
+  expect(help.stdout).toContain("--models role=model,...");
+
+  const result = await runHarnessCli([
+    "incident-triage",
+    "--agents-dir",
+    ".agents",
+    "--workspace",
+    ".",
+    "--models",
+    "security-missing-equals",
+  ]);
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("invalid --models value");
+});
+
 test("harness run --force-tool-calls warns; default options stay non-forcing", async () => {
   const { cursorOptionsForHarnessRun } = await import(
     "../packages/cli/src/harness-run-main"

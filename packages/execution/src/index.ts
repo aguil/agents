@@ -953,6 +953,13 @@ function hasAborted(data: unknown): boolean {
 export interface OpenCodeAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
+  /**
+   * Per-role model overrides keyed by `AgentRunRequest.roleId`. A matching
+   * entry beats `model`; roles without one fall back to `model`, then to
+   * the CLI's own default. Resolution happens at spawn time — the session
+   * itself can never re-route (`.agents/rules/model-routing.md`).
+   */
+  readonly models?: Readonly<Record<string, string>>;
   readonly variant?: string;
   readonly agent?: string;
   readonly pure?: boolean;
@@ -962,12 +969,16 @@ export interface OpenCodeAdapterOptions {
 export interface ClaudeCodeAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
+  /** Per-role model overrides; see {@link OpenCodeAdapterOptions.models}. */
+  readonly models?: Readonly<Record<string, string>>;
   readonly argsTemplate?: readonly string[];
 }
 
 export interface CursorAdapterOptions {
   readonly executable?: string;
   readonly model?: string;
+  /** Per-role model overrides; see {@link OpenCodeAdapterOptions.models}. */
+  readonly models?: Readonly<Record<string, string>>;
   readonly argsTemplate?: readonly string[];
   readonly mode?: "agent" | "plan" | "ask";
   /**
@@ -1060,11 +1071,26 @@ export class CursorAdapter extends SubprocessAgentAdapter {
   }
 }
 
+/**
+ * Pick the model for one spawn: the role's `models` entry, else the global
+ * `model`, else undefined (the CLI's own default applies).
+ */
+export function resolveModelForRole(
+  roleId: string,
+  options: {
+    readonly model?: string;
+    readonly models?: Readonly<Record<string, string>>;
+  },
+): string | undefined {
+  return options.models?.[roleId] ?? options.model;
+}
+
 export function buildOpenCodeCommand(
   request: AgentRunRequest,
   requestPath: string,
   options: OpenCodeAdapterOptions = {},
 ): readonly string[] {
+  const model = resolveModelForRole(request.roleId, options);
   const cmd = [
     options.executable ?? "opencode",
     "run",
@@ -1080,8 +1106,8 @@ export function buildOpenCodeCommand(
     `code-review:${request.roleId}`,
   ];
 
-  if (options.model !== undefined) {
-    cmd.push("--model", options.model);
+  if (model !== undefined) {
+    cmd.push("--model", model);
   }
   if (options.variant !== undefined) {
     cmd.push("--variant", options.variant);
@@ -1180,13 +1206,14 @@ export function buildClaudeCodeCommand(
     prompt,
   };
 
+  const model = resolveModelForRole(request.roleId, options);
   const template = options.argsTemplate ?? ["-p", "{prompt}"];
   const args = template.map((arg) => substituteTemplateArg(arg, substitutions));
   const hasPrompt = template.some((arg) => arg.includes("{prompt}"));
   const cmd = [options.executable ?? "claude", ...args];
 
-  if (options.model !== undefined) {
-    cmd.push("--model", options.model);
+  if (model !== undefined) {
+    cmd.push("--model", model);
   }
   if (!hasPrompt) {
     cmd.push(prompt);
@@ -1309,18 +1336,53 @@ export function applyCursorApprovalToArgv(
   return out;
 }
 
+/**
+ * Force the resolved model onto a flag argv: rewrite every existing
+ * `--model <value>` / `--model=<value>` to the resolved model, or append
+ * `--model` when the argv has none. Keeps a custom template's flag
+ * placement while making it impossible for the template to pin a model
+ * that disagrees with the configured `model`/`models` routing.
+ */
+function applyModelToArgv(
+  argv: readonly string[],
+  model: string,
+): readonly string[] {
+  const out: string[] = [];
+  let saw = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--model") {
+      out.push("--model", model);
+      saw = true;
+      if (index + 1 < argv.length) {
+        index += 1;
+      }
+    } else if (arg.startsWith("--model=")) {
+      out.push(`--model=${model}`);
+      saw = true;
+    } else {
+      out.push(arg);
+    }
+  }
+  if (!saw) {
+    out.push("--model", model);
+  }
+  return out;
+}
+
 export function buildCursorCommand(
   request: AgentRunRequest,
   requestPath: string,
   options: CursorAdapterOptions = {},
 ): readonly string[] {
   const prompt = buildCursorPrompt(request, requestPath);
+  const model = resolveModelForRole(request.roleId, options);
   const substitutions: Record<string, string> = {
     workspace: request.workspacePath,
     context_bundle: request.contextBundlePath,
     request: requestPath,
     role: request.roleId,
-    model: options.model ?? "",
+    model: model ?? "",
     prompt,
   };
 
@@ -1337,7 +1399,7 @@ export function buildCursorCommand(
       ? ["--mode", options.mode]
       : []),
     ...(approval.sandbox !== undefined ? ["--sandbox", approval.sandbox] : []),
-    ...(options.model !== undefined ? ["--model", "{model}"] : []),
+    ...(model !== undefined ? ["--model", "{model}"] : []),
     "{prompt}",
   ];
 
@@ -1356,7 +1418,15 @@ export function buildCursorCommand(
   // Enforce approval on flag argv only so injected --sandbox/--force stay
   // ahead of the prompt (and custom templates cannot disagree with metadata).
   const enforced = applyCursorApprovalToArgv(flagArgs, approval);
-  return [options.executable ?? "agent", ...enforced, trailingPrompt];
+  // Configured model routing must reach the spawned argv exactly as
+  // metadata and provenance record it (same posture as the approval-flag
+  // enforcement above): a template's `{model}` slot substitutes the
+  // resolved model, a literal `--model` value is overridden by it, and a
+  // template with neither gets it appended. A template only pins its own
+  // model when no `model`/`models` is configured for the run.
+  const withModel =
+    model === undefined ? enforced : applyModelToArgv(enforced, model);
+  return [options.executable ?? "agent", ...withModel, trailingPrompt];
 }
 
 export {

@@ -1414,24 +1414,34 @@ function metadataString(
   return raw.length > 0 ? raw : undefined;
 }
 
-/** Model id recorded for the active adapter in harness run metadata. */
+/**
+ * Model attribution recorded for the active adapter in harness run metadata.
+ * When the run carried per-role overrides (`<adapter>_models`), they are
+ * appended so provenance does not attribute a role's findings to the global
+ * fallback it did not spawn under — and so a run configured with only
+ * per-role models still names them.
+ */
 export function resolveAdapterModelFromMetadata(
   runMetadata: Readonly<Record<string, string>> | undefined,
 ): string | undefined {
+  const attributionFor = (name: string): string | undefined => {
+    const model = metadataString(runMetadata, `${name}_model`);
+    const roleModels = metadataString(runMetadata, `${name}_models`);
+    if (roleModels === undefined) {
+      return model;
+    }
+    return model === undefined
+      ? `per-role ${roleModels}`
+      : `${model}; per-role ${roleModels}`;
+  };
   const adapter = metadataString(runMetadata, "adapter");
-  if (adapter === "opencode") {
-    return metadataString(runMetadata, "opencode_model");
-  }
-  if (adapter === "claude") {
-    return metadataString(runMetadata, "claude_model");
-  }
-  if (adapter === "cursor") {
-    return metadataString(runMetadata, "cursor_model");
+  if (adapter === "opencode" || adapter === "claude" || adapter === "cursor") {
+    return attributionFor(adapter);
   }
   return (
-    metadataString(runMetadata, "cursor_model") ??
-    metadataString(runMetadata, "claude_model") ??
-    metadataString(runMetadata, "opencode_model")
+    attributionFor("cursor") ??
+    attributionFor("claude") ??
+    attributionFor("opencode")
   );
 }
 

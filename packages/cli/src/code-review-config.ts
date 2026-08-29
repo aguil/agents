@@ -11,6 +11,7 @@ import {
   expandReposRoot,
   resolveEffectiveWorkspace,
 } from "./code-review-workspace";
+import { parseRoleModels } from "./role-models";
 
 const ENV_PREFIX = "AGENTS_CODE_REVIEW_";
 
@@ -26,6 +27,7 @@ const STRING_FIELDS: readonly (keyof CliOptions & string)[] = [
   "consensus",
   "adapter",
   "model",
+  "models",
   "variant",
   "agent",
   "opencode",
@@ -112,6 +114,69 @@ export function normalizeAdapterArgsTemplateField(
   return { ok: true, normalized: parts };
 }
 
+/**
+ * Validate and normalize `models` from JSON: a comma-separated `role=model`
+ * string, or an object mapping role ids to model strings folded into that
+ * string form. Both encodings pass through {@link parseRoleModels}, so a
+ * config value the CLI would later reject fails here at load time instead,
+ * and the two forms accept exactly the same maps.
+ */
+export function normalizeRoleModelsField(
+  value: unknown,
+):
+  | { readonly ok: true; readonly normalized?: string }
+  | { readonly ok: false; readonly error: string } {
+  if (value === undefined) {
+    return { ok: true };
+  }
+  let candidate: string;
+  if (typeof value === "string") {
+    candidate = value.trim();
+  } else if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  ) {
+    const pairs: string[] = [];
+    for (const [role, model] of Object.entries(value)) {
+      if (typeof model !== "string") {
+        return {
+          ok: false,
+          error: `'models.${role}' must be a model string`,
+        };
+      }
+      // ',' separates pairs and '=' terminates the role id in the string
+      // encoding, so an object entry using either in the role (or ',' in
+      // the model) has no equivalent string form and must be rejected here
+      // rather than silently producing a different map.
+      if (role.includes(",") || role.includes("=") || model.includes(",")) {
+        return {
+          ok: false,
+          error: `'models.${role}' cannot be represented as role=model pairs (',' in either part or '=' in the role id)`,
+        };
+      }
+      pairs.push(`${role.trim()}=${model.trim()}`);
+    }
+    candidate = pairs.join(",");
+  } else {
+    return {
+      ok: false,
+      error:
+        "'models' must be a comma-separated role=model string or an object mapping role ids to model strings",
+    };
+  }
+  if (candidate.length === 0) {
+    return { ok: true };
+  }
+  const parsed = parseRoleModels(candidate);
+  if (!parsed.ok) {
+    return { ok: false, error: `'models': ${parsed.error}` };
+  }
+  return parsed.models === undefined
+    ? { ok: true }
+    : { ok: true, normalized: candidate };
+}
+
 function unknownFlatKeys(record: Record<string, unknown>): string[] {
   return Object.keys(record)
     .filter((key) => !ALLOWED_JSON_FLAT_KEYS.has(key))
@@ -127,6 +192,7 @@ const ENV_TO_FIELD: Readonly<Record<string, keyof CliOptions>> = {
   CONSENSUS: "consensus",
   ADAPTER: "adapter",
   MODEL: "model",
+  MODELS: "models",
   VARIANT: "variant",
   AGENT: "agent",
   OPENCODE: "opencode",
@@ -318,8 +384,20 @@ function extractFlatFields(
 
   const out: CodeReviewMergedPartial = {};
   const plainStringFields = STRING_FIELDS.filter(
-    (f) => !(ARGS_TEMPLATE_FIELDS as readonly string[]).includes(f),
+    (f) =>
+      !(ARGS_TEMPLATE_FIELDS as readonly string[]).includes(f) &&
+      f !== "models",
   );
+
+  if ("models" in raw) {
+    const normModels = normalizeRoleModelsField(raw.models);
+    if (!normModels.ok) {
+      return { ok: false, error: `${diagnosticsPrefix}: ${normModels.error}` };
+    }
+    if (normModels.normalized !== undefined) {
+      (out as Record<string, unknown>).models = normModels.normalized;
+    }
+  }
 
   for (const field of plainStringFields) {
     if (field in raw) {
@@ -563,6 +641,7 @@ function applyExplicitCliOptions(
     consensus: stringOr("consensus"),
     adapter: stringOr("adapter"),
     model: stringOr("model"),
+    models: stringOr("models"),
     variant: stringOr("variant"),
     agent: stringOr("agent"),
     opencode: stringOr("opencode"),

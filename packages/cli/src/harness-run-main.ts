@@ -44,6 +44,7 @@ import {
   resolveReportRenderer,
   statusAfterFindingPipelines,
 } from "@aguil/agents-reporting";
+import { parseRoleModels } from "./role-models";
 
 export { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
 
@@ -55,6 +56,10 @@ interface HarnessRunArgs {
   readonly agentsDir: string;
   readonly workspace: string;
   readonly adapter: AdapterName;
+  /** Model passed to the adapter CLI for every role (`--model`). */
+  readonly model?: string;
+  /** Per-role model overrides (`--models role=model,...`); beat `model`. */
+  readonly models?: Readonly<Record<string, string>>;
   readonly agentsCli?: string;
   readonly strict: boolean;
   readonly allowUnenforcedPolicy: boolean;
@@ -64,6 +69,7 @@ interface HarnessRunArgs {
 
 const USAGE = `Usage: agents harness run <id> --agents-dir <dir> --workspace <path>
                         [--adapter cursor|claude|opencode|fake]
+                        [--model <model>] [--models role=model,...]
                         [--agents-cli <cmd>] [--strict]
                         [--allow-unenforced-policy]
                         [--force-tool-calls]
@@ -77,6 +83,11 @@ Required:
 
 Optional:
   --adapter <name>         cursor (default) | claude | opencode | fake
+  --model <model>          Model passed to the adapter CLI for every role
+                           (default: the adapter CLI's own configured model)
+  --models role=model,...  Per-role model overrides by harness role id, e.g.
+                           --models security=provider/strong,quality=provider/fast
+                           A role's entry beats --model; unmapped roles fall back
   --agents-cli <cmd>       agents CLI used by generated hooks (default: agents)
   --strict                 Fail the run on schema / enablement violations
   --allow-unenforced-policy
@@ -95,6 +106,8 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
   let agentsDir: string | undefined;
   let workspace: string | undefined;
   let adapter: AdapterName = "cursor";
+  let model: string | undefined;
+  let models: Readonly<Record<string, string>> | undefined;
   let agentsCli: string | undefined;
   let strict = false;
   let allowUnenforcedPolicy = false;
@@ -111,6 +124,14 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
         return `harness run: unsupported adapter "${candidate}" (${SUPPORTED_ADAPTERS.join(", ")})`;
       }
       adapter = candidate as AdapterName;
+    } else if (arg === "--model") {
+      model = rest[++index];
+    } else if (arg === "--models") {
+      const parsed = parseRoleModels(rest[++index]);
+      if (!parsed.ok) {
+        return `harness run: invalid --models value. ${parsed.error}`;
+      }
+      models = parsed.models;
     } else if (arg === "--agents-cli") {
       agentsCli = rest[++index];
     } else if (arg === "--strict") {
@@ -131,6 +152,8 @@ function parseHarnessRunArgv(argv: readonly string[]): HarnessRunArgs | string {
     agentsDir,
     workspace,
     adapter,
+    model,
+    models,
     agentsCli,
     strict,
     allowUnenforcedPolicy,
@@ -151,15 +174,19 @@ export function cursorOptionsForHarnessRun(
 
 function constructAdapter(
   name: AdapterName,
-  forceToolCalls: boolean,
+  args: Pick<HarnessRunArgs, "forceToolCalls" | "model" | "models">,
 ): AgentAdapter {
+  const modelOptions = { model: args.model, models: args.models };
   switch (name) {
     case "cursor":
-      return new CursorAdapter(cursorOptionsForHarnessRun(forceToolCalls));
+      return new CursorAdapter({
+        ...cursorOptionsForHarnessRun(args.forceToolCalls),
+        ...modelOptions,
+      });
     case "claude":
-      return new ClaudeCodeAdapter({});
+      return new ClaudeCodeAdapter(modelOptions);
     case "opencode":
-      return new OpenCodeAdapter({});
+      return new OpenCodeAdapter(modelOptions);
     case "fake":
       return new FakeAgentAdapter({});
   }
@@ -415,7 +442,7 @@ export async function runHarnessRunCli(
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
-    adapter: constructAdapter(parsed.adapter, parsed.forceToolCalls),
+    adapter: constructAdapter(parsed.adapter, parsed),
     contextBundlePath,
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),

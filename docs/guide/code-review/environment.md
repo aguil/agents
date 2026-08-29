@@ -14,6 +14,7 @@ Boolean variables accept `true` / `false` / `1` / `0` / `yes` / `no`.
 | `AGENTS_CODE_REVIEW_CONSENSUS`              | `--consensus`                                                                                    |
 | `AGENTS_CODE_REVIEW_ADAPTER`                | `--adapter`                                                                                      |
 | `AGENTS_CODE_REVIEW_MODEL`                  | `--model`                                                                                        |
+| `AGENTS_CODE_REVIEW_MODELS`                 | `--models` (per-role `role=model` pairs, comma-separated)                                        |
 | `AGENTS_CODE_REVIEW_VARIANT`                | `--variant`                                                                                      |
 | `AGENTS_CODE_REVIEW_AGENT`                  | `--agent`                                                                                        |
 | `AGENTS_CODE_REVIEW_OPENCODE`               | `--opencode`                                                                                     |
