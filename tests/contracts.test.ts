@@ -2753,6 +2753,55 @@ test("builders route per-role models into --model at spawn time", () => {
   expect(unmapped).not.toContain("--model");
 });
 
+test("cursor custom argsTemplate cannot silently drop configured model routing", () => {
+  const request = {
+    runId: "run-1",
+    roleId: "security",
+    prompt: "Review this change.",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch/roles/security",
+    timeoutMs: 1_000,
+    allowedCommands: ["bun test"],
+  };
+  const requestPath = "/scratch/roles/security/security.request.json";
+  const templateWithoutModel = [
+    "--print",
+    "--workspace",
+    "{workspace}",
+    "{prompt}",
+  ];
+
+  // Template without a model slot: the resolved model is appended anyway,
+  // ahead of the trailing prompt.
+  const appended = buildCursorCommand(request, requestPath, {
+    argsTemplate: templateWithoutModel,
+    model: "provider/default",
+    models: { security: "provider/strong" },
+  });
+  const flag = appended.indexOf("--model");
+  expect(flag).toBeGreaterThan(0);
+  expect(appended[flag + 1]).toBe("provider/strong");
+  expect(flag + 1).toBeLessThan(appended.length - 1);
+
+  // Template that routes the model itself keeps ownership: one --model,
+  // via substitution, no duplicate injection.
+  const substituted = buildCursorCommand(request, requestPath, {
+    argsTemplate: ["--print", "--model", "{model}", "{prompt}"],
+    model: "provider/default",
+  });
+  expect(substituted.filter((arg) => arg === "--model")).toHaveLength(1);
+  expect(substituted[substituted.indexOf("--model") + 1]).toBe(
+    "provider/default",
+  );
+
+  // No configured model: nothing is appended.
+  const unconfigured = buildCursorCommand(request, requestPath, {
+    argsTemplate: templateWithoutModel,
+  });
+  expect(unconfigured).not.toContain("--model");
+});
+
 test("adds jj guidance to opencode prompt when workspace is jj", () => {
   const prompt = buildOpenCodePrompt({
     runId: "run-1",

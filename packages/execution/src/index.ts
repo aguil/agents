@@ -1384,7 +1384,18 @@ export function buildCursorCommand(
   // Enforce approval on flag argv only so injected --sandbox/--force stay
   // ahead of the prompt (and custom templates cannot disagree with metadata).
   const enforced = applyCursorApprovalToArgv(flagArgs, approval);
-  return [options.executable ?? "agent", ...enforced, trailingPrompt];
+  // A custom template that routes the model itself (a `{model}` slot or a
+  // literal `--model`) owns that choice; otherwise append the resolved
+  // model so a template written without one cannot silently drop the
+  // configured routing while metadata and provenance still record it.
+  const templateRoutesModel = template.some(
+    (arg) => arg === "--model" || arg.includes("{model}"),
+  );
+  const withModel =
+    model !== undefined && !templateRoutesModel
+      ? [...enforced, "--model", model]
+      : enforced;
+  return [options.executable ?? "agent", ...withModel, trailingPrompt];
 }
 
 export {

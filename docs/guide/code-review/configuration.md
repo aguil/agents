@@ -106,6 +106,12 @@ etc.), use the `=` binding form to keep the template in one argv cell:
 --claude-args="--verbose,--model,claude-sonnet-4"
 ```
 
+A cursor template that contains neither a `{model}` slot nor a literal `--model`
+still receives the resolved `--model` (from `model` / `models`) appended after
+the template flags, so a custom template cannot silently drop configured model
+routing; include `{model}` in the template only to control where the flag
+appears.
+
 ## `models` — per-role model overrides
 
 `models` maps harness role ids to models. A role's entry wins over `model`;
