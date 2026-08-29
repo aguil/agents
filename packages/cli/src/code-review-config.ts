@@ -11,6 +11,7 @@ import {
   expandReposRoot,
   resolveEffectiveWorkspace,
 } from "./code-review-workspace";
+import { parseRoleModels } from "./role-models";
 
 const ENV_PREFIX = "AGENTS_CODE_REVIEW_";
 
@@ -114,9 +115,11 @@ export function normalizeAdapterArgsTemplateField(
 }
 
 /**
- * Validate and normalize `models` from JSON: a comma-separated
- * `role=model` string kept verbatim, or an object mapping role ids to model
- * strings folded into that string form.
+ * Validate and normalize `models` from JSON: a comma-separated `role=model`
+ * string, or an object mapping role ids to model strings folded into that
+ * string form. Both encodings pass through {@link parseRoleModels}, so a
+ * config value the CLI would later reject fails here at load time instead,
+ * and the two forms accept exactly the same maps.
  */
 export function normalizeRoleModelsField(
   value: unknown,
@@ -126,43 +129,52 @@ export function normalizeRoleModelsField(
   if (value === undefined) {
     return { ok: true };
   }
+  let candidate: string;
   if (typeof value === "string") {
-    const t = value.trim();
-    return t.length === 0 ? { ok: true } : { ok: true, normalized: t };
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    candidate = value.trim();
+  } else if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  ) {
+    const pairs: string[] = [];
+    for (const [role, model] of Object.entries(value)) {
+      if (typeof model !== "string") {
+        return {
+          ok: false,
+          error: `'models.${role}' must be a model string`,
+        };
+      }
+      // ',' separates pairs and '=' terminates the role id in the string
+      // encoding, so an object entry using either in the role (or ',' in
+      // the model) has no equivalent string form and must be rejected here
+      // rather than silently producing a different map.
+      if (role.includes(",") || role.includes("=") || model.includes(",")) {
+        return {
+          ok: false,
+          error: `'models.${role}' cannot be represented as role=model pairs (',' in either part or '=' in the role id)`,
+        };
+      }
+      pairs.push(`${role.trim()}=${model.trim()}`);
+    }
+    candidate = pairs.join(",");
+  } else {
     return {
       ok: false,
       error:
         "'models' must be a comma-separated role=model string or an object mapping role ids to model strings",
     };
   }
-  const pairs: string[] = [];
-  for (const [role, model] of Object.entries(value)) {
-    if (typeof model !== "string" || model.trim().length === 0) {
-      return {
-        ok: false,
-        error: `'models.${role}' must be a non-empty model string`,
-      };
-    }
-    const roleTrimmed = role.trim();
-    if (roleTrimmed.length === 0 || roleTrimmed.includes("=")) {
-      return {
-        ok: false,
-        error: `'models' role ids must be non-empty and must not contain '=' (got '${role}')`,
-      };
-    }
-    if (model.includes(",") || model.includes("=")) {
-      return {
-        ok: false,
-        error: `'models.${role}' must not contain ',' or '=' (got '${model}')`,
-      };
-    }
-    pairs.push(`${roleTrimmed}=${model.trim()}`);
+  if (candidate.length === 0) {
+    return { ok: true };
   }
-  return pairs.length === 0
+  const parsed = parseRoleModels(candidate);
+  if (!parsed.ok) {
+    return { ok: false, error: `'models': ${parsed.error}` };
+  }
+  return parsed.models === undefined
     ? { ok: true }
-    : { ok: true, normalized: pairs.join(",") };
+    : { ok: true, normalized: candidate };
 }
 
 function unknownFlatKeys(record: Record<string, unknown>): string[] {

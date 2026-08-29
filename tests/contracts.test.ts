@@ -3671,6 +3671,25 @@ test("extractConfigDocument normalizes a models object to role=model pairs", () 
   expect(extractConfigDocument({ models: { security: "a,b" } }).ok).toBe(false);
 });
 
+test("models string and object config forms accept the same maps", () => {
+  // Malformed string form fails at config load, like the object form does.
+  expect(extractConfigDocument({ models: "not-a-pair" }).ok).toBe(false);
+  expect(extractConfigDocument({ models: "security=" }).ok).toBe(false);
+  // '=' inside a model value round-trips through the string encoding
+  // (parseRoleModels splits on the first '='), so both forms accept it.
+  const objectForm = extractConfigDocument({ models: { security: "a=b" } });
+  expect(objectForm.ok).toBe(true);
+  if (objectForm.ok) {
+    expect(objectForm.flat.models).toBe("security=a=b");
+  }
+  expect(parseRoleModels("security=a=b")).toEqual({
+    ok: true,
+    models: { security: "a=b" },
+  });
+  // An empty-model object entry fails in both forms.
+  expect(extractConfigDocument({ models: { security: " " } }).ok).toBe(false);
+});
+
 test("extractConfigDocument rejects nested presets inside a preset body", () => {
   expect(
     extractConfigDocument({
