@@ -48,8 +48,9 @@ is the **enforced** routing mechanism. Everything else role-shaped below is a
    config, which model to recommend to a human.
 
 Do not present a layer-3 preference as a guarantee. If a task requires that a
-specific role provably runs on a specific model, say that the harness cannot
-enforce it today and route through layer 1 or 2 instead.
+specific role provably runs on a specific model, set it in layer 1 — the
+`models` surface exists for exactly that — rather than relying on an advisory
+preference being honored.
 
 ## Declaring preferences in a target repository
 
