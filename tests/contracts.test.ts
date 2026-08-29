@@ -2784,7 +2784,7 @@ test("cursor custom argsTemplate cannot silently drop configured model routing",
   expect(appended[flag + 1]).toBe("provider/strong");
   expect(flag + 1).toBeLessThan(appended.length - 1);
 
-  // Template that routes the model itself keeps ownership: one --model,
+  // Template with a {model} slot keeps its flag placement: one --model,
   // via substitution, no duplicate injection.
   const substituted = buildCursorCommand(request, requestPath, {
     argsTemplate: ["--print", "--model", "{model}", "{prompt}"],
@@ -2795,7 +2795,30 @@ test("cursor custom argsTemplate cannot silently drop configured model routing",
     "provider/default",
   );
 
-  // No configured model: nothing is appended.
+  // A literal --model pinned in the template is overridden by configured
+  // routing, so spawn argv cannot disagree with recorded metadata.
+  const pinned = buildCursorCommand(request, requestPath, {
+    argsTemplate: ["--print", "--model", "sonnet-4", "--trust", "{prompt}"],
+    models: { security: "provider/strong" },
+  });
+  expect(pinned.filter((arg) => arg === "--model")).toHaveLength(1);
+  expect(pinned[pinned.indexOf("--model") + 1]).toBe("provider/strong");
+  expect(pinned).not.toContain("sonnet-4");
+  const pinnedEquals = buildCursorCommand(request, requestPath, {
+    argsTemplate: ["--print", "--model=sonnet-4", "{prompt}"],
+    model: "provider/default",
+  });
+  expect(pinnedEquals).toContain("--model=provider/default");
+  expect(pinnedEquals).not.toContain("--model=sonnet-4");
+
+  // No configured model: the template's own pin stands, and nothing is
+  // appended to a template without one.
+  const pinnedUnconfigured = buildCursorCommand(request, requestPath, {
+    argsTemplate: ["--print", "--model", "sonnet-4", "{prompt}"],
+  });
+  expect(pinnedUnconfigured[pinnedUnconfigured.indexOf("--model") + 1]).toBe(
+    "sonnet-4",
+  );
   const unconfigured = buildCursorCommand(request, requestPath, {
     argsTemplate: templateWithoutModel,
   });

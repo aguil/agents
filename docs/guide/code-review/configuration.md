@@ -106,11 +106,12 @@ etc.), use the `=` binding form to keep the template in one argv cell:
 --claude-args="--verbose,--model,claude-sonnet-4"
 ```
 
-A cursor template that contains neither a `{model}` slot nor a literal `--model`
-still receives the resolved `--model` (from `model` / `models`) appended after
-the template flags, so a custom template cannot silently drop configured model
-routing; include `{model}` in the template only to control where the flag
-appears.
+Configured model routing (`model` / `models`) always reaches the spawned cursor
+argv: a `{model}` slot in the template substitutes the resolved model, a literal
+`--model <value>` in the template is overridden by it, and a template with
+neither gets `--model` appended after its flags. A template only pins its own
+model when no `model` / `models` is configured for the run; include `{model}` in
+the template only to control where the flag appears.
 
 ## `models` — per-role model overrides
 

@@ -1336,6 +1336,40 @@ export function applyCursorApprovalToArgv(
   return out;
 }
 
+/**
+ * Force the resolved model onto a flag argv: rewrite every existing
+ * `--model <value>` / `--model=<value>` to the resolved model, or append
+ * `--model` when the argv has none. Keeps a custom template's flag
+ * placement while making it impossible for the template to pin a model
+ * that disagrees with the configured `model`/`models` routing.
+ */
+function applyModelToArgv(
+  argv: readonly string[],
+  model: string,
+): readonly string[] {
+  const out: string[] = [];
+  let saw = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--model") {
+      out.push("--model", model);
+      saw = true;
+      if (index + 1 < argv.length) {
+        index += 1;
+      }
+    } else if (arg.startsWith("--model=")) {
+      out.push(`--model=${model}`);
+      saw = true;
+    } else {
+      out.push(arg);
+    }
+  }
+  if (!saw) {
+    out.push("--model", model);
+  }
+  return out;
+}
+
 export function buildCursorCommand(
   request: AgentRunRequest,
   requestPath: string,
@@ -1384,17 +1418,14 @@ export function buildCursorCommand(
   // Enforce approval on flag argv only so injected --sandbox/--force stay
   // ahead of the prompt (and custom templates cannot disagree with metadata).
   const enforced = applyCursorApprovalToArgv(flagArgs, approval);
-  // A custom template that routes the model itself (a `{model}` slot or a
-  // literal `--model`) owns that choice; otherwise append the resolved
-  // model so a template written without one cannot silently drop the
-  // configured routing while metadata and provenance still record it.
-  const templateRoutesModel = template.some(
-    (arg) => arg === "--model" || arg.includes("{model}"),
-  );
+  // Configured model routing must reach the spawned argv exactly as
+  // metadata and provenance record it (same posture as the approval-flag
+  // enforcement above): a template's `{model}` slot substitutes the
+  // resolved model, a literal `--model` value is overridden by it, and a
+  // template with neither gets it appended. A template only pins its own
+  // model when no `model`/`models` is configured for the run.
   const withModel =
-    model !== undefined && !templateRoutesModel
-      ? [...enforced, "--model", model]
-      : enforced;
+    model === undefined ? enforced : applyModelToArgv(enforced, model);
   return [options.executable ?? "agent", ...withModel, trailingPrompt];
 }
 
