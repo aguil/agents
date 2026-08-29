@@ -2192,6 +2192,26 @@ test("resolveAdapterModelFromMetadata picks adapter-specific model field", () =>
   ).toBe("opencode/gpt-5.3-codex");
 });
 
+test("resolveAdapterModelFromMetadata includes per-role model overrides", () => {
+  // --models with no --model: provenance still names the per-role map.
+  expect(
+    resolveAdapterModelFromMetadata({
+      adapter: "cursor",
+      cursor_model: "",
+      cursor_models: "security=strong",
+    }),
+  ).toBe("per-role security=strong");
+  // Both set: the global fallback and the overrides both appear, so a
+  // role spawned under an override is not attributed to the fallback.
+  expect(
+    resolveAdapterModelFromMetadata({
+      adapter: "claude",
+      claude_model: "base",
+      claude_models: "quality=fast,security=strong",
+    }),
+  ).toBe("base; per-role quality=fast,security=strong");
+});
+
 test("review provenance section lists reviewer and agent in summary", () => {
   const lines = formatReviewProvenanceSectionLines({
     reviewerLogin: "jasona",
