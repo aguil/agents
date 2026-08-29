@@ -10,6 +10,22 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.2](https://github.com/aguil/agents/compare/v0.8.1...v0.8.2) (2026-08-29)
+
+
+### Added
+
+* per-role model routing via --models, config, and adapter options ([58462ed](https://github.com/aguil/agents/commit/58462ede384f8332febc82ed6b82f10ae8d5192c))
+* per-role model routing via --models, config, and adapter options ([2767ccc](https://github.com/aguil/agents/commit/2767ccc18c45643ece21ed2293564e4af2cc1776))
+
+
+### Fixed
+
+* **cli:** validate both models config forms with the same rules ([01a6439](https://github.com/aguil/agents/commit/01a6439ffeb15aba2ca1b6cfe36dbed4b6e6ef1c))
+* **code-review-post:** attribute per-role models in review provenance ([8c0acab](https://github.com/aguil/agents/commit/8c0acabf758164d9e265d26607d29e2a1b2df258))
+* **execution:** append cursor --model when a custom template omits it ([e42047f](https://github.com/aguil/agents/commit/e42047f274ffe705f17b90a7c45b21be746b9ae9))
+* **execution:** override pinned cursor template --model with configured routing ([30869eb](https://github.com/aguil/agents/commit/30869eb5d50e6e8cf20257d00252b3283482cc82))
+
 ## [0.8.1](https://github.com/aguil/agents/compare/v0.8.0...v0.8.1) (2026-08-27)
 
 
