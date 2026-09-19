@@ -261,3 +261,93 @@ test("MCP-shaped payload with nested url is denied by network policy", async () 
   );
   expect(lastJsonLine(result.stdout).permission).toBe("deny");
 });
+
+test("normalizeHookPayload maps Claude Code event names (ADR 0023)", () => {
+  const pre = normalizeHookPayload({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo hi" },
+  });
+  expect(pre.hook_event).toBe("pre_tool_call");
+  expect(pre.tool_name).toBe("Bash");
+  expect(pre.tool_input?.command).toBe("echo hi");
+
+  const post = normalizeHookPayload({ hook_event_name: "PostToolUse" });
+  expect(post.hook_event).toBe("post_tool_call");
+
+  const stop = normalizeHookPayload({ hook_event_name: "Stop" });
+  expect(stop.hook_event).toBe("role_stop");
+
+  const start = normalizeHookPayload({ hook_event_name: "SessionStart" });
+  expect(start.hook_event).toBe("role_start");
+});
+
+test("policy-eval --format defaults to cursor and encodes claude deny", async () => {
+  const { encodeClaudePolicyResponse, encodeCursorPolicyResponse } =
+    await import("../packages/cli/src/policy-eval-main");
+  expect(encodeCursorPolicyResponse({ permission: "deny" })).toEqual({
+    permission: "deny",
+  });
+  expect(
+    encodeClaudePolicyResponse({
+      permission: "deny",
+      agentMessage: "nope",
+    }),
+  ).toEqual({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "nope",
+    },
+  });
+
+  const cursorDefault = await runPolicyEval(
+    ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "rm -rf /" },
+    },
+  );
+  // Unknown/denied by policy still Cursor-shaped when --format omitted.
+  const cursorBody = lastJsonLine(cursorDefault.stdout);
+  expect(cursorBody.permission).toBeDefined();
+
+  const claudeDeny = await runPolicyEval(
+    [
+      "--policy",
+      "triage-readonly",
+      "--agents-dir",
+      fixturesAgentsDir,
+      "--format",
+      "claude",
+    ],
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "curl https://evil.example" },
+    },
+  );
+  const body = lastJsonLine(claudeDeny.stdout) as {
+    hookSpecificOutput?: { permissionDecision?: string };
+  };
+  expect(body.hookSpecificOutput?.permissionDecision).toBeDefined();
+});
+
+test("unknown hook event still denies (ADR 0023 decision 7)", async () => {
+  const result = await runPolicyEval(
+    [
+      "--policy",
+      "triage-readonly",
+      "--agents-dir",
+      fixturesAgentsDir,
+      "--format",
+      "claude",
+    ],
+    { hook_event_name: "TotallyUnknownEvent" },
+  );
+  const body = lastJsonLine(result.stdout) as {
+    hookSpecificOutput: { permissionDecision: string };
+  };
+  expect(body.hookSpecificOutput.permissionDecision).toBe("deny");
+});

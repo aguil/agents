@@ -9,8 +9,10 @@ import {
   CURSOR_EVENT_MAPPING,
   cursorHookEventDispatchability,
   generateCursorHooksConfig,
+  HOOK_ADAPTER_IDS,
+  hookEventAdapterDispatchability,
+  LIFECYCLE_HOOK_EVENTS,
   renderCursorHooksConfig,
-  UNDISPATCHABLE_LIFECYCLE_EVENTS,
   undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
 
@@ -103,13 +105,85 @@ test("every HookEvent has an explicit Cursor dispatchability (ADR 0024 skip cont
   // The three inert lifecycle events stay undispatchable until orchestrator
   // dispatch (run_*) or an adapter mapping (role_start) lands — never by
   // projecting a session-end onto a run boundary.
-  expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toContain("role_start");
-  expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toContain("run_start");
-  expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toContain("run_end");
-  expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toHaveLength(3);
-  for (const event of UNDISPATCHABLE_LIFECYCLE_EVENTS) {
+  expect(LIFECYCLE_HOOK_EVENTS).toContain("role_start");
+  expect(LIFECYCLE_HOOK_EVENTS).toContain("run_start");
+  expect(LIFECYCLE_HOOK_EVENTS).toContain("run_end");
+  expect(LIFECYCLE_HOOK_EVENTS).toHaveLength(3);
+  for (const event of LIFECYCLE_HOOK_EVENTS) {
     expect(expectedDispatchable.has(event)).toBe(false);
   }
+});
+
+test("adapter × HookEvent dispatchability matrix is complete (ADR 0023)", () => {
+  const rows = hookEventAdapterDispatchability();
+  expect(rows.length).toBe(HOOK_ADAPTER_IDS.length * HOOK_EVENTS.length);
+  // run_start / run_end never map on any adapter (ADR 0024).
+  for (const row of rows) {
+    if (row.event === "run_start" || row.event === "run_end") {
+      expect(row.dispatchable).toBe(false);
+    }
+  }
+  expect(
+    rows.find((r) => r.adapter === "claude" && r.event === "role_start")
+      ?.dispatchable,
+  ).toBe(true);
+  expect(
+    rows.find((r) => r.adapter === "cursor" && r.event === "role_start")
+      ?.dispatchable,
+  ).toBe(false);
+  expect(rows.find((r) => r.adapter === "opencode")?.canDeny).toBe(false);
+  expect(rows.find((r) => r.adapter === "claude")?.canDeny).toBe(true);
+});
+
+test("Claude generator projects events, matchers, and policy bridge format", async () => {
+  const {
+    generateClaudeHooksConfig,
+    renderClaudeSettingsConfig,
+    assertWellFormedClaudeSettings,
+  } = await import("@aguil/agents-hooks");
+  const { config, skippedEvents } = generateClaudeHooksConfig({
+    hooks: sampleHooks,
+    policyBridge: true,
+  });
+  expect(skippedEvents).toEqual(["run_end"]);
+  expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
+    '"agents" policy-eval --format claude',
+  );
+  expect(config.hooks.PostToolUse?.[0].hooks[0].command).toBe(
+    '"agents" policy-eval --format claude',
+  );
+  // User pre_tool_call carries matcher as Claude's matcher field.
+  const preUser = config.hooks.PreToolUse?.find(
+    (group) => group.matcher === "Execute",
+  );
+  expect(preUser?.hooks[0].command).toBe("/h/hooks/validate-shell.sh");
+  expect(preUser?.hooks[0].timeout).toBe(10);
+  expect(config.hooks.Stop?.[0].hooks[0].command).toBe(
+    "/h/hooks/check-coverage.sh",
+  );
+  assertWellFormedClaudeSettings(config);
+  const rendered = renderClaudeSettingsConfig(config);
+  expect(rendered.endsWith("\n")).toBe(true);
+  expect(() =>
+    assertWellFormedClaudeSettings({
+      hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "" }] }] },
+    }),
+  ).toThrow(/non-empty string/);
+});
+
+test("Claude applies_to scopes matchers to tool classes", async () => {
+  const { generateClaudeHooksConfig } = await import("@aguil/agents-hooks");
+  const shellOnly: HookHandlerSpec = {
+    command: "/h/hooks/shell-only.sh",
+    appliesTo: ["shell"],
+  };
+  const { config } = generateClaudeHooksConfig({
+    hooks: { pre_tool_call: [shellOnly] },
+  });
+  expect(config.hooks.PreToolUse?.[0].matcher).toBe("Bash");
+  expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
+    "/h/hooks/shell-only.sh",
+  );
 });
 
 test("declaring undispatchable lifecycle handlers yields named warnings (ADR 0024)", () => {
@@ -122,15 +196,18 @@ test("declaring undispatchable lifecycle handlers yields named warnings (ADR 002
     run_start: [{ command: "echo run_start" }],
     run_end: [{ command: "echo run_end" }],
   };
-  const warnings = undispatchableLifecycleHookWarnings(allThree);
+  const warnings = undispatchableLifecycleHookWarnings(allThree, "cursor");
   expect(warnings).toHaveLength(3);
   expect(warnings[0]).toContain("hooks.role_start:");
-  expect(warnings[0]).toContain("no adapter event mapping");
   expect(warnings[1]).toContain("hooks.run_start:");
   expect(warnings[2]).toContain("hooks.run_end:");
-  for (const warning of warnings) {
-    expect(warning).toContain("ADR 0024");
-  }
+  // Claude maps SessionStart → role_start, so only run_* warn.
+  const claudeWarnings = undispatchableLifecycleHookWarnings(
+    allThree,
+    "claude",
+  );
+  expect(claudeWarnings).toHaveLength(2);
+  expect(claudeWarnings.join("\n")).not.toContain("role_start");
 });
 
 test("policyBridge false yields no bridge entries", () => {
