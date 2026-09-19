@@ -130,3 +130,9 @@ so it is upheld in review.
   binding defaults, recency-then-identifier admission order, and overflow
   recorded in the bundle rather than failing the run. Qualifies ADR 0017 §6 on
   where the budget is declared.
+- [0024-undispatchable-lifecycle-events.md](0024-undispatchable-lifecycle-events.md)
+  — ADR 0024: run-level events are the orchestrator's to dispatch and no adapter
+  mapping can supply them, because an adapter is invoked once per role
+  invocation and cannot know which is the run's last; declaring `run_start`,
+  `run_end` or `role_start` is reported to the author rather than silently
+  accepted; harness-declared run-level handlers do not execute.
