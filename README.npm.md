@@ -22,6 +22,11 @@ npm install -g @aguil/agents
 A fresh install does **not** require a pre-existing Bun on `PATH`; npm installs
 the `bun` dependency and the shim resolves it.
 
+Installers that skip lifecycle scripts (`--ignore-scripts`, pnpm, mise's `npm:`
+backend) leave the `bun` dependency without a binary. The shim skips it and
+falls back to `BUN_INSTALL`, then `PATH`. With no other Bun available, run the
+dependency's postinstall by hand: `cd node_modules/bun && node install.js`.
+
 ## Smoke test
 
 ```bash
