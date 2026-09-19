@@ -91,6 +91,28 @@ This repository allows merge commits (default merge method is MERGE, not
 squash). Every commit that lands on `main` must have a valid header — not only
 the PR title.
 
+## PR titles
+
+Give a PR a plain-language title, not a conventional header:
+
+| Use                                            | Avoid                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------- |
+| `Skip unusable bun candidates in the launcher` | `fix(launcher): skip unusable bun candidates before spawning` |
+
+GitHub writes a merge commit as `Merge pull request #N from …`, a blank line,
+then the PR title. release-please splits a commit message at any blank line
+followed by a conventional header, so it reads a conventional PR title as a
+second change and credits it to the merge commit. The commits inside the PR are
+listed too, and the release notes show the change twice. No GitHub merge-message
+setting avoids this (see
+[Duplicate changelog entries](../../docs/release-checklist.md#duplicate-changelog-entries)).
+
+GitHub reads the title at merge time, so renaming a PR just before merging is
+enough. CI does not check PR titles.
+
+The exception is a squash merge of several commits, which takes its header from
+the PR title. A PR that will be squashed needs a conventional title.
+
 ## Check locally
 
 Verify a single revision's description before pushing:

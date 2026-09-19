@@ -30,6 +30,12 @@ This repository is a Bun/TypeScript monorepo for reusable agent harnesses.
   entirely. Breaking commits carry both the `!` and a `BREAKING CHANGE:` footer
   describing the break. Canonical wording:
   [`.agents/rules/conventional-commits.md`](.agents/rules/conventional-commits.md).
+- PR titles are plain language, not conventional headers (for example "Skip
+  unusable bun candidates in the launcher", not `fix(launcher): …`). PRs land as
+  merge commits, and release-please reads a conventional PR title in the merge
+  commit body as a second change, so the release notes list it twice. Commits
+  inside the PR keep conventional headers. Canonical wording:
+  [PR titles](.agents/rules/conventional-commits.md#pr-titles).
 - Before any commit: **`bun run lint`**, **`bun run typecheck`**, and
   **`mise exec --locked -- pre-commit run --all-files`** must all pass (requires
   [mise](https://mise.jdx.dev/): `mise trust` + `mise install` in this repo).
