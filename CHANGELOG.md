@@ -10,6 +10,14 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.3](https://github.com/aguil/agents/compare/v0.8.2...v0.8.3) (2026-09-19)
+
+
+### Fixed
+
+* **launcher:** skip unusable bun candidates before spawning ([d0f09a8](https://github.com/aguil/agents/commit/d0f09a81adeee67d63ca097d32499cf7e116aee8))
+* **launcher:** skip unusable bun candidates before spawning ([6166078](https://github.com/aguil/agents/commit/6166078f5c92d757213a19e7bdbc7da63c621579)), closes [#195](https://github.com/aguil/agents/issues/195)
+
 ## [0.8.2](https://github.com/aguil/agents/compare/v0.8.1...v0.8.2) (2026-08-29)
 
 
