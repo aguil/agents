@@ -38,6 +38,9 @@ and merging the release PR when you want to ship.
       from the changelog entirely is the signature of an unparseable header.
 - [ ] The release PR's version bump and changelog entry look right (fix commit
       types on `main` and let release-please regenerate if not).
+- [ ] No change is listed twice. A line whose SHA is a `Merge pull request`
+      commit is a duplicate (see
+      [Duplicate changelog entries](#duplicate-changelog-entries)).
 - [ ] Commits reaching GitHub are signed (see
       [`.agents/rules/pre-commit-checks.md`](../.agents/rules/pre-commit-checks.md)
       for the jj `git.sign-on-push` setup).
@@ -62,6 +65,33 @@ and merging the release PR when you want to ship.
 Do not commit per-version release notes outside `CHANGELOG.md`; the
 release-please-maintained changelog is the only committed source of release
 notes.
+
+## Duplicate changelog entries
+
+release-please lists a change twice when a PR lands as a merge commit and its
+title is a conventional header. GitHub writes the merge message as
+`Merge pull request #N from …`, a blank line, then the PR title. release-please
+splits a commit message at any blank line followed by a conventional header, so
+it reads the PR title as a second change and credits it to the merge commit's
+SHA. The commits inside the PR are listed too.
+
+No repository setting avoids this. GitHub allows three merge-message
+combinations (`MERGE_MESSAGE` + `PR_TITLE`, `PR_TITLE` + `PR_BODY`, `PR_TITLE` +
+`BLANK`), and each one puts the PR title where release-please parses it.
+release-please has no option to ignore merge commits.
+
+To prevent it, give the PR a plain-language title ("Skip unusable bun candidates
+in the launcher") instead of a conventional header. GitHub reads the title at
+merge time, so renaming the PR just before merging works. The commits inside the
+PR still need conventional headers, because those produce the changelog entries.
+This applies to merge commits only. A squash merge of several commits takes its
+header from the PR title, so a squashed PR needs a conventional title.
+
+To clean up a release PR that already has a duplicate, delete the line that
+links to the merge commit from both `CHANGELOG.md` on the release branch and the
+release PR's description. The GitHub Release notes come from the PR description,
+not from the file. Do it last, right before merging, because release-please
+regenerates both on every push to `main`.
 
 ## One-time npm / CI prerequisites
 
