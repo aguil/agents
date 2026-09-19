@@ -30,7 +30,7 @@ jobs:
 
       # npm 11.5.1+ exchanges the GitHub Actions OIDC token for a short-lived publish grant.
       # Node 22.14+ required; see npm trusted publishing docs.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
