@@ -179,8 +179,10 @@ bun run agents code-review --adapter fake --dry-run --log summary
 ## Config-declared harness
 
 `agents code-review` always runs the declarative `harness.yaml`-backed
-implementation. The runner resolves the code-review harness definition in this
-order:
+implementation. For the harness document format itself and for running your own
+harness, see [../custom-harness.md](../custom-harness.md); this section covers
+only how `agents code-review` resolves and constrains its harness. The runner
+resolves the code-review harness definition in this order:
 
 1. `<workspace>/.agents/harnesses/code-review/`
 2. `~/.agents/harnesses/code-review/`
