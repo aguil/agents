@@ -153,6 +153,89 @@ when a provider fails soft, the run can still pass, because a `pass_check` gate
 that sees no changes exits 0. Check the recorded outcomes, not just the exit
 code.
 
+### Knowledge providers
+
+The two knowledge providers read a store of Markdown notes from the workspace:
+`.agents/knowledge` by default, overridable per declaration with `path`, always
+confined to the workspace. Both layouts work: flat `<root>/*.md` files, or a
+directory per note (`<root>/<id>/<id>.md`) so note-local assets can sit beside
+the note. Discovery is a recursive Markdown scan, and a note's identifier comes
+from its frontmatter rather than its filename, so moving a file never renames a
+note. The full contract is ADR 0022; what follows is the working summary. A
+small real store ships with the incident-triage example under
+`fixture/.agents/knowledge/`.
+
+A note is Markdown with YAML frontmatter:
+
+```yaml
+---
+id: pagination-off-by-one
+context: auto # auto | search-only (default)
+tags: [incident, pagination]
+title: Optional title (defaults to the id)
+updatedAt: 2026-09-01
+---
+The note body.
+```
+
+The reader uses `id` (required), `context`, `tags`, `title` and `updatedAt`, and
+carries fields it does not know without complaint. The write path will add
+reserved provenance fields to exactly these documents, so rejecting unknown
+fields now would make that addition a breaking change. An identifier starting
+`_meta:` is reserved for the providers' own report artifacts. Malformed notes
+(unparseable, missing id, duplicate id, unusable field value) are skipped and
+reported, never fatal; an absent or empty store yields no artifacts, so
+declaring a provider before any note exists is safe.
+
+**`knowledge`: automatic injection.** Injecting a note into the context every
+role sees needs two opt-ins: the harness declares the provider, and the note
+carries `context: auto`. Injection is bounded unconditionally: `max_notes`
+(default 10) and `max_bytes` (default 50000, aggregate across admitted notes).
+When more notes are eligible than the budget admits, admission walks a total
+order: `updatedAt` descending, then `id` ascending, with notes lacking
+`updatedAt` sorted last. A note that does not fit in the remaining budget is
+truncated into it and admitted, so the admitted set is always a prefix of the
+ranking and the highest-ranked note is never the one dropped. Overflow is
+recorded in the bundle as a `<provider>:_meta:admission` artifact naming the
+admitted and omitted identifiers and the bound that was reached, and skipped
+notes are reported as `<provider>:_meta:skipped`. Neither is a run failure: a
+run must not start failing because the store grew (ADR 0017 clause 7).
+
+**`knowledge-search`: explicit retrieval.** Returns notes carrying every listed
+tag (AND match, case-insensitive). Params: `tags` (required), `limit` (default
+5), `provenance` (`any`, `machine` or `human`), `machine_id_prefix` (default
+`harness:`), plus `path` and `max_bytes`. Search honors the byte bound but not
+the note-count bound, and does not require `context: auto`: a search result was
+explicitly asked for. There is no free-text or embedding search. Retrieval
+quality rests on tags, which is deliberate: ADR 0017 chose to surface an
+inadequate store as a search problem rather than hide it by injecting
+everything.
+
+**Machine-authored notes.** Identifiers beginning with the machine prefix
+(default `harness:`) mark notes a run wrote. The reader treats a prefixed
+identifier as machine-authored for the `provenance` filter. Enforcing the
+namespace, rejecting a machine note that lacks the prefix, belongs to the write
+path.
+
+**Write-back is not built.** ADR 0017 governs how a run may write notes (staged
+notes with runtime-stamped provenance, human promotion, the reserved machine
+namespace), but the write path was designed around a `run_end` hook that cannot
+fire, and it remains unimplemented. The landing lifecycle stack (ADRs 0023 and
+0024, PRs [#175](https://github.com/aguil/agents/pull/175) through
+[#178](https://github.com/aguil/agents/pull/178)) settles the direction:
+run-level lifecycle events are the orchestrator's to dispatch rather than an
+adapter's to report (ADR 0024), which closes the "map a session event onto
+`run_end`" route for good, and declaring a `role_start` / `run_start` /
+`run_end` handler now warns at run setup instead of silently never running. Do
+not declare a `run_end` handler expecting write-back. When the capability lands
+it will be runtime-owned, per ADR 0017 clause 2, and the maintained
+[blockers note](../design/knowledge-write-back-blockers.md) tracks what remains.
+
+Notes are workspace-sourced text entering every agent's context window, the same
+trust class as the AGENTS.md instructions the `agents-md` provider injects. A
+hostile workspace can shape agent context through them. Nothing executable
+attaches to a note, and no path escapes the workspace.
+
 ### Parameterizing a run
 
 The runtime has no parameter surface: no harness argument, no per-run config
@@ -392,6 +475,7 @@ natural home for the model pins described above.
   [0006](../adr/0006-harness-governance-phase-1.md),
   [0009](../adr/0009-spec-v0.2-hook-scoping-and-bridge-cost.md),
   [0015](../adr/0015-project-local-harness-spec.md),
+  [0017](../adr/0017-knowledge-governance.md),
   [0018](../adr/0018-harness-schema-and-spec-0-3.md),
   [0019](../adr/0019-structured-finding-evidence.md),
   [0020](../adr/0020-cursor-force-opt-in-and-sandbox-default.md),
