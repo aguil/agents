@@ -833,7 +833,9 @@ function readFindingEnvelope(
 /**
  * Read a `{"outcome":{...}}` envelope into a validated HarnessOutcome.
  * Returns undefined for non-outcome values; returns an invalid marker when
- * the envelope key is present but the payload is malformed.
+ * the envelope key holds an object that is not a valid HarnessOutcome.
+ * A scalar `outcome` (e.g. Claude Code's `hook_response` records carry
+ * `"outcome":"success"`) is ordinary JSON, not a malformed envelope.
  */
 function readOutcomeEnvelope(
   value: unknown,
@@ -842,6 +844,9 @@ function readOutcomeEnvelope(
     return undefined;
   }
   const rawOutcome = (value as { readonly outcome?: unknown }).outcome;
+  if (typeof rawOutcome !== "object" || rawOutcome === null) {
+    return undefined;
+  }
   if (isHarnessOutcome(rawOutcome)) {
     return { value: rawOutcome };
   }

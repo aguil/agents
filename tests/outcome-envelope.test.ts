@@ -79,3 +79,19 @@ test("finding and outcome envelopes remain disjoint", () => {
   );
   expect(findingEvents[0]?.type).toBe("finding");
 });
+
+test("a scalar outcome value is ordinary JSON, not a malformed envelope", () => {
+  // Claude Code stream-json hook_response records carry `"outcome":"success"`.
+  const hookResponse = {
+    type: "system",
+    subtype: "hook_response",
+    exit_code: 0,
+    outcome: "success",
+  };
+  const events = normalizeAgentOutputLine(
+    request,
+    JSON.stringify(hookResponse),
+  );
+  expect(events).toHaveLength(1);
+  expect(events[0]?.type).toBe("stdout");
+});
