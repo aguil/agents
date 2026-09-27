@@ -833,7 +833,9 @@ function readFindingEnvelope(
 /**
  * Read a `{"outcome":{...}}` envelope into a validated HarnessOutcome.
  * Returns undefined for non-outcome values; returns an invalid marker when
- * the envelope key is present but the payload is malformed.
+ * the envelope key holds an object that is not a valid HarnessOutcome.
+ * A scalar `outcome` (e.g. Claude Code's `hook_response` records carry
+ * `"outcome":"success"`) is ordinary JSON, not a malformed envelope.
  */
 function readOutcomeEnvelope(
   value: unknown,
@@ -842,6 +844,9 @@ function readOutcomeEnvelope(
     return undefined;
   }
   const rawOutcome = (value as { readonly outcome?: unknown }).outcome;
+  if (typeof rawOutcome !== "object" || rawOutcome === null) {
+    return undefined;
+  }
   if (isHarnessOutcome(rawOutcome)) {
     return { value: rawOutcome };
   }
@@ -862,6 +867,7 @@ interface NestedEnvelopes {
  * Real subprocess agents (e.g. Cursor stream-json) embed envelopes inside an
  * assistant message's text rather than as standalone stdout lines, so the
  * top-level checks in normalizeAgentOutputLine are not enough on their own.
+ * Tool I/O and non-agent records are skipped (see NON_AGENT_OUTPUT_TYPES).
  * Both envelope types share a single tree walk + line parse to avoid
  * scanning and JSON-parsing the same blob twice.
  */
@@ -891,6 +897,33 @@ function extractNestedEnvelopes(value: unknown): NestedEnvelopes {
   return { findings, outcomes };
 }
 
+/**
+ * Stream-event `type` values whose subtree is not the agent's own output:
+ * tool calls and their results (Claude Code `tool_use`/`tool_result`,
+ * Cursor `tool_call`, OpenCode `tool_use` events and `tool` parts), echoed
+ * user turns, and CLI system records such as hook responses. Files a role
+ * reads land in these, and must not surface as that role's envelopes.
+ */
+const NON_AGENT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
+  "tool_use",
+  "tool_result",
+  "tool_call",
+  "tool",
+  "user",
+  "system",
+]);
+
+/** Object keys that hold tool I/O outside a typed block. */
+const NON_AGENT_OUTPUT_KEYS: ReadonlySet<string> = new Set([
+  "tool_use_result",
+  "tool_call",
+]);
+
+function isNonAgentOutput(node: object): boolean {
+  const type = (node as { readonly type?: unknown }).type;
+  return typeof type === "string" && NON_AGENT_OUTPUT_TYPES.has(type);
+}
+
 function extractTextCandidates(value: unknown): readonly string[] {
   const texts: string[] = [];
   const visit = (node: unknown): void => {
@@ -905,8 +938,13 @@ function extractTextCandidates(value: unknown): readonly string[] {
       return;
     }
     if (typeof node === "object" && node !== null) {
-      for (const child of Object.values(node)) {
-        visit(child);
+      if (isNonAgentOutput(node)) {
+        return;
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (!NON_AGENT_OUTPUT_KEYS.has(key)) {
+          visit(child);
+        }
       }
     }
   };

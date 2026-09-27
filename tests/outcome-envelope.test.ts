@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { AgentRunRequest } from "@aguil/agents-execution";
 import { normalizeAgentOutputLine } from "@aguil/agents-execution";
 
@@ -78,4 +78,96 @@ test("finding and outcome envelopes remain disjoint", () => {
     }),
   );
   expect(findingEvents[0]?.type).toBe("finding");
+});
+
+test("a scalar outcome value is ordinary JSON, not a malformed envelope", () => {
+  // Claude Code stream-json hook_response records carry `"outcome":"success"`.
+  const hookResponse = {
+    type: "system",
+    subtype: "hook_response",
+    exit_code: 0,
+    outcome: "success",
+  };
+  const events = normalizeAgentOutputLine(
+    request,
+    JSON.stringify(hookResponse),
+  );
+  expect(events).toHaveLength(1);
+  expect(events[0]?.type).toBe("stdout");
+});
+
+describe("envelopes inside tool I/O are not the role's output", () => {
+  // Lines a role reads or greps: a malformed outcome and a valid finding.
+  const readContent = [
+    '{"outcome":{"id":"x","kind":"diagnosis"}}',
+    '{"finding":{"id":"f1","severity":"warning","title":"t","description":"d","evidence":"e","sourceRole":"other","validation":{"status":"verified","details":"ok"}}}',
+  ].join("\n");
+
+  const cases: readonly (readonly [string, unknown])[] = [
+    [
+      "Claude Code tool_result",
+      {
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "t1", content: readContent },
+          ],
+        },
+        tool_use_result: { stdout: readContent, stderr: "" },
+      },
+    ],
+    [
+      "Claude Code tool_use input",
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "t1",
+              name: "Write",
+              input: { file_path: "out.jsonl", content: readContent },
+            },
+          ],
+        },
+      },
+    ],
+    [
+      "Cursor tool_call",
+      {
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "c1",
+        tool_call: {
+          readToolCall: {
+            args: { path: "out.jsonl" },
+            result: { success: { content: readContent } },
+          },
+        },
+      },
+    ],
+    [
+      "OpenCode tool_use",
+      {
+        type: "tool_use",
+        part: {
+          type: "tool",
+          tool: "read",
+          state: { status: "completed", output: readContent },
+        },
+      },
+    ],
+  ];
+
+  for (const [name, streamEvent] of cases) {
+    test(name, () => {
+      const events = normalizeAgentOutputLine(
+        request,
+        JSON.stringify(streamEvent),
+      );
+      expect(events.map((event) => event.type)).toEqual(["stdout"]);
+    });
+  }
 });
