@@ -10,6 +10,14 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.4](https://github.com/aguil/agents/compare/v0.8.3...v0.8.4) (2026-09-27)
+
+
+### Fixed
+
+* **execution:** ignore scalar outcome values when reading envelopes ([4da76c1](https://github.com/aguil/agents/commit/4da76c1a7d57946cf9498086060c09476dc12212)), closes [#212](https://github.com/aguil/agents/issues/212)
+* **execution:** skip tool I/O when scanning for nested envelopes ([794bb6d](https://github.com/aguil/agents/commit/794bb6d41115738b618b0abfc26d838046b5f6e9)), closes [#212](https://github.com/aguil/agents/issues/212)
+
 ## [0.8.3](https://github.com/aguil/agents/compare/v0.8.2...v0.8.3) (2026-09-19)
 
 
