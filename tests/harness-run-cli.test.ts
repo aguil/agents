@@ -8,6 +8,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function runHarnessCli(
   args: readonly string[],
+  env?: Readonly<Record<string, string>>,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn({
     cmd: [
@@ -19,6 +20,7 @@ async function runHarnessCli(
       ...args,
     ],
     cwd: repoRoot,
+    ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -325,6 +327,180 @@ test("declaring run_end / run_start / role_start warns rather than failing (ADR 
     await rm(workspace, { recursive: true, force: true });
     await rm(agentsDir, { recursive: true, force: true });
   }
+});
+
+/**
+ * Run a one-role harness through the CLI with the given `hooks:` / extra YAML
+ * lines, and return the CLI output plus the persisted run result. `cursor` and
+ * `claude` resolve to stub executables that exit 0, so their real generators
+ * run without a real agent CLI.
+ */
+async function runLifecycleHarness(options: {
+  readonly adapter: "cursor" | "claude" | "fake";
+  readonly yaml: readonly string[];
+}): Promise<{
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+  readonly result: {
+    readonly status: string;
+    readonly metadata: Record<string, string>;
+  };
+}> {
+  const root = await mkdtemp(join(tmpdir(), "harness-undeliverable-"));
+  try {
+    const workspace = join(root, "workspace");
+    const agentsDir = join(root, "agents");
+    const binDir = join(root, "bin");
+    const harnessDir = join(agentsDir, "harnesses", "lifecycle-record");
+    await mkdir(workspace, { recursive: true });
+    await mkdir(harnessDir, { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    for (const name of ["agent", "claude"]) {
+      await writeFile(join(binDir, name), "#!/bin/sh\nexit 0\n", {
+        mode: 0o755,
+      });
+    }
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness:",
+        "  id: lifecycle-record",
+        "roles:",
+        "  solo:",
+        "    description: noop role for undeliverable-hook record coverage",
+        "    prompt: |",
+        "      noop",
+        ...options.yaml,
+        "",
+      ].join("\n"),
+    );
+    const cli = await runHarnessCli(
+      [
+        "lifecycle-record",
+        "--agents-dir",
+        agentsDir,
+        "--workspace",
+        workspace,
+        "--adapter",
+        options.adapter,
+      ],
+      { PATH: `${binDir}:${process.env.PATH ?? ""}` },
+    );
+    const artifacts = /^artifacts: (.+)$/m.exec(cli.stdout)?.[1];
+    if (artifacts === undefined) {
+      throw new Error(`no artifacts line:\n${cli.stdout}\n${cli.stderr}`);
+    }
+    const result = await Bun.file(join(artifacts, "result.raw.json")).json();
+    return { ...cli, result };
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+/** Events named by the ADR 0024 setup warnings, in the order printed. */
+function warnedLifecycleEvents(stderr: string): string[] {
+  return [
+    ...stderr.matchAll(/hooks\.(\w+): declared handler cannot fire/g),
+  ].map((match) => match[1] ?? "");
+}
+
+const ALL_LIFECYCLE_HOOKS = [
+  "hooks:",
+  "  role_start:",
+  "    - command: echo role_start",
+  "  role_stop:",
+  "    - command: echo role_stop",
+  "  run_start:",
+  "    - command: echo run_start",
+  "  run_end:",
+  "    - command: echo run_end",
+] as const;
+
+test("a declared run_end is recorded in the run result as undeliverable (ADR 0024)", async () => {
+  const run = await runLifecycleHarness({
+    adapter: "fake",
+    yaml: ["hooks:", "  run_end:", "    - command: echo run_end"],
+  });
+  expect(run.exitCode).toBe(0);
+  expect(run.result.metadata.undeliverable_hooks).toBe("run_end");
+});
+
+test("a declared role_start is recorded only where the adapter cannot map it (ADR 0024)", async () => {
+  const yaml = ["hooks:", "  role_start:", "    - command: echo role_start"];
+  const cursor = await runLifecycleHarness({ adapter: "cursor", yaml });
+  expect(cursor.result.metadata.undeliverable_hooks).toBe("role_start");
+  // Claude maps SessionStart onto role_start, so nothing is undeliverable.
+  const claude = await runLifecycleHarness({ adapter: "claude", yaml });
+  expect(claude.result.metadata).not.toHaveProperty("undeliverable_hooks");
+});
+
+test("a declared role_stop is recorded only where no generator maps it", async () => {
+  const yaml = ["hooks:", "  role_stop:", "    - command: echo role_stop"];
+  // fake has no hook generator, so role_stop cannot fire there.
+  const fake = await runLifecycleHarness({ adapter: "fake", yaml });
+  expect(fake.result.metadata.undeliverable_hooks).toBe("role_stop");
+  expect(warnedLifecycleEvents(fake.stderr)).toEqual(["role_stop"]);
+  // Cursor maps it to `stop`, Claude to `Stop`.
+  for (const adapter of ["cursor", "claude"] as const) {
+    const run = await runLifecycleHarness({ adapter, yaml });
+    expect(run.result.metadata).not.toHaveProperty("undeliverable_hooks");
+  }
+});
+
+test("a harness declaring no lifecycle handlers records none and passes (ADR 0024)", async () => {
+  const run = await runLifecycleHarness({
+    adapter: "fake",
+    yaml: [],
+  });
+  expect(run.exitCode).toBe(0);
+  expect(run.result.status).toBe("passed");
+  expect(run.result.metadata.undeliverable_hooks ?? "").toBe("");
+  expect(warnedLifecycleEvents(run.stderr)).toEqual([]);
+});
+
+test("the undeliverable-hooks record names the same events as the setup warning (ADR 0024)", async () => {
+  for (const adapter of ["cursor", "claude", "fake"] as const) {
+    const run = await runLifecycleHarness({
+      adapter,
+      yaml: ALL_LIFECYCLE_HOOKS,
+    });
+    const recorded = (run.result.metadata.undeliverable_hooks ?? "")
+      .split(",")
+      .filter((event) => event !== "");
+    expect(recorded.length).toBeGreaterThan(0);
+    expect(recorded).toEqual(warnedLifecycleEvents(run.stderr));
+  }
+});
+
+test("recording undeliverable hooks never changes run status (ADR 0021 / ADR 0024)", async () => {
+  // One passing and one gate-failed run, each with and without declarations.
+  const failingGate = [
+    "execution:",
+    "  mode: chain",
+    "  order: [solo]",
+    '  pass_check: ["false"]',
+  ];
+  const statuses: string[] = [];
+  for (const extra of [[], failingGate]) {
+    const plain = await runLifecycleHarness({ adapter: "fake", yaml: extra });
+    statuses.push(plain.result.status);
+    const declared = await runLifecycleHarness({
+      adapter: "fake",
+      yaml: [...extra, ...ALL_LIFECYCLE_HOOKS],
+    });
+    expect(declared.result.metadata.undeliverable_hooks).toBe(
+      "role_start,role_stop,run_start,run_end",
+    );
+    expect(declared.result.status).toBe(plain.result.status);
+    expect(declared.exitCode).toBe(plain.exitCode);
+    expect(/^status: .+$/m.exec(declared.stdout)?.[0]).toBe(
+      /^status: .+$/m.exec(plain.stdout)?.[0],
+    );
+  }
+  expect(statuses).toEqual(["passed", "failed"]);
 });
 
 test("enforcement provides per-role env in every mode; hooks file is role-invariant (ADR 0008)", async () => {

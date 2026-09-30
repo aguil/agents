@@ -75,9 +75,12 @@ export const CURSOR_EVENT_MAPPING: Readonly<
  * - `role_start` is adapter-dependent: Claude maps `SessionStart`; Cursor
  *   has no equivalent. Whether a declared handler warns depends on the
  *   active adapter's row in `ADAPTER_HOOK_CAPABILITIES`.
+ * - `role_stop` is adapter-dependent the same way: Cursor and Claude map it,
+ *   and an adapter with no generator (`opencode`, `fake`) cannot.
  */
 export const LIFECYCLE_HOOK_EVENTS = [
   "role_start",
+  "role_stop",
   "run_start",
   "run_end",
 ] as const satisfies readonly HookEvent[];
@@ -87,6 +90,8 @@ export type LifecycleHookEvent = (typeof LIFECYCLE_HOOK_EVENTS)[number];
 const LIFECYCLE_REASON: Readonly<Record<LifecycleHookEvent, string>> = {
   role_start:
     "no adapter event mapping exists for role_start under the active generator",
+  role_stop:
+    "no adapter event mapping exists for role_stop under the active generator",
   run_start:
     "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
   run_end:
@@ -94,28 +99,35 @@ const LIFECYCLE_REASON: Readonly<Record<LifecycleHookEvent, string>> = {
 };
 
 /**
+ * Harness-declared lifecycle events that cannot fire under the active
+ * adapter's generator (ADR 0024), in `LIFECYCLE_HOOK_EVENTS` order. The
+ * setup warnings and the run result's `undeliverable_hooks` record both read
+ * this list, so they cannot disagree. Defaults to Cursor when no adapter is
+ * named (the historical path).
+ */
+export function undeliverableLifecycleHookEvents(
+  hooks: HooksSpec,
+  adapter: string = "cursor",
+): readonly LifecycleHookEvent[] {
+  const dispatchable = adapterDispatchableEvents(adapter);
+  return LIFECYCLE_HOOK_EVENTS.filter(
+    (event) => (hooks[event]?.length ?? 0) > 0 && !dispatchable.has(event),
+  );
+}
+
+/**
  * Warnings for harness-declared lifecycle handlers that cannot fire under
- * the active adapter's generator (ADR 0024). Defaults to Cursor when no
- * adapter is named (the historical path).
+ * the active adapter's generator (ADR 0024), one per event from
+ * `undeliverableLifecycleHookEvents`.
  */
 export function undispatchableLifecycleHookWarnings(
   hooks: HooksSpec,
   adapter: string = "cursor",
 ): readonly string[] {
-  const dispatchable = adapterDispatchableEvents(adapter);
-  const warnings: string[] = [];
-  for (const event of LIFECYCLE_HOOK_EVENTS) {
-    if ((hooks[event]?.length ?? 0) === 0) {
-      continue;
-    }
-    if (dispatchable.has(event)) {
-      continue;
-    }
-    warnings.push(
+  return undeliverableLifecycleHookEvents(hooks, adapter).map(
+    (event) =>
       `hooks.${event}: declared handler cannot fire — ${LIFECYCLE_REASON[event]} (ADR 0024)`,
-    );
-  }
-  return warnings;
+  );
 }
 
 /** Whether Cursor generation maps this canonical event onto at least one native event. */

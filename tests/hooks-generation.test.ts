@@ -12,6 +12,7 @@ import {
   hookEventAdapterDispatchability,
   LIFECYCLE_HOOK_EVENTS,
   renderCursorHooksConfig,
+  undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
 
@@ -106,15 +107,17 @@ test("every HookEvent has an explicit Cursor dispatchability (ADR 0024 skip cont
     expect(dispatchable).toBe(expectedDispatchable[event]);
   }
 
-  // The three inert lifecycle events stay undispatchable until orchestrator
-  // dispatch (run_*) or an adapter mapping (role_start) lands — never by
-  // projecting a session-end onto a run boundary.
-  expect(LIFECYCLE_HOOK_EVENTS).toContain("role_start");
-  expect(LIFECYCLE_HOOK_EVENTS).toContain("run_start");
-  expect(LIFECYCLE_HOOK_EVENTS).toContain("run_end");
-  expect(LIFECYCLE_HOOK_EVENTS).toHaveLength(3);
+  // Every lifecycle event but role_stop stays undispatchable on Cursor until
+  // orchestrator dispatch (run_*) or an adapter mapping (role_start) lands —
+  // never by projecting a session-end onto a run boundary.
+  expect([...LIFECYCLE_HOOK_EVENTS]).toEqual([
+    "role_start",
+    "role_stop",
+    "run_start",
+    "run_end",
+  ]);
   for (const event of LIFECYCLE_HOOK_EVENTS) {
-    expect(expectedDispatchable[event]).toBe(false);
+    expect(expectedDispatchable[event]).toBe(event === "role_stop");
   }
 });
 
@@ -212,6 +215,48 @@ test("declaring undispatchable lifecycle handlers yields named warnings (ADR 002
   );
   expect(claudeWarnings).toHaveLength(2);
   expect(claudeWarnings.join("\n")).not.toContain("role_start");
+});
+
+test("undeliverable lifecycle events are the ones the warnings name (ADR 0024)", () => {
+  const allThree: HooksSpec = {
+    role_start: [{ command: "echo role_start" }],
+    run_start: [{ command: "echo run_start" }],
+    run_end: [{ command: "echo run_end" }],
+  };
+  expect(undeliverableLifecycleHookEvents({})).toEqual([]);
+  expect(undeliverableLifecycleHookEvents(allThree, "cursor")).toEqual([
+    "role_start",
+    "run_start",
+    "run_end",
+  ]);
+  expect(undeliverableLifecycleHookEvents(allThree, "claude")).toEqual([
+    "run_start",
+    "run_end",
+  ]);
+  // role_stop is undeliverable only where no generator maps it.
+  const withStop: HooksSpec = {
+    ...allThree,
+    role_stop: [{ command: "echo role_stop" }],
+  };
+  expect(undeliverableLifecycleHookEvents(withStop, "cursor")).not.toContain(
+    "role_stop",
+  );
+  expect(undeliverableLifecycleHookEvents(withStop, "claude")).not.toContain(
+    "role_stop",
+  );
+  expect(undeliverableLifecycleHookEvents(withStop, "opencode")).toEqual([
+    "role_start",
+    "role_stop",
+    "run_start",
+    "run_end",
+  ]);
+  for (const adapter of ["cursor", "claude", "opencode"]) {
+    expect(
+      undispatchableLifecycleHookWarnings(withStop, adapter).map(
+        (warning) => /^hooks\.(\w+):/.exec(warning)?.[1],
+      ),
+    ).toEqual([...undeliverableLifecycleHookEvents(withStop, adapter)]);
+  }
 });
 
 test("policyBridge false yields no bridge entries", () => {
