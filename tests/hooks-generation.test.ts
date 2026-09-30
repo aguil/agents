@@ -6,7 +6,6 @@ import {
   type HooksSpec,
 } from "@aguil/agents-harness-config";
 import {
-  CURSOR_EVENT_MAPPING,
   cursorHookEventDispatchability,
   generateCursorHooksConfig,
   renderCursorHooksConfig,
@@ -91,13 +90,18 @@ test("every HookEvent has an explicit Cursor dispatchability (ADR 0024 skip cont
   const rows = cursorHookEventDispatchability();
   expect(rows.map((row) => row.event)).toEqual([...HOOK_EVENTS]);
 
-  const expectedDispatchable = new Set(
-    (Object.keys(CURSOR_EVENT_MAPPING) as HookEvent[]).filter(
-      (event) => (CURSOR_EVENT_MAPPING[event]?.length ?? 0) > 0,
-    ),
-  );
+  // Written out rather than derived from CURSOR_EVENT_MAPPING, so a dropped
+  // or added mapping fails here instead of passing by construction.
+  const expectedDispatchable: Readonly<Record<HookEvent, boolean>> = {
+    pre_tool_call: true,
+    post_tool_call: true,
+    role_start: false,
+    role_stop: true,
+    run_start: false,
+    run_end: false,
+  };
   for (const { event, dispatchable } of rows) {
-    expect(dispatchable).toBe(expectedDispatchable.has(event));
+    expect(dispatchable).toBe(expectedDispatchable[event]);
   }
 
   // The three inert lifecycle events stay undispatchable until orchestrator
@@ -108,7 +112,7 @@ test("every HookEvent has an explicit Cursor dispatchability (ADR 0024 skip cont
   expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toContain("run_end");
   expect(UNDISPATCHABLE_LIFECYCLE_EVENTS).toHaveLength(3);
   for (const event of UNDISPATCHABLE_LIFECYCLE_EVENTS) {
-    expect(expectedDispatchable.has(event)).toBe(false);
+    expect(expectedDispatchable[event]).toBe(false);
   }
 });
 
