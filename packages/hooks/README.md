@@ -48,11 +48,12 @@ after a hook error (ADR 0023 decision 10).
 ## Lifecycle honesty (ADR 0024)
 
 `LIFECYCLE_HOOK_EVENTS` is the checklist of lifecycle events that _may_ be inert
-(`role_start`, `run_start`, `run_end`).
+(`role_start`, `role_stop`, `run_start`, `run_end`).
 `undispatchableLifecycleHookWarnings(hooks, adapter)` warns for each declared
-member that the active adapter does not map — `run_*` always, `role_start` only
-when the generator has no native equivalent (Cursor today; Claude maps
-`SessionStart`). `run_*` must never be projected onto a session-end event.
-`undeliverableLifecycleHookEvents(hooks, adapter)` returns the same events the
-warnings name; `agents harness run` records them in the run result's `metadata`
-as `undeliverable_hooks`, comma-separated.
+member that the active adapter does not map — `run_*` always, `role_start` and
+`role_stop` only when the generator has no native equivalent (`role_start` on
+Cursor, where Claude maps `SessionStart`; `role_stop` on adapters with no
+generator, such as `opencode` and `fake`). `run_*` must never be projected onto
+a session-end event. `undeliverableLifecycleHookEvents(hooks, adapter)` returns
+the same events the warnings name; `agents harness run` records them in the run
+result's `metadata` as `undeliverable_hooks`, comma-separated.

@@ -56,8 +56,9 @@ adapter that has a hook generator:
 **3. A test pins the behavior.** `tests/hooks-generation.test.ts` enumerates
 every canonical `HookEvent` and its Cursor dispatchability (ADR 0024 §4). The
 fixture-local `skippedEvents === ["run_end"]` assertion remains, labeled as a
-fixture artifact, not the contract. `LIFECYCLE_HOOK_EVENTS` names the three
-inert events explicitly.
+fixture artifact, not the contract. `LIFECYCLE_HOOK_EVENTS` names the lifecycle
+events that may be inert under an adapter; on Cursor, `role_start`, `run_start`
+and `run_end` are.
 
 **4. The orchestrator does not close the gap.** Its only lifecycle callback is
 `onRoleStart` (declared `packages/orchestration/src/index.ts:188`, invoked
