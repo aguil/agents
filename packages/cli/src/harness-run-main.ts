@@ -47,6 +47,7 @@ import {
   generateCursorHooksConfig,
   renderClaudeSettingsConfig,
   renderCursorHooksConfig,
+  undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
 import {
@@ -639,7 +640,12 @@ export async function runHarnessRunCli(
           cursorOptionsForHarnessRun(parsed.forceToolCalls),
         )
       : undefined;
-
+  // ADR 0024 decision 2: the events the setup warning named are recorded in
+  // the run's result too. Informational only; status never reads it (ADR 0021).
+  const undeliverableHooks = undeliverableLifecycleHookEvents(
+    loaded.hooks,
+    parsed.adapter,
+  );
   // Same conformance bookkeeping as `agents code-review` (ADR 0025): empty
   // unless the harness declares a `conformance` role, so other harnesses'
   // results and reports are unchanged.
@@ -656,6 +662,9 @@ export async function runHarnessRunCli(
           cursor_force: cursorApproval.force ? "true" : "false",
           cursor_sandbox: cursorApproval.sandbox ?? "",
         }),
+    ...(undeliverableHooks.length === 0
+      ? {}
+      : { undeliverable_hooks: undeliverableHooks.join(",") }),
   };
   const ranResult = await orchestrator.run({
     runId,
