@@ -2918,6 +2918,31 @@ test("claude command passes --settings and refuses bare/safe under policy (ADR 0
       argsTemplate: ["-p", "{prompt}"],
     }),
   ).toThrow(/--settings/);
+
+  // The generated file must be the value of --settings; either token alone,
+  // or a second --settings pointing elsewhere, loads no generated hooks.
+  const enforced = {
+    requireHookEnforcement: true,
+    settingsPath: "/scratch/claude-settings.json",
+  };
+  for (const template of [
+    ["-p", "{prompt} {settings}"],
+    ["-p", "{prompt}", "--settings", "/tmp/other.json"],
+    ["-p", "{prompt}", "--settings=/tmp/other.json", "{settings}"],
+    ["-p", "{prompt}", "--settings", "{settings}", "--settings", "/tmp/o.json"],
+  ]) {
+    expect(() => assertClaudeHookEnforcementArgs(template, enforced)).toThrow(
+      /--settings/,
+    );
+  }
+  for (const template of [
+    ["-p", "{prompt}", "--settings", "{settings}"],
+    ["-p", "{prompt}", "--settings={settings}"],
+  ]) {
+    expect(() =>
+      assertClaudeHookEnforcementArgs(template, enforced),
+    ).not.toThrow();
+  }
 });
 
 test("builds cursor command behind the adapter boundary", () => {

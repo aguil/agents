@@ -1270,9 +1270,22 @@ export function assertClaudeHookEnforcementArgs(
       );
     }
   }
-  const passesSettings =
-    template.some((arg) => arg === "--settings") ||
-    template.some((arg) => arg.includes("{settings}"));
+  // The generated file must be the flag's value: `--settings {settings}` as
+  // adjacent tokens or `--settings={settings}`. Any other --settings value
+  // (a different file, or the placeholder buried in another token) would
+  // load settings without the generated hooks.
+  let passesSettings = false;
+  for (const [index, arg] of template.entries()) {
+    const paired =
+      (arg === "--settings" && template[index + 1] === "{settings}") ||
+      arg === "--settings={settings}";
+    if (paired) {
+      passesSettings = true;
+    } else if (arg === "--settings" || arg.startsWith("--settings=")) {
+      passesSettings = false;
+      break;
+    }
+  }
   if (!passesSettings || options.settingsPath === undefined) {
     throw new Error(
       "claude adapter: under a declared policy, argv must pass --settings {settings} with a settingsPath (ADR 0023)",
