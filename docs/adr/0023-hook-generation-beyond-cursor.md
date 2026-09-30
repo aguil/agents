@@ -7,8 +7,10 @@
 - 2026-08-03 — Proposed.
 - 2026-08-03 — Accepted: merged in #176, after the CLI verification its context
   named as a precondition. `claude --settings` composes and its hooks fire and
-  deny; decision 3's mechanism holds. The probe results are recorded in the
-  context above rather than left in a working note.
+  deny, and — measured 2026-09-27 at Claude Code `2.1.283` — a hook's allow lets
+  a permitted call run under headless defaults; decision 3's mechanism holds.
+  The probe results are recorded in the context above rather than left in a
+  working note.
 
 **Context:** `packages/hooks` exports one generator,
 `generateCursorHooksConfig`, which projects a harness's canonical `hooks:` block
@@ -96,6 +98,33 @@ shape denies a tool call. Both were probed against Claude Code `2.1.220` on
 So decision 3's mechanism holds as written. Recorded here rather than left in a
 working note because the next person to add an adapter will want to know these
 were measured, not assumed.
+
+**A third fact, measured 2026-09-27: a hook's allow lifts the headless
+default.** Headless `claude -p` with no permission settings denies Bash and
+Write outright (#174). The adapter's invocation,
+`-p {prompt} --settings {settings}`, passes no permission flags, so a
+policy-declaring run on Claude Code depends on the bridge's explicit allow to
+let a permitted call run at all. A deny that works is not enough if nothing
+permitted can run either: such a run starts, does nothing, and passes its gate.
+Probed against Claude Code `2.1.283`, one trial per cell, with a stub
+`PreToolUse` hook registered without a matcher — the shape decision 1's
+generator gives the bridge — and a prompt asking for one Bash write, one Write
+and one Read:
+
+- **Without `--settings`,** Bash and Write were denied and listed in
+  `permission_denials`, and no file was written. Read ran.
+- **With `--settings`** naming the stub, which answered
+  `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}`,
+  all three ran: both files were written, the Read's content came back, the hook
+  logged an allow for each call, and `permission_denials` was empty.
+- **It held on both arms:** the adapter's own argv, which loads user settings,
+  and the same argv with `--setting-sources ''`.
+
+So the Claude Code adapter needs no permission mode: the bridge's allow is what
+permits a call, and the policy stays the boundary in both directions. The probe
+used a stub, not the bridge. That the bridge's allow is the same JSON is
+decision 6's encoding, which emits exactly that shape for an allow with no
+message, and is covered by unit tests rather than by this probe.
 
 **Decision:**
 
@@ -217,8 +246,10 @@ were measured, not assumed.
   map.
 - Issue #156 — declared keys that are parsed and never consumed; the reasoning
   behind refusing rather than silently under-enforcing.
+- Issue #174 — headless `claude -p` denies Bash and Write by default, which is
+  why the allow was measured as well as the deny.
 - `packages/hooks/src/index.ts`, `packages/cli/src/harness-run-main.ts`,
   `packages/cli/src/policy-eval-main.ts`, `packages/cli/src/hooks-test-main.ts`,
   `packages/policy/src/index.ts`, `packages/execution/src/index.ts`.
 - Claude Code CLI `2.1.220`; OpenCode `1.14.39`; Cursor Agent CLI
-  `2026.07.23-e383d2b`.
+  `2026.07.23-e383d2b`. The allow measurement: Claude Code CLI `2.1.283`.
