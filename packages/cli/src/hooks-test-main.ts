@@ -1,5 +1,6 @@
 import type { PolicySpec } from "@aguil/agents-harness-config";
 import { loadPolicy } from "@aguil/agents-harness-config";
+import { allEnforceableProbeEventNames } from "@aguil/agents-hooks";
 import type {
   PolicyHookOutput,
   PolicyInterventionPoint,
@@ -15,13 +16,8 @@ import { normalizeHookPayload } from "./policy-eval-main";
 const USAGE =
   "Usage: agents hooks test --policy <id> --agents-dir <dir> --event <name> [--tool <name>] [--input <json>] [--file <path>] [--format text|json]";
 
-const SUPPORTED_EVENTS = new Set([
-  "beforeShellExecution",
-  "beforeMCPExecution",
-  "afterFileEdit",
-  "pre_tool_call",
-  "post_tool_call",
-]);
+/** Derived from the adapter × event matrix (ADR 0023) — not a restated list. */
+const SUPPORTED_EVENTS = allEnforceableProbeEventNames();
 
 interface HooksTestArgs {
   readonly policyId: string;
