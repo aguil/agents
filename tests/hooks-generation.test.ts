@@ -12,6 +12,7 @@ import {
   hookEventAdapterDispatchability,
   LIFECYCLE_HOOK_EVENTS,
   renderCursorHooksConfig,
+  undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
 
@@ -212,6 +213,31 @@ test("declaring undispatchable lifecycle handlers yields named warnings (ADR 002
   );
   expect(claudeWarnings).toHaveLength(2);
   expect(claudeWarnings.join("\n")).not.toContain("role_start");
+});
+
+test("undeliverable lifecycle events are the ones the warnings name (ADR 0024)", () => {
+  const allThree: HooksSpec = {
+    role_start: [{ command: "echo role_start" }],
+    run_start: [{ command: "echo run_start" }],
+    run_end: [{ command: "echo run_end" }],
+  };
+  expect(undeliverableLifecycleHookEvents({})).toEqual([]);
+  expect(undeliverableLifecycleHookEvents(allThree, "cursor")).toEqual([
+    "role_start",
+    "run_start",
+    "run_end",
+  ]);
+  expect(undeliverableLifecycleHookEvents(allThree, "claude")).toEqual([
+    "run_start",
+    "run_end",
+  ]);
+  for (const adapter of ["cursor", "claude", "opencode"]) {
+    expect(
+      undispatchableLifecycleHookWarnings(allThree, adapter).map(
+        (warning) => /^hooks\.(\w+):/.exec(warning)?.[1],
+      ),
+    ).toEqual([...undeliverableLifecycleHookEvents(allThree, adapter)]);
+  }
 });
 
 test("policyBridge false yields no bridge entries", () => {
