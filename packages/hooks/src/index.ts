@@ -75,9 +75,12 @@ export const CURSOR_EVENT_MAPPING: Readonly<
  * - `role_start` is adapter-dependent: Claude maps `SessionStart`; Cursor
  *   has no equivalent. Whether a declared handler warns depends on the
  *   active adapter's row in `ADAPTER_HOOK_CAPABILITIES`.
+ * - `role_stop` is adapter-dependent the same way: Cursor and Claude map it,
+ *   and an adapter with no generator (`opencode`, `fake`) cannot.
  */
 export const LIFECYCLE_HOOK_EVENTS = [
   "role_start",
+  "role_stop",
   "run_start",
   "run_end",
 ] as const satisfies readonly HookEvent[];
@@ -87,6 +90,8 @@ export type LifecycleHookEvent = (typeof LIFECYCLE_HOOK_EVENTS)[number];
 const LIFECYCLE_REASON: Readonly<Record<LifecycleHookEvent, string>> = {
   role_start:
     "no adapter event mapping exists for role_start under the active generator",
+  role_stop:
+    "no adapter event mapping exists for role_stop under the active generator",
   run_start:
     "run-level lifecycle is the orchestrator's to dispatch; an adapter session cannot identify a run boundary",
   run_end:

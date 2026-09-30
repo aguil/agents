@@ -411,6 +411,8 @@ const ALL_LIFECYCLE_HOOKS = [
   "hooks:",
   "  role_start:",
   "    - command: echo role_start",
+  "  role_stop:",
+  "    - command: echo role_stop",
   "  run_start:",
   "    - command: echo run_start",
   "  run_end:",
@@ -435,10 +437,23 @@ test("a declared role_start is recorded only where the adapter cannot map it (AD
   expect(claude.result.metadata).not.toHaveProperty("undeliverable_hooks");
 });
 
+test("a declared role_stop is recorded only where no generator maps it", async () => {
+  const yaml = ["hooks:", "  role_stop:", "    - command: echo role_stop"];
+  // fake has no hook generator, so role_stop cannot fire there.
+  const fake = await runLifecycleHarness({ adapter: "fake", yaml });
+  expect(fake.result.metadata.undeliverable_hooks).toBe("role_stop");
+  expect(warnedLifecycleEvents(fake.stderr)).toEqual(["role_stop"]);
+  // Cursor maps it to `stop`, Claude to `Stop`.
+  for (const adapter of ["cursor", "claude"] as const) {
+    const run = await runLifecycleHarness({ adapter, yaml });
+    expect(run.result.metadata).not.toHaveProperty("undeliverable_hooks");
+  }
+});
+
 test("a harness declaring no lifecycle handlers records none and passes (ADR 0024)", async () => {
   const run = await runLifecycleHarness({
     adapter: "fake",
-    yaml: ["hooks:", "  role_stop:", "    - command: echo role_stop"],
+    yaml: [],
   });
   expect(run.exitCode).toBe(0);
   expect(run.result.status).toBe("passed");
@@ -477,7 +492,7 @@ test("recording undeliverable hooks never changes run status (ADR 0021 / ADR 002
       yaml: [...extra, ...ALL_LIFECYCLE_HOOKS],
     });
     expect(declared.result.metadata.undeliverable_hooks).toBe(
-      "role_start,run_start,run_end",
+      "role_start,role_stop,run_start,run_end",
     );
     expect(declared.result.status).toBe(plain.result.status);
     expect(declared.exitCode).toBe(plain.exitCode);
