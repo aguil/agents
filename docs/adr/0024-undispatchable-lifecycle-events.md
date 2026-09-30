@@ -8,7 +8,9 @@
 - 2026-08-03 — Accepted: merged in #175. Revised under review to separate
   `role_start` (unmapped, per-adapter, fixable by a generator) from `run_start`
   / `run_end` (structurally undispatchable by that route), after implementation
-  found Claude Code's `SessionStart` is a correct `role_start` native.
+  found Claude Code's `SessionStart` is a correct `role_start` native, and
+  amended before merge so decision 2's report is also recorded in the run's
+  result, not only printed at setup.
 
 **Context:** `HOOK_EVENTS` in `packages/harness-config/src/index.ts` declares
 six canonical hook events: `pre_tool_call`, `post_tool_call`, `role_start`,
@@ -115,10 +117,25 @@ absence.
    respect: an author who learns to ignore these warnings stops reading the ones
    that are true. The reason string names which case applies.
 
+   **The report is also recorded in the run.** A warning printed at setup is
+   gone once the terminal is, and a person reading a run afterwards opens its
+   result, not its setup output. So the same events the warning names are
+   recorded in the run result's `metadata` under one key, `undeliverable_hooks`:
+   the event names, comma-separated, for example `run_end,role_start`, and empty
+   or absent when there are none. That follows how `metadata` already lists
+   roles — `completed_roles`, `failed_roles` and `timed_out_roles` are
+   comma-separated strings — and `metadata` is `Record<string, string>`, so no
+   exported type changes. The reason stays in the warning: the adapter is the
+   run's own, and the reason follows from the event by the rule above. The
+   record never changes the run's status (ADR 0021). Only `agents harness run`
+   records it. The code-review path refuses a harness that declares `hooks` at
+   all, so no hook there is ever undeliverable.
+
 3. **The report is a warning, not a load failure.** A harness declaring an inert
    lifecycle handler continues to load and run. The defect being corrected is
-   that the author is not told; it is not that the document is invalid, and this
-   decision changes no other behaviour. Documents that load today keep loading.
+   that the author is not told; it is not that the document is invalid, and
+   beyond the warning and its record in the run's result this decision changes
+   no other behaviour. Documents that load today keep loading.
 
 4. **The skip contract becomes a contract.** The assertion in
    `tests/hooks-generation.test.ts` enumerates every canonical event and its
@@ -152,8 +169,9 @@ absence.
 **Consequences:**
 
 - An author who declares a lifecycle handler that cannot fire under the adapter
-  they are running learns immediately. That is the whole of the user-visible
-  change.
+  they are running learns immediately, and the run's result records which
+  handlers were undeliverable, so it can be seen after the fact. That is the
+  whole of the user-visible change.
 - Knowledge write-back stays blocked, and is now blocked on something precisely
   named. The false hope that a newer adapter release could unblock it is
   removed, which is worth more than it sounds: it was the reason a
@@ -200,6 +218,8 @@ absence.
 - ADR 0021 — gate-owned run status, which decision 6 defers to.
 - Issue #156 — a declared key honoured at one entry point and dropped at
   another; the reason decision 6 names both orchestrator construction sites.
+- `packages/cli/src/harness-run-main.ts` — where the setup warning is printed
+  and where decision 2's record joins the run's metadata.
 - `packages/harness-config/src/index.ts`, `packages/policy/src/index.ts`,
   `packages/hooks/src/index.ts`, `packages/orchestration/src/index.ts`,
   `packages/execution/src/index.ts`,
