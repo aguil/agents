@@ -39,6 +39,7 @@ import {
   generateCursorHooksConfig,
   renderClaudeSettingsConfig,
   renderCursorHooksConfig,
+  undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
 import {
@@ -532,6 +533,23 @@ export async function runHarnessRunCli(
           cursorOptionsForHarnessRun(parsed.forceToolCalls),
         )
       : undefined;
+  // ADR 0024 decision 2: the events the setup warning named are recorded in
+  // the run's result too. Informational only; status never reads it (ADR 0021).
+  const undeliverableHooks = undeliverableLifecycleHookEvents(
+    loaded.hooks,
+    parsed.adapter,
+  );
+  const requestMetadata: Record<string, string> = {
+    ...(cursorApproval === undefined
+      ? {}
+      : {
+          cursor_force: cursorApproval.force ? "true" : "false",
+          cursor_sandbox: cursorApproval.sandbox ?? "",
+        }),
+    ...(undeliverableHooks.length === 0
+      ? {}
+      : { undeliverable_hooks: undeliverableHooks.join(",") }),
+  };
 
   const result = await orchestrator.run({
     runId,
@@ -539,14 +557,9 @@ export async function runHarnessRunCli(
     workspacePath,
     scratchpadPath,
     strictMode: parsed.strict,
-    ...(cursorApproval === undefined
+    ...(Object.keys(requestMetadata).length === 0
       ? {}
-      : {
-          metadata: {
-            cursor_force: cursorApproval.force ? "true" : "false",
-            cursor_sandbox: cursorApproval.sandbox ?? "",
-          },
-        }),
+      : { metadata: requestMetadata }),
   });
 
   // Declared pipelines shape the reported findings the same way the
