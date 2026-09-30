@@ -53,3 +53,6 @@ after a hook error (ADR 0023 decision 10).
 member that the active adapter does not map — `run_*` always, `role_start` only
 when the generator has no native equivalent (Cursor today; Claude maps
 `SessionStart`). `run_*` must never be projected onto a session-end event.
+`undeliverableLifecycleHookEvents(hooks, adapter)` returns the same events the
+warnings name; `agents harness run` records them in the run result's `metadata`
+as `undeliverable_hooks`, comma-separated.
