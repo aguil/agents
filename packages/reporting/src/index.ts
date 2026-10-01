@@ -1,4 +1,9 @@
-import type { Finding, HarnessRunResult } from "@aguil/agents-core";
+import {
+  type ConformanceVerdict,
+  type Finding,
+  type HarnessRunResult,
+  readConformanceVerdict,
+} from "@aguil/agents-core";
 
 export const REPORT_TEMPLATE_NAMES = [
   "builtin:code-review-markdown",
@@ -227,10 +232,85 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
     "",
     ...executionNotes,
     ...(executionNotes.length > 0 ? [""] : []),
+    ...renderConformanceSection(result),
     ...sections,
     ...renderUnsubstantiatedSection(unsubstantiated),
     "",
   ].join("\n");
+}
+
+/**
+ * Per-row conformance results (ADR 0025), or why the role did not run.
+ * Keyed off the `conformance` metadata the code-review runner writes only
+ * when its harness declares the role, so other reports are unchanged. A row
+ * the role never reported is listed as having no result: dropping it would
+ * read as a pass.
+ */
+function renderConformanceSection(result: HarnessRunResult): readonly string[] {
+  const metadata = result.metadata ?? {};
+  const state = metadata.conformance;
+  const reason = metadata.conformance_reason?.trim() ?? "";
+  if (state === "not_run") {
+    return [
+      "## Plan Conformance",
+      "",
+      `Not run: ${reason.length > 0 ? reason : "no reason recorded"}.`,
+      "",
+    ];
+  }
+  if (state !== "scheduled") {
+    return [];
+  }
+
+  const verdicts = new Map<string, ConformanceVerdict>();
+  for (const outcome of result.outcomes ?? []) {
+    const verdict = readConformanceVerdict(outcome);
+    if (verdict !== undefined && !verdicts.has(verdict.criterion)) {
+      verdicts.set(verdict.criterion, verdict);
+    }
+  }
+  const criteria = parseRoleList(metadata.conformance_criteria);
+  const roleProblem = parseRoleList(metadata.timed_out_roles).includes(
+    "conformance",
+  )
+    ? "The conformance role timed out; rows without a result were not checked."
+    : parseRoleList(metadata.failed_roles).includes("conformance")
+      ? "The conformance role failed; rows without a result were not checked."
+      : undefined;
+  const counts = { satisfied: 0, unsatisfied: 0, unverifiable: 0, missing: 0 };
+  const rows = criteria.map((criterion) => {
+    const verdict = verdicts.get(criterion);
+    if (verdict === undefined) {
+      counts.missing += 1;
+      return `- ❔ **${criterion}**: no result. The role reported nothing for this row; treat it as unchecked.`;
+    }
+    counts[verdict.status] += 1;
+    const detail = verdict.detail.trim().replace(/\s*\n\s*/g, " ");
+    return `- ${conformanceEmoji(verdict.status)} **${criterion}**: ${verdict.status}${detail.length > 0 ? `. ${detail}` : ""}`;
+  });
+  const tally = [
+    `${counts.satisfied} satisfied`,
+    `${counts.unsatisfied} unsatisfied`,
+    `${counts.unverifiable} unverifiable`,
+    ...(counts.missing > 0 ? [`${counts.missing} without a result`] : []),
+  ].join(", ");
+
+  return [
+    "## Plan Conformance",
+    "",
+    `${criteria.length} criteri${criteria.length === 1 ? "on" : "a"}: ${tally}.${reason.length > 0 ? ` Source: ${reason}.` : ""}`,
+    ...(roleProblem === undefined ? [] : ["", roleProblem]),
+    "",
+    ...rows,
+    "",
+  ];
+}
+
+function conformanceEmoji(status: ConformanceVerdict["status"]): string {
+  if (status === "satisfied") {
+    return "✅";
+  }
+  return status === "unsatisfied" ? "❌" : "⚠️";
 }
 
 /**

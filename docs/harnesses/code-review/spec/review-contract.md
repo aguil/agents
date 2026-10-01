@@ -16,6 +16,17 @@ This document describes the stable contracts encoded in
 Role IDs are stable wire keys. The canonical order for scheduling and
 review-coverage summaries is `security → performance → quality → compliance`.
 
+One optional role sits outside the tier table
+([ADR 0025](../../../adr/0025-plan-conformance-role.md)):
+
+| Role ID       | Section label    | Description                                                                  |
+| ------------- | ---------------- | ---------------------------------------------------------------------------- |
+| `conformance` | Plan Conformance | Checks the change against [acceptance-criteria rows](acceptance-criteria.md) |
+
+It is `CODE_REVIEW_CONFORMANCE_ROLE_ID`, not a member of `CODE_REVIEW_ROLE_IDS`.
+The harness enables it with `enabled: acceptance_criteria > 0`, so it runs at
+any tier when rows were supplied and never otherwise.
+
 ## Triage tiers
 
 The triage step selects how many roles to run based on PR risk signals.
@@ -34,13 +45,16 @@ Tier is written to `result.json` under `metadata.triage` and stored in
 These keys appear in `result.json → metadata` and are the stable identifiers
 used by `parseCodeReviewRunMetadata`:
 
-| Constant                                                | Wire key                     | Description                               |
-| ------------------------------------------------------- | ---------------------------- | ----------------------------------------- |
-| `CODE_REVIEW_RUN_METADATA_KEYS.triage`                  | `"triage"`                   | Selected triage tier                      |
-| `CODE_REVIEW_RUN_METADATA_KEYS.completedRoles`          | `"completed_roles"`          | Comma-separated role IDs                  |
-| `CODE_REVIEW_RUN_METADATA_KEYS.timedOutRoles`           | `"timed_out_roles"`          | Comma-separated role IDs                  |
-| `CODE_REVIEW_RUN_METADATA_KEYS.failedRoles`             | `"failed_roles"`             | Comma-separated role IDs                  |
-| `CODE_REVIEW_RUN_METADATA_KEYS.unsubstantiatedFindings` | `"unsubstantiated_findings"` | Count of findings published but uncounted |
+| Constant                                                | Wire key                     | Description                                 |
+| ------------------------------------------------------- | ---------------------------- | ------------------------------------------- |
+| `CODE_REVIEW_RUN_METADATA_KEYS.triage`                  | `"triage"`                   | Selected triage tier                        |
+| `CODE_REVIEW_RUN_METADATA_KEYS.completedRoles`          | `"completed_roles"`          | Comma-separated role IDs                    |
+| `CODE_REVIEW_RUN_METADATA_KEYS.timedOutRoles`           | `"timed_out_roles"`          | Comma-separated role IDs                    |
+| `CODE_REVIEW_RUN_METADATA_KEYS.failedRoles`             | `"failed_roles"`             | Comma-separated role IDs                    |
+| `CODE_REVIEW_RUN_METADATA_KEYS.unsubstantiatedFindings` | `"unsubstantiated_findings"` | Count of findings published but uncounted   |
+| `CODE_REVIEW_RUN_METADATA_KEYS.conformance`             | `"conformance"`              | `scheduled` or `not_run`                    |
+| `CODE_REVIEW_RUN_METADATA_KEYS.conformanceReason`       | `"conformance_reason"`       | Why the conformance role did or did not run |
+| `CODE_REVIEW_RUN_METADATA_KEYS.conformanceCriteria`     | `"conformance_criteria"`     | Comma-separated criterion ids               |
 
 Role lists are comma-separated strings, not JSON arrays. Use
 `parseMetadataRolesList` to parse them.
@@ -51,6 +65,10 @@ Role lists are comma-separated strings, not JSON arrays. Use
 `validation.evidence` is absent or empty. Both limbs count: a `not_reproduced`
 finding is uncounted even when it cites the command that failed to reproduce it.
 Runs recorded before the key existed parse as `0`.
+
+The three `conformance*` keys appear only when the run's harness declares the
+`conformance` role. `conformance_criteria` is present only when the role was
+scheduled.
 
 ## Scratchpad artifact layout
 

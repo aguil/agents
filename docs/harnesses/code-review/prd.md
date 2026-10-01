@@ -30,6 +30,8 @@ evidence and validation.
 **In scope:**
 
 - Multi-role parallel review (security, performance, quality, compliance)
+- Optional plan-conformance review against supplied acceptance-criteria rows
+  (ADR 0025)
 - Risk-based triage selecting which roles run
 - Agent-agnostic adapter contract (subprocess and app-server runtimes)
 - Structured JSONL event log, `result.json` schema, `report.md` synthesis

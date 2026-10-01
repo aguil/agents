@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  acceptanceCriteriaFromArtifacts,
+  acceptanceCriteriaRowCount,
   type ContextBundle,
   collectContextBundle,
   resolveContextProvider,
@@ -38,6 +40,7 @@ import {
   statusAfterFindingPipelines,
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
+import { conformanceRunMetadata } from "./conformance";
 import {
   type CodeReviewRunResult,
   defaultCommandsForVcsMode,
@@ -202,6 +205,11 @@ export interface ConfigCodeReviewRunOptions {
   /** Replay seam: skip provider collection and load this bundle instead. */
   readonly contextBundlePath?: string;
   readonly reviewPrNumber?: number;
+  /**
+   * Operator-supplied acceptance-criteria file (`--criteria`); takes
+   * precedence over the provider's own sources (ADR 0025).
+   */
+  readonly acceptanceCriteriaPath?: string;
   readonly adapter?: AgentAdapter;
   readonly metadata?: Readonly<Record<string, string>>;
   readonly onEvent?: (event: AgentEvent) => void | Promise<void>;
@@ -334,6 +342,13 @@ export async function runCodeReviewFromConfig(
             workspacePath,
             scratchpadPath,
             pullRequestNumber: options.reviewPrNumber,
+            ...(options.acceptanceCriteriaPath === undefined
+              ? {}
+              : {
+                  params: {
+                    acceptanceCriteriaPath: options.acceptanceCriteriaPath,
+                  },
+                }),
           },
           (loaded.contextProviders ?? []).map((spec) =>
             resolveContextProvider(spec.use, spec.params),
@@ -355,7 +370,15 @@ export async function runCodeReviewFromConfig(
   const vcsMode = await detectWorkspaceVcsMode(workspacePath);
   await writeJsonFile(join(scratchpadPath, "triage.json"), { tier: triage });
 
-  const enablement = filterEnabledRoles(loaded.definition, { tier: triage });
+  const enablement = filterEnabledRoles(loaded.definition, {
+    tier: triage,
+    acceptance_criteria: acceptanceCriteriaRowCount(context.artifacts),
+  });
+  const conformanceMetadata = conformanceRunMetadata({
+    declaredRoleIds: loaded.definition.roles.map((role) => role.id),
+    enabledRoleIds: enablement.definition.roles.map((role) => role.id),
+    criteria: acceptanceCriteriaFromArtifacts(context.artifacts),
+  });
   const definition = {
     ...enablement.definition,
     // Union, because the two lists answer different questions and neither may
@@ -434,6 +457,7 @@ export async function runCodeReviewFromConfig(
           pr_reviewed_head_sha: reviewPrMetadata.headSha ?? "",
           pr_reviewed_at: reviewPrMetadata.reviewedAt,
         }),
+    ...conformanceMetadata,
     ...options.metadata,
   };
 

@@ -1,6 +1,7 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
+  acceptanceCriteriaRowCount,
   collectContextBundle,
   resolveContextProvider,
   writeContextBundle,
@@ -370,7 +371,11 @@ export async function runHarnessRunCli(
   const scratchpadPath = join(workspacePath, ".agents-harness", "runs", runId);
   await mkdir(scratchpadPath, { recursive: true });
   let contextBundlePath: string;
-  const enablementEnv: Record<string, string | number | boolean> = {};
+  // A row count has an exact meaning when nothing was collected (no rows),
+  // unlike `tier`, so it is always bound (ADR 0025).
+  const enablementEnv: Record<string, string | number | boolean> = {
+    acceptance_criteria: 0,
+  };
   if (loaded.contextProviders !== undefined) {
     // Declared providers resolve against the builtin registry; resolution
     // errors (unknown name, bad params) abort before any role runs.
@@ -392,6 +397,9 @@ export async function runHarnessRunCli(
       if (tier !== undefined) {
         enablementEnv.tier = tier;
       }
+      enablementEnv.acceptance_criteria = acceptanceCriteriaRowCount(
+        bundle.artifacts,
+      );
     } catch (error) {
       console.error(
         `harness run: context collection failed: ${error instanceof Error ? error.message : String(error)}`,
