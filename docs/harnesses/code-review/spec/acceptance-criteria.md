@@ -1,11 +1,17 @@
 # Acceptance criteria rows
 
-One JSON file format carries the constraints a change is meant to satisfy. The
-code-review harness reads it in its optional `conformance` role
-([ADR 0025](../../../adr/0025-plan-conformance-role.md)). The format is meant
-for any check of a change against its plan, so write the rows once, from the
-plan or the hand-off's binding-constraints table, and point every such check at
-the same file. The parser is `parseAcceptanceCriteria` in `@aguil/agents-core`.
+One JSON file format carries the constraints a change is meant to satisfy. Two
+readers use it:
+
+- the author, in the constraint trace step of the
+  [`self-review-checks`](../../../skills/self-review-checks/SKILL.md) skill,
+  before marking a PR ready for review;
+- the code-review harness, in its optional `conformance` role
+  ([ADR 0025](../../../adr/0025-plan-conformance-role.md)).
+
+Write the rows once, from the plan or the hand-off's binding-constraints table,
+and both checks read the same file. The parser is `parseAcceptanceCriteria` in
+`@aguil/agents-core`.
 
 ## Format
 
