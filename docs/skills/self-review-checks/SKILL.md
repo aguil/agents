@@ -2,9 +2,10 @@
 name: self-review-checks
 description: >-
   PR author checklist to move a change from Draft to Ready for review: gates,
-  `agents code-review` / `agents triage`, one commit per actionable finding, and
-  a five-part work report. Empty triage `items` is the automation bar —
-  merged-config-only code-review; no fabricated adapter overrides.
+  `agents code-review` / `agents triage`, one commit per actionable finding, a
+  constraint trace against the plan's acceptance criteria, and a six-part work
+  report. Empty triage `items` is the automation bar — merged-config-only
+  code-review; no fabricated adapter overrides.
 ---
 
 # Self-review checks (draft → ready for review)
@@ -76,6 +77,12 @@ wrap-ups, checkpoints). Prefer **facts from artifacts** over paraphrase.
    report.
 5. **Commits:** For each **code** remediation, **`finding.id`** (or duplicate
    set) → **revision/bookmark/git SHA** mapping.
+6. **Constraint trace:** The criteria file's path, then one entry per row from
+   [Constraint trace](#constraint-trace-against-acceptance-criteria): row `id`,
+   the quoted code that implements it (`file:line`), and the test that fails if
+   it is violated. When no plan or hand-off with acceptance criteria exists, say
+   so here in one line. Leaving §6 out is not the same as having nothing to
+   trace.
 
 Intermediate checkpoints (baseline, mid-fix) should still cite **§2–3**
 (**`findings.length`**, **`items.length`**, paths) even if §4–5 is “in
@@ -90,9 +97,13 @@ progress.”
    findings into one commit).
 4. Re-run the same verification the project documents after each fix or before
    pushing.
-5. Repeat until a final **code-review → triage ingest** pass yields
+5. Before the final pass, complete the
+   [constraint trace](#constraint-trace-against-acceptance-criteria) for **§6**,
+   so any code or test it forces goes through gates and review like any other
+   fix.
+6. Repeat until a final **code-review → triage ingest** pass yields
    **`items: []`** on the envelope and your gates stay green, then finalize
-   [Reporting work done](#reporting-work-done) **§§1–5** from that pipeline.
+   [Reporting work done](#reporting-work-done) **§§1–6** from that pipeline.
 
 ## Prerequisites
 
@@ -176,6 +187,83 @@ treat that finding as a unit of work:
   the **checkout’s** `AGENTS.md` and your usual workflow; the rule above is
   independent of tooling.
 
+## Constraint trace against acceptance criteria
+
+Review and triage catch defects. They do not catch a change that passes every
+test and still diverges from what its plan decided, because nothing in them
+knows what the plan decided. A hash that had to be stable under map-insertion
+order, or a fallback whose rule had a condition, can both regress without a
+single test noticing. The trace makes you check each decision against the code
+before a reviewer has to.
+
+**When it applies:** a plan, design note, or hand-off message for this change
+records acceptance criteria or binding constraints. If none exists, skip the
+trace and say so in **§6**.
+
+**Input:** the rows the change touches, as an acceptance-criteria file in the
+Agents format. If the plan only has a table or prose, write the file first and
+keep it with the plan; the code-review `conformance` role reads the same file,
+so you write the rows once.
+
+```json
+{
+  "version": 1,
+  "source": "docs/plans/hashing.md#slice-3",
+  "criteria": [
+    {
+      "id": "AC-1",
+      "statement": "The fallback uses stored values when they are non-empty.",
+      "check": "diff",
+      "required_tests": ["fallback returns stored values when present"]
+    }
+  ]
+}
+```
+
+The rules, all enforced; any violation rejects the whole file:
+
+- Top-level keys are `version` (must be `1`), optional `source` (non-empty
+  string), and `criteria` (non-empty list). No other keys.
+- Row keys are `id`, `statement`, optional `check`, and optional
+  `required_tests`. No other keys, so `requiredTests` or a typo is an error, not
+  "no tests".
+- `id` is unique in the file, starts with a letter or digit, and uses only
+  letters, digits, `.`, `_`, and `-`.
+- `statement` is a non-empty string. Copy each condition into it: "use stored
+  values when non-empty" is a different rule from "use stored values".
+- `check` is `diff` (the default) or `runtime`.
+- `required_tests` is a list of non-empty strings.
+
+The full specification is
+[acceptance-criteria.md](https://github.com/aguil/agents/blob/main/docs/harnesses/code-review/spec/acceptance-criteria.md)
+in the Agents repository.
+
+**For each row:**
+
+1. Quote the code that implements it, with `file:line`.
+2. Name the test that fails if the row is violated. For a row with
+   `required_tests`, that is each listed test, present in the change. Make sure
+   the test checks the property itself, not something next to it. A determinism
+   test that never varies insertion order does not cover "stable under insertion
+   order".
+
+A row with no implementing code, or with no test that would fail if it were
+violated, is a finding. Fix it before marking Ready: change the code, or add the
+test. Record each fix as its own commit and map it in **§5** under the row `id`.
+A row you genuinely cannot test (behaviour only visible in production) goes in
+**§6** as `unverifiable`, with what would settle it, so a reviewer can decide;
+it is not silently dropped.
+
+**Reviewer-side check:** when the trace applies and the operator's review
+invocation does not already supply criteria, suggest adding `--criteria <file>`
+to **`agents code-review`**, or an `Acceptance-Criteria: <path>` line to the PR
+description. The harness then reports each row as satisfied, unsatisfied, or
+unverifiable, and turns the last two into findings that triage picks up like any
+other. It does not replace the trace: the trace runs before review and is yours
+to fix. This step needs an Agents CLI with the conformance role: if
+`agents code-review --help` does not list `--criteria`, skip the suggestion and
+keep the trace. The trace itself needs no particular CLI version.
+
 ## A tight manual checklist
 
 - [ ] **Baseline:** Project-documented verification (build, lint, tests, etc.)
@@ -194,6 +282,11 @@ treat that finding as a unit of work:
 - [ ] **Verify gates:** Re-run the same documented verification after fixes;
       refresh **§1**; rerun **`agents code-review`** when edits are broad or
       touch harness contracts.
+- [ ] **Constraint trace:** for every acceptance-criteria row the change
+      touches, quote the implementing code and name the test that fails if it is
+      violated; fix any row missing either (one commit each) → **§6**. No plan
+      or criteria: say so in **§6**. Do this before the final pipeline so trace
+      fixes are reviewed.
 - [ ] **Final pipeline:** rerun **`agents code-review`** then
       **`agents triage --from code-review`** (add **`--result …`** when not
       using workspace default **`result.json`**); record fresh **§2**
@@ -203,7 +296,7 @@ treat that finding as a unit of work:
       parse **`items`** from **`--stdout --format json`** the same way.
 - [ ] **Closed-out report:** finalize **§4** (done or documented exits); confirm
       **§5** covers every code change vs **`finding.id`** (or duplicated ids in
-      one commit body).
+      one commit body) and every trace fix vs its row `id`.
 - [ ] **Safeguards:** [Stopping endless churn](#stopping-endless-churn) — round
       cap / no item churn / documented exits validated; if stopping early, §2–§4
       still reflects residual **`findings`** / **`items`**.
@@ -237,7 +330,7 @@ Agents and humans chasing noisy LLM output can spin; cap the churn explicitly.
 
 ## Suggested “done for this round”
 
-Compose the **five-part work report** from
+Compose the **six-part work report** from
 [Reporting work done](#reporting-work-done):
 
 - §1 Gates green — every verification step you cite in §1 passed (or call out
@@ -253,6 +346,9 @@ Compose the **five-part work report** from
   **`deferred`** (ticket)—in the report text, not only in stray chat.
 - §5 **Commit map** — every remediated **`finding.id`** ties to exactly one
   scoped commit (or one commit listing paired duplicate **`id`** values).
+- §6 **Constraint trace** — every acceptance-criteria row has quoted code and a
+  failing-if-violated test, or is marked `unverifiable` with what would settle
+  it; or one line saying no plan with acceptance criteria exists.
 
 Artifacts (`.agents-triage/…`) are disposable after you excerpt paths and counts
 into the report.
