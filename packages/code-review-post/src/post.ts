@@ -2,6 +2,7 @@ import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import {
+  CODE_REVIEW_CONFORMANCE_ROLE_ID,
   CODE_REVIEW_ROLE_IDS,
   type CodeReviewRoleId,
   expectedRolesForTriageTier,
@@ -1633,7 +1634,42 @@ export function formatReviewCoverageSectionLines(
     );
   }
 
+  lines.push(...formatConformanceCoverageLines(parsed));
   return lines;
+}
+
+/**
+ * The conformance role is gated by supplied criteria, not by triage tier
+ * (ADR 0025), so the tier bookkeeping above never mentions it. State it on
+ * its own line whenever the harness declared it, including why it did not run.
+ */
+function formatConformanceCoverageLines(
+  parsed: ReturnType<typeof parseCodeReviewRunMetadata>,
+): readonly string[] {
+  const label = `**${roleReviewSectionLabel(CODE_REVIEW_CONFORMANCE_ROLE_ID)}:**`;
+  if (parsed.conformance === "not_run") {
+    return [
+      `- ${label} not performed — ${parsed.conformanceReason ?? "no reason recorded"}.`,
+    ];
+  }
+  if (parsed.conformance !== "scheduled") {
+    return [];
+  }
+  const roleId = CODE_REVIEW_CONFORMANCE_ROLE_ID;
+  if (parsed.timedOutRoles.includes(roleId)) {
+    return [
+      `- ${label} not performed — reviewer **timed out** before completion.`,
+    ];
+  }
+  if (parsed.failedRoles.includes(roleId)) {
+    return [
+      `- ${label} not performed — reviewer **failed** (adapter error or non-timeout failure).`,
+    ];
+  }
+  const count = parsed.conformanceCriteria.length;
+  return [
+    `- ${label} checked against ${count} acceptance criteri${count === 1 ? "on" : "a"} (${parsed.conformanceCriteria.join(", ")}).`,
+  ];
 }
 
 function renderTriageSummary(

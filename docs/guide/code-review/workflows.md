@@ -184,6 +184,27 @@ bun run agents code-review replay \
 `result.json` includes `vcs_mode`, `context_source`, and `context_fingerprint`
 for run-to-run comparison.
 
+## Checking a change against plan acceptance criteria
+
+When a plan or hand-off records binding constraints, write them as an
+acceptance-criteria file
+([format](../../harnesses/code-review/spec/acceptance-criteria.md)) and the
+optional `conformance` role checks the change against each row:
+
+```bash
+# Local file, named on the command line (CLI only; config cannot set it)
+bun run agents code-review --criteria docs/plans/slice-3.criteria.json
+
+# Or name it in the PR description, one line per file
+#   Acceptance-Criteria: docs/plans/slice-3.criteria.json
+bun run agents code-review --pr 42
+```
+
+`report.md` gains a Plan Conformance section listing each row as satisfied,
+unsatisfied, or unverifiable. Unsatisfied and unverifiable rows are also
+findings, titled `[<row id>] …`. Without criteria the role does not run, and the
+section says why.
+
 ## Consensus mode (`--consensus <n>`)
 
 Runs `n` review passes and keeps only findings that recur in every pass. Values

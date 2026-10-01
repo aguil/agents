@@ -26,6 +26,7 @@ const STRING_OPTION_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   "post-pr": "postPr",
   "review-summary": "reviewSummary",
   "include-unsubstantiated": "includeUnsubstantiated",
+  criteria: "criteria",
   "agents-dir": "agentsDir",
 };
 
@@ -245,6 +246,7 @@ export function parseCodeReviewArgv(
     postPr: stringOptions["post-pr"],
     reviewSummary: stringOptions["review-summary"],
     includeUnsubstantiated: stringOptions["include-unsubstantiated"],
+    criteria: stringOptions.criteria,
     agentsDir: stringOptions["agents-dir"],
     postOnly: false,
     noConfirm: flags.has("no-confirm"),

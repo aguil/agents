@@ -241,6 +241,7 @@ Run and replay (shared):
   --scratchpad <path>    Scratchpad root (default: <workspace>/.agents-code-review/runs)
   --dry-run              Write artifacts under <workspace>/.agents-code-review/dry-run
   --context-bundle <path> Reuse captured context bundle JSON
+  --criteria <path>      Acceptance-criteria JSON for the conformance role (CLI only; overrides the PR's Acceptance-Criteria: line; not with replay)
   --consensus <n>        Run n passes and keep recurring findings (default 1 when --pending-review); values > 1 are not supported (ADR 0012)
   --agents-dir <path>    Explicit .agents dir for harness resolution (env AGENTS_CODE_REVIEW_AGENTS_DIR); bypasses layered lookup
 

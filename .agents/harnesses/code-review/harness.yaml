@@ -16,6 +16,9 @@ context:
     - use: pr-referenced-docs
     - use: git-diff
     - use: agents-md
+    # Appended last so bundles collected before it keep their provider order.
+    # Always emits one artifact (loaded / absent / invalid) — see ADR 0025.
+    - use: acceptance-criteria
 
 # Prompts are the package's own files (single source, no drift); paths
 # resolve relative to this harness directory.
@@ -43,6 +46,15 @@ roles:
     timeout_ms: 1200000
     required_capabilities: [readOnlyMode, structuredOutput]
     enabled: tier != "trivial"
+  # Optional: runs at every tier, but only when acceptance-criteria rows were
+  # supplied (`--criteria`, or an `Acceptance-Criteria:` line in the PR
+  # description). Otherwise the report says it did not run and why (ADR 0025).
+  conformance:
+    description: Check the change against the acceptance-criteria rows it is meant to satisfy.
+    prompt_path: ../../../harnesses/code-review/prompts/conformance.md
+    timeout_ms: 1200000
+    required_capabilities: [readOnlyMode, structuredOutput]
+    enabled: acceptance_criteria > 0
 
 # No execution section: code-review keeps legacy finding-severity status
 # semantics (parallel fan-out, findings drive status), not the generalized

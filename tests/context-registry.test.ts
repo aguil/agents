@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AcceptanceCriteriaProvider,
   AgentsInstructionsProvider,
   BUILTIN_CONTEXT_PROVIDER_NAMES,
   FileGlobProvider,
@@ -27,6 +28,7 @@ test("builtin context provider names resolve to their provider classes", () => {
     "file-glob",
     "knowledge",
     "knowledge-search",
+    "acceptance-criteria",
   ]);
   expect(resolveContextProvider("git-diff", {})).toBeInstanceOf(
     RepositoryDiffProvider,
@@ -55,6 +57,9 @@ test("builtin context provider names resolve to their provider classes", () => {
   expect(
     resolveContextProvider("knowledge-search", { tags: ["security"] }),
   ).toBeInstanceOf(KnowledgeSearchProvider);
+  expect(resolveContextProvider("acceptance-criteria", {})).toBeInstanceOf(
+    AcceptanceCriteriaProvider,
+  );
 });
 
 test("zero-param context providers reject params", () => {
