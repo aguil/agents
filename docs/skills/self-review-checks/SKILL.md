@@ -232,7 +232,9 @@ to **`agents code-review`**, or an `Acceptance-Criteria: <path>` line to the PR
 description. The harness then reports each row as satisfied, unsatisfied, or
 unverifiable, and turns the last two into findings that triage picks up like any
 other. It does not replace the trace: the trace runs before review and is yours
-to fix.
+to fix. This step needs an Agents CLI with the conformance role: if
+`agents code-review --help` does not list `--criteria`, skip the suggestion and
+keep the trace. The trace itself needs no particular CLI version.
 
 ## A tight manual checklist
 
