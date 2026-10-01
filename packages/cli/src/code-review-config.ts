@@ -662,6 +662,8 @@ function applyExplicitCliOptions(
     includeUnsubstantiated: ex.has("includeUnsubstantiated")
       ? o.includeUnsubstantiated
       : undefined,
+    // CLI-only for the same reason: see `CliOptions.criteria`.
+    criteria: ex.has("criteria") ? o.criteria : undefined,
     agentsDir: stringOr("agentsDir"),
     postOnly: boolOr("postOnly", false),
     noConfirm: boolOr("noConfirm", false),

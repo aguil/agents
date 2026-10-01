@@ -364,6 +364,11 @@ export async function main(
         ),
         contextBundlePath: options.contextBundle,
         reviewPrNumber,
+        // Resolved against the invoking cwd: with --pr the review workspace
+        // is a detached worktree the operator never named.
+        ...(options.criteria === undefined
+          ? {}
+          : { acceptanceCriteriaPath: resolve(options.criteria) }),
         strict: options.strict,
         metadata: await buildDeterminismMetadata(
           adapterName,
