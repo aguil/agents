@@ -10,6 +10,7 @@ import {
   acceptanceCriteriaFromArtifacts,
   acceptanceCriteriaRowCount,
   type ContextBundle,
+  readBoundedResponseText,
   resolveContextProvider,
 } from "@aguil/agents-context";
 import {
@@ -586,4 +587,18 @@ test("posted review coverage states the conformance role's outcome", () => {
       timed_out_roles: "conformance",
     }),
   ).toContain("timed out");
+});
+
+test("URL criteria bodies are read only up to the byte cap", async () => {
+  let pulls = 0;
+  const endless = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1;
+      controller.enqueue(new TextEncoder().encode("x".repeat(1024)));
+    },
+  });
+  const text = await readBoundedResponseText(new Response(endless), 4_000);
+  expect(Buffer.byteLength(text, "utf8")).toBe(4_000);
+  // A few chunks of read-ahead at most, not the whole (infinite) body.
+  expect(pulls).toBeLessThan(10);
 });

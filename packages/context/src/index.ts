@@ -1134,20 +1134,20 @@ export class AcceptanceCriteriaProvider implements ContextProvider {
           this.commandRunner,
         )
       : undefined;
-    const documents: AcceptanceCriteriaArtifactContent[] = [];
-    for (const reference of references) {
-      const loaded = isHttpUrl(reference)
-        ? await this.loadUrl(reference, remoteScope)
-        : await this.loadLocal(request.workspacePath, reference, {
-            allowOutsideWorkspace: false,
-            whenMissing: "invalid",
-          });
-      if (loaded.status !== "loaded") {
-        return loaded;
-      }
-      documents.push(loaded);
-    }
-    return mergeLoadedCriteria(documents);
+    // Loaded concurrently so fetch times do not stack; the first unusable
+    // reference in PR order still decides the reported reason.
+    const documents = await Promise.all(
+      references.map((reference) =>
+        isHttpUrl(reference)
+          ? this.loadUrl(reference, remoteScope)
+          : this.loadLocal(request.workspacePath, reference, {
+              allowOutsideWorkspace: false,
+              whenMissing: "invalid",
+            }),
+      ),
+    );
+    const unusable = documents.find((loaded) => loaded.status !== "loaded");
+    return unusable ?? mergeLoadedCriteria(documents);
   }
 
   private async loadLocal(
@@ -2622,13 +2622,47 @@ async function fetchReferencedUrl(
       return undefined;
     }
 
-    const content = await response.text();
-    return content.slice(0, options.maxBytes);
+    return await readBoundedResponseText(response, options.maxBytes);
   } catch {
     return undefined;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Read at most maxBytes of a response body, then cancel the stream, so a
+ * large same-owner document cannot pull its whole body into memory before
+ * being cut down (the abort timer was the only other bound).
+ */
+export async function readBoundedResponseText(
+  response: Response,
+  maxBytes: number,
+): Promise<string> {
+  if (response.body === null) {
+    return "";
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let bytesRead = 0;
+  try {
+    while (bytesRead < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      const bounded = value.subarray(0, maxBytes - bytesRead);
+      bytesRead += bounded.byteLength;
+      chunks.push(decoder.decode(bounded, { stream: true }));
+    }
+    if (bytesRead >= maxBytes) {
+      await reader.cancel().catch(() => undefined);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return chunks.join("") + decoder.decode();
 }
 
 function isPathInsideWorkspace(path: string, workspacePath: string): boolean {
