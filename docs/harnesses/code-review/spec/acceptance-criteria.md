@@ -52,9 +52,10 @@ and both checks read the same file. The parser is `parseAcceptanceCriteria` in
 | `criteria[].check`          | no       | `diff` (default) when the change itself can show the row holds; `runtime` when only running code can.                                   |
 | `criteria[].required_tests` | no       | Tests the change must add, by name or description. A counterexample regression test belongs here.                                       |
 
-Any defect fails the whole file: invalid JSON, a wrong `version`, an empty list,
-a malformed or duplicate `id`, an empty `statement`, an unknown `check`. A row
-that quietly drops out is a constraint nobody checks.
+Any defect fails the whole file: invalid JSON, an unknown key (so a misspelled
+`required_tests` cannot quietly mean "no tests"), a wrong `version`, an empty
+list, a malformed or duplicate `id`, an empty `statement`, an unknown `check`. A
+row that quietly drops out is a constraint nobody checks.
 
 Write each `statement` as the rule, including its conditions. "Use stored
 values" loses the condition that made the original design correct; "use stored

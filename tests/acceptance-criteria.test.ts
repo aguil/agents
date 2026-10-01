@@ -131,6 +131,17 @@ test("rejects criteria files that would silently lose a row", () => {
       { version: 1, criteria: [{ id: "AC-1", statement: "x", check: "eyes" }] },
       `criteria[0].check must be "diff" or "runtime"`,
     ],
+    [
+      {
+        version: 1,
+        criteria: [{ id: "AC-1", statement: "x", requiredTests: ["t"] }],
+      },
+      `criteria[0] has unknown key "requiredTests"`,
+    ],
+    [
+      { version: 1, criteria: [{ id: "AC-1", statement: "x" }], extra: 1 },
+      `top level has unknown key "extra"`,
+    ],
   ];
   for (const [input, error] of cases) {
     const parsed = parseAcceptanceCriteria(JSON.stringify(input));
@@ -323,7 +334,9 @@ test("conformance metadata says whether the role ran and why", () => {
     }),
   ).toMatchObject({
     conformance: "not_run",
-    conformance_reason: expect.stringContaining("no well-formed acceptance-criteria"),
+    conformance_reason: expect.stringContaining(
+      "no well-formed acceptance-criteria",
+    ),
   });
   expect(
     conformanceRunMetadata({
