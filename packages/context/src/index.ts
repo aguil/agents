@@ -1,8 +1,14 @@
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import type { ReviewTriageTier } from "@aguil/agents-core";
+import type {
+  AcceptanceCriteriaArtifactContent,
+  ReviewTriageTier,
+} from "@aguil/agents-core";
 import {
+  ACCEPTANCE_CRITERIA_ARTIFACT_ID,
   ensureDirectory,
+  parseAcceptanceCriteria,
+  readAcceptanceCriteriaArtifact,
   resolveGitAwarePath,
   writeJsonFile,
   writeTextFile,
@@ -406,6 +412,7 @@ export const BUILTIN_CONTEXT_PROVIDER_NAMES: readonly string[] = [
   "file-glob",
   "knowledge",
   "knowledge-search",
+  "acceptance-criteria",
 ];
 
 const BUILD_TIME_ONLY_CONTEXT_PARAMS: ReadonlySet<string> = new Set([
@@ -679,6 +686,17 @@ const CONTEXT_PROVIDER_FACTORIES: Readonly<
               use,
             ),
           }),
+    });
+  },
+  "acceptance-criteria": (params) => {
+    const use = "acceptance-criteria";
+    const record = contextProviderParamsRecord(use, params);
+    validateContextProviderParamKeys(use, record, ["path", "max_bytes"]);
+    const path = optionalContextString(record, "path", use);
+    const maxBytes = optionalContextPositiveInt(record, "max_bytes", use);
+    return new AcceptanceCriteriaProvider({
+      ...(path === undefined ? {} : { path }),
+      ...(maxBytes === undefined ? {} : { maxBytes }),
     });
   },
   knowledge: (params) => {
@@ -1022,6 +1040,257 @@ export class PullRequestReferencedDocsProvider implements ContextProvider {
       ...artifacts,
     ];
   }
+}
+
+export interface AcceptanceCriteriaProviderOptions {
+  /** Workspace-relative criteria file declared in harness config. */
+  readonly path?: string;
+  readonly commandRunner?: CommandRunner;
+  readonly maxBytes?: number;
+  readonly timeoutMs?: number;
+}
+
+/** PR-description line that points at a criteria file or URL. */
+const ACCEPTANCE_CRITERIA_PR_LINE =
+  /^[ \t]*Acceptance-Criteria:[ \t]*(\S+)[ \t]*$/gim;
+
+/**
+ * Load the acceptance-criteria rows a change is meant to satisfy (ADR 0025).
+ *
+ * Sources, first present wins: the operator's `acceptanceCriteriaPath`
+ * request param (`--criteria`), this provider's `path` param, then
+ * `Acceptance-Criteria: <path-or-url>` lines in the PR description. Always
+ * emits exactly one artifact so a run without usable criteria records why.
+ * Only the operator's own path is fatal when unusable; the others become
+ * `invalid` with a reason, which the report surfaces.
+ */
+export class AcceptanceCriteriaProvider implements ContextProvider {
+  readonly name = "acceptance-criteria";
+
+  private readonly commandRunner: CommandRunner;
+  private readonly maxBytes: number;
+  private readonly timeoutMs: number;
+
+  constructor(
+    private readonly options: AcceptanceCriteriaProviderOptions = {},
+  ) {
+    this.commandRunner = options.commandRunner ?? runCommand;
+    this.maxBytes = options.maxBytes ?? DEFAULT_ARTIFACT_MAX_BYTES;
+    this.timeoutMs = options.timeoutMs ?? 8_000;
+  }
+
+  async collect(request: ContextRequest): Promise<readonly ContextArtifact[]> {
+    return [acceptanceCriteriaArtifact(await this.resolve(request))];
+  }
+
+  private async resolve(
+    request: ContextRequest,
+  ): Promise<AcceptanceCriteriaArtifactContent> {
+    const operatorPath = stringRequestParam(request, "acceptanceCriteriaPath");
+    if (operatorPath !== undefined) {
+      const loaded = await this.loadLocal(request.workspacePath, operatorPath, {
+        allowOutsideWorkspace: true,
+        whenMissing: "invalid",
+      });
+      if (loaded.status !== "loaded") {
+        throw new Error(
+          `acceptance criteria ${operatorPath}: ${loaded.reason}`,
+        );
+      }
+      return loaded;
+    }
+
+    if (this.options.path !== undefined) {
+      // A harness may name a conventional location every change can opt
+      // into; a change that has no file there simply has no criteria.
+      return await this.loadLocal(request.workspacePath, this.options.path, {
+        allowOutsideWorkspace: false,
+        whenMissing: "absent",
+      });
+    }
+
+    const pullRequest = await discoverPullRequest(
+      request.workspacePath,
+      this.commandRunner,
+      numberRequestParam(request, "pullRequestNumber"),
+    );
+    if (pullRequest === undefined) {
+      return absentCriteria(
+        "no acceptance criteria supplied: no --criteria path, no provider `path`, and no pull request to read an `Acceptance-Criteria:` line from",
+      );
+    }
+    const references = [
+      ...pullRequest.body.matchAll(ACCEPTANCE_CRITERIA_PR_LINE),
+    ].map((match) => match[1] ?? "");
+    if (references.length === 0) {
+      return absentCriteria(
+        `no acceptance criteria supplied: PR #${pullRequest.number} has no \`Acceptance-Criteria:\` line, and no --criteria path or provider \`path\` was set`,
+      );
+    }
+
+    const remoteScope = references.some(isHttpUrl)
+      ? await resolvePreferredRemoteScope(
+          request.workspacePath,
+          this.commandRunner,
+        )
+      : undefined;
+    const documents: AcceptanceCriteriaArtifactContent[] = [];
+    for (const reference of references) {
+      const loaded = isHttpUrl(reference)
+        ? await this.loadUrl(reference, remoteScope)
+        : await this.loadLocal(request.workspacePath, reference, {
+            allowOutsideWorkspace: false,
+            whenMissing: "invalid",
+          });
+      if (loaded.status !== "loaded") {
+        return loaded;
+      }
+      documents.push(loaded);
+    }
+    return mergeLoadedCriteria(documents);
+  }
+
+  private async loadLocal(
+    workspacePath: string,
+    candidate: string,
+    options: {
+      /** Only the operator's own `--criteria` path may leave the workspace. */
+      readonly allowOutsideWorkspace: boolean;
+      readonly whenMissing: "absent" | "invalid";
+    },
+  ): Promise<AcceptanceCriteriaArtifactContent> {
+    const path = await resolveWorkspacePath(
+      workspacePath,
+      candidate,
+      options.allowOutsideWorkspace,
+    );
+    if (path === undefined) {
+      return invalidCriteria(
+        [candidate],
+        `refused ${candidate}: resolves outside the workspace`,
+      );
+    }
+    let text: string;
+    try {
+      text = await readBoundedFile(path, this.maxBytes);
+    } catch {
+      const reason = `missing or unreadable: ${candidate}`;
+      return options.whenMissing === "absent"
+        ? absentCriteria(`no acceptance criteria supplied: ${reason}`)
+        : invalidCriteria([candidate], reason);
+    }
+    return loadedOrInvalid(candidate, text, this.maxBytes);
+  }
+
+  private async loadUrl(
+    url: string,
+    remoteScope: RemoteScope | undefined,
+  ): Promise<AcceptanceCriteriaArtifactContent> {
+    const decision = shouldFetchReferencedUrl(url, remoteScope);
+    if (!decision.allowed) {
+      return invalidCriteria([url], `not fetched (${decision.reason}): ${url}`);
+    }
+    const text = await fetchReferencedUrl(url, {
+      timeoutMs: this.timeoutMs,
+      maxBytes: this.maxBytes + 1,
+    });
+    if (text === undefined) {
+      return invalidCriteria([url], `fetch failed: ${url}`);
+    }
+    return loadedOrInvalid(url, text, this.maxBytes);
+  }
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function absentCriteria(reason: string): AcceptanceCriteriaArtifactContent {
+  return { status: "absent", reason, sources: [], criteria: [] };
+}
+
+function invalidCriteria(
+  sources: readonly string[],
+  reason: string,
+): AcceptanceCriteriaArtifactContent {
+  return { status: "invalid", reason, sources, criteria: [] };
+}
+
+function loadedOrInvalid(
+  source: string,
+  text: string,
+  maxBytes: number,
+): AcceptanceCriteriaArtifactContent {
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    return invalidCriteria([source], `${source} exceeds ${maxBytes} bytes`);
+  }
+  const parsed = parseAcceptanceCriteria(text);
+  if (!parsed.ok) {
+    return invalidCriteria([source], `${source}: ${parsed.error}`);
+  }
+  return {
+    status: "loaded",
+    reason: `${parsed.document.criteria.length} criteria from ${source}`,
+    sources: [source],
+    criteria: parsed.document.criteria,
+  };
+}
+
+function mergeLoadedCriteria(
+  documents: readonly AcceptanceCriteriaArtifactContent[],
+): AcceptanceCriteriaArtifactContent {
+  const sources = documents.flatMap((document) => document.sources);
+  const criteria = documents.flatMap((document) => document.criteria);
+  const seen = new Set<string>();
+  for (const criterion of criteria) {
+    if (seen.has(criterion.id)) {
+      return invalidCriteria(
+        sources,
+        `duplicate criterion id "${criterion.id}" across ${sources.join(", ")}`,
+      );
+    }
+    seen.add(criterion.id);
+  }
+  return {
+    status: "loaded",
+    reason: `${criteria.length} criteria from ${sources.join(", ")}`,
+    sources,
+    criteria,
+  };
+}
+
+function acceptanceCriteriaArtifact(
+  content: AcceptanceCriteriaArtifactContent,
+): ContextArtifact {
+  return {
+    id: ACCEPTANCE_CRITERIA_ARTIFACT_ID,
+    title: "Acceptance Criteria",
+    content: JSON.stringify(content, null, 2),
+  };
+}
+
+/** The bundle's `acceptance-criteria` artifact content, if it has a valid one. */
+export function acceptanceCriteriaFromArtifacts(
+  artifacts: readonly ContextArtifact[],
+): AcceptanceCriteriaArtifactContent | undefined {
+  const artifact = artifacts.find(
+    (entry) => entry.id === ACCEPTANCE_CRITERIA_ARTIFACT_ID,
+  );
+  return artifact === undefined
+    ? undefined
+    : readAcceptanceCriteriaArtifact(artifact.content);
+}
+
+/**
+ * The acceptance-criteria row count a bundle carries, for the CEL
+ * `acceptance_criteria` binding (ADR 0025). Absent, unparseable, or
+ * not-`loaded` artifacts count 0: no rows means nothing to check.
+ */
+export function acceptanceCriteriaRowCount(
+  artifacts: readonly ContextArtifact[],
+): number {
+  const content = acceptanceCriteriaFromArtifacts(artifacts);
+  return content?.status === "loaded" ? content.criteria.length : 0;
 }
 
 export class RepositoryDiffProvider implements ContextProvider {
