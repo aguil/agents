@@ -207,7 +207,11 @@ export function readAcceptanceCriteriaArtifact(
     !Array.isArray(record.sources) ||
     record.sources.some((source) => typeof source !== "string") ||
     !Array.isArray(record.criteria) ||
-    !record.criteria.every(isAcceptanceCriterion)
+    !record.criteria.every(isAcceptanceCriterion) ||
+    // Outcome ids and report rows are keyed by criterion id, so a repeated
+    // id would let one verdict stand in for two rows.
+    new Set(record.criteria.map((row) => row.id)).size !==
+      record.criteria.length
   ) {
     return undefined;
   }
