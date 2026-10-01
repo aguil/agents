@@ -7,6 +7,7 @@ import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner
 import { formatReviewCoverageSectionLines } from "@aguil/agents-code-review-post";
 import {
   AcceptanceCriteriaProvider,
+  acceptanceCriteriaFromArtifacts,
   acceptanceCriteriaRowCount,
   type ContextBundle,
   resolveContextProvider,
@@ -279,6 +280,33 @@ test("row count binds only loaded criteria", () => {
   ).toBe(0);
 });
 
+test("a malformed replayed artifact counts no rows instead of crashing", () => {
+  const artifact = (criteria: unknown) => ({
+    id: ACCEPTANCE_CRITERIA_ARTIFACT_ID,
+    title: "Acceptance Criteria",
+    content: JSON.stringify({
+      status: "loaded",
+      reason: "x",
+      sources: [],
+      criteria,
+    }),
+  });
+  for (const criteria of [
+    [null],
+    [{ id: "AC-1", statement: "x" }],
+    [{ id: "a,b", statement: "x", check: "diff", requiredTests: [] }],
+  ]) {
+    expect(acceptanceCriteriaRowCount([artifact(criteria)])).toBe(0);
+    expect(
+      conformanceRunMetadata({
+        declaredRoleIds: ["conformance"],
+        enabledRoleIds: [],
+        criteria: acceptanceCriteriaFromArtifacts([artifact(criteria)]),
+      }),
+    ).toMatchObject({ conformance: "not_run" });
+  }
+});
+
 test("conformance metadata says whether the role ran and why", () => {
   expect(
     conformanceRunMetadata({
@@ -295,7 +323,7 @@ test("conformance metadata says whether the role ran and why", () => {
     }),
   ).toMatchObject({
     conformance: "not_run",
-    conformance_reason: expect.stringContaining("no acceptance-criteria"),
+    conformance_reason: expect.stringContaining("no well-formed acceptance-criteria"),
   });
   expect(
     conformanceRunMetadata({

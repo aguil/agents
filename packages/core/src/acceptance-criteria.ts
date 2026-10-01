@@ -153,7 +153,13 @@ export interface AcceptanceCriteriaArtifactContent {
   readonly criteria: readonly AcceptanceCriterion[];
 }
 
-/** Read the provider's artifact content back; undefined when malformed. */
+/**
+ * Read the provider's artifact content back; undefined when malformed.
+ *
+ * Replayed bundles are loaded without per-artifact validation, so every row
+ * is checked here too: a row that is not a well-formed criterion would
+ * otherwise count toward enabling the role and crash whatever reads it.
+ */
 export function readAcceptanceCriteriaArtifact(
   content: string,
 ): AcceptanceCriteriaArtifactContent | undefined {
@@ -173,11 +179,28 @@ export function readAcceptanceCriteriaArtifact(
       record.status !== "invalid") ||
     typeof record.reason !== "string" ||
     !Array.isArray(record.sources) ||
-    !Array.isArray(record.criteria)
+    record.sources.some((source) => typeof source !== "string") ||
+    !Array.isArray(record.criteria) ||
+    !record.criteria.every(isAcceptanceCriterion)
   ) {
     return undefined;
   }
   return record as AcceptanceCriteriaArtifactContent;
+}
+
+function isAcceptanceCriterion(value: unknown): value is AcceptanceCriterion {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const row = value as Partial<AcceptanceCriterion>;
+  return (
+    typeof row.id === "string" &&
+    CRITERION_ID_PATTERN.test(row.id) &&
+    typeof row.statement === "string" &&
+    (row.check === "diff" || row.check === "runtime") &&
+    Array.isArray(row.requiredTests) &&
+    row.requiredTests.every((test) => typeof test === "string")
+  );
 }
 
 export interface ConformanceVerdict {
