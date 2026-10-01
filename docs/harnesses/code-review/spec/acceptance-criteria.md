@@ -1,17 +1,11 @@
 # Acceptance criteria rows
 
-One JSON file format carries the constraints a change is meant to satisfy. Two
-readers use it:
-
-- the author, in the constraint trace step of the
-  [`self-review-checks`](../../../skills/self-review-checks/SKILL.md) skill,
-  before marking a PR ready for review;
-- the code-review harness, in its optional `conformance` role
-  ([ADR 0025](../../../adr/0025-plan-conformance-role.md)).
-
-Write the rows once, from the plan or the hand-off's binding-constraints table,
-and both checks read the same file. The parser is `parseAcceptanceCriteria` in
-`@aguil/agents-core`.
+One JSON file format carries the constraints a change is meant to satisfy. The
+code-review harness reads it in its optional `conformance` role
+([ADR 0025](../../../adr/0025-plan-conformance-role.md)). The format is meant
+for any check of a change against its plan, so write the rows once, from the
+plan or the hand-off's binding-constraints table, and point every such check at
+the same file. The parser is `parseAcceptanceCriteria` in `@aguil/agents-core`.
 
 ## Format
 
@@ -52,9 +46,10 @@ and both checks read the same file. The parser is `parseAcceptanceCriteria` in
 | `criteria[].check`          | no       | `diff` (default) when the change itself can show the row holds; `runtime` when only running code can.                                   |
 | `criteria[].required_tests` | no       | Tests the change must add, by name or description. A counterexample regression test belongs here.                                       |
 
-Any defect fails the whole file: invalid JSON, a wrong `version`, an empty list,
-a malformed or duplicate `id`, an empty `statement`, an unknown `check`. A row
-that quietly drops out is a constraint nobody checks.
+Any defect fails the whole file: invalid JSON, an unknown key (so a misspelled
+`required_tests` cannot quietly mean "no tests"), a wrong `version`, an empty
+list, a malformed or duplicate `id`, an empty `statement`, an unknown `check`. A
+row that quietly drops out is a constraint nobody checks.
 
 Write each `statement` as the rule, including its conditions. "Use stored
 values" loses the condition that made the original design correct; "use stored

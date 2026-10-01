@@ -49,6 +49,24 @@ export type ParsedAcceptanceCriteria =
 
 const CRITERION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+const DOCUMENT_KEYS = ["version", "source", "criteria"] as const;
+const CRITERION_KEYS = ["id", "statement", "check", "required_tests"] as const;
+
+/**
+ * Unknown keys are errors, not extras: `requiredTests` or a misspelled
+ * `required_tests` would otherwise parse as "no required tests".
+ */
+function unknownKeyError(
+  record: Record<string, unknown>,
+  allowed: readonly string[],
+  label: string,
+): string | undefined {
+  const unknown = Object.keys(record).filter((key) => !allowed.includes(key));
+  return unknown.length === 0
+    ? undefined
+    : `${label} has unknown key${unknown.length === 1 ? "" : "s"} ${unknown.map((key) => `"${key}"`).join(", ")} (allowed: ${allowed.join(", ")})`;
+}
+
 /**
  * Parse an acceptance-criteria file. Every defect is an error rather than a
  * dropped row: a row that silently disappears is a constraint nobody checks.
@@ -69,6 +87,10 @@ export function parseAcceptanceCriteria(
     return { ok: false, error: "top level must be an object" };
   }
   const record = parsed as Record<string, unknown>;
+  const unknownTopLevel = unknownKeyError(record, DOCUMENT_KEYS, "top level");
+  if (unknownTopLevel !== undefined) {
+    return { ok: false, error: unknownTopLevel };
+  }
   if (record.version !== ACCEPTANCE_CRITERIA_FORMAT_VERSION) {
     return {
       ok: false,
@@ -114,6 +136,10 @@ function parseCriterion(
     return `${label} must be an object`;
   }
   const row = entry as Record<string, unknown>;
+  const unknownRowKey = unknownKeyError(row, CRITERION_KEYS, label);
+  if (unknownRowKey !== undefined) {
+    return unknownRowKey;
+  }
   if (typeof row.id !== "string" || !CRITERION_ID_PATTERN.test(row.id)) {
     return `${label}.id must match ${CRITERION_ID_PATTERN.source}`;
   }
@@ -153,7 +179,13 @@ export interface AcceptanceCriteriaArtifactContent {
   readonly criteria: readonly AcceptanceCriterion[];
 }
 
-/** Read the provider's artifact content back; undefined when malformed. */
+/**
+ * Read the provider's artifact content back; undefined when malformed.
+ *
+ * Replayed bundles are loaded without per-artifact validation, so every row
+ * is checked here too: a row that is not a well-formed criterion would
+ * otherwise count toward enabling the role and crash whatever reads it.
+ */
 export function readAcceptanceCriteriaArtifact(
   content: string,
 ): AcceptanceCriteriaArtifactContent | undefined {
@@ -173,11 +205,32 @@ export function readAcceptanceCriteriaArtifact(
       record.status !== "invalid") ||
     typeof record.reason !== "string" ||
     !Array.isArray(record.sources) ||
-    !Array.isArray(record.criteria)
+    record.sources.some((source) => typeof source !== "string") ||
+    !Array.isArray(record.criteria) ||
+    !record.criteria.every(isAcceptanceCriterion) ||
+    // Outcome ids and report rows are keyed by criterion id, so a repeated
+    // id would let one verdict stand in for two rows.
+    new Set(record.criteria.map((row) => row.id)).size !==
+      record.criteria.length
   ) {
     return undefined;
   }
   return record as AcceptanceCriteriaArtifactContent;
+}
+
+function isAcceptanceCriterion(value: unknown): value is AcceptanceCriterion {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const row = value as Partial<AcceptanceCriterion>;
+  return (
+    typeof row.id === "string" &&
+    CRITERION_ID_PATTERN.test(row.id) &&
+    typeof row.statement === "string" &&
+    (row.check === "diff" || row.check === "runtime") &&
+    Array.isArray(row.requiredTests) &&
+    row.requiredTests.every((test) => typeof test === "string")
+  );
 }
 
 export interface ConformanceVerdict {

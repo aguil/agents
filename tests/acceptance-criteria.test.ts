@@ -7,8 +7,10 @@ import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner
 import { formatReviewCoverageSectionLines } from "@aguil/agents-code-review-post";
 import {
   AcceptanceCriteriaProvider,
+  acceptanceCriteriaFromArtifacts,
   acceptanceCriteriaRowCount,
   type ContextBundle,
+  readBoundedResponseText,
   resolveContextProvider,
 } from "@aguil/agents-context";
 import {
@@ -129,6 +131,17 @@ test("rejects criteria files that would silently lose a row", () => {
     [
       { version: 1, criteria: [{ id: "AC-1", statement: "x", check: "eyes" }] },
       `criteria[0].check must be "diff" or "runtime"`,
+    ],
+    [
+      {
+        version: 1,
+        criteria: [{ id: "AC-1", statement: "x", requiredTests: ["t"] }],
+      },
+      `criteria[0] has unknown key "requiredTests"`,
+    ],
+    [
+      { version: 1, criteria: [{ id: "AC-1", statement: "x" }], extra: 1 },
+      `top level has unknown key "extra"`,
     ],
   ];
   for (const [input, error] of cases) {
@@ -279,6 +292,37 @@ test("row count binds only loaded criteria", () => {
   ).toBe(0);
 });
 
+test("a malformed replayed artifact counts no rows instead of crashing", () => {
+  const artifact = (criteria: unknown) => ({
+    id: ACCEPTANCE_CRITERIA_ARTIFACT_ID,
+    title: "Acceptance Criteria",
+    content: JSON.stringify({
+      status: "loaded",
+      reason: "x",
+      sources: [],
+      criteria,
+    }),
+  });
+  for (const criteria of [
+    [null],
+    [{ id: "AC-1", statement: "x" }],
+    [{ id: "a,b", statement: "x", check: "diff", requiredTests: [] }],
+    [
+      { id: "AC-1", statement: "x", check: "diff", requiredTests: [] },
+      { id: "AC-1", statement: "y", check: "diff", requiredTests: [] },
+    ],
+  ]) {
+    expect(acceptanceCriteriaRowCount([artifact(criteria)])).toBe(0);
+    expect(
+      conformanceRunMetadata({
+        declaredRoleIds: ["conformance"],
+        enabledRoleIds: [],
+        criteria: acceptanceCriteriaFromArtifacts([artifact(criteria)]),
+      }),
+    ).toMatchObject({ conformance: "not_run" });
+  }
+});
+
 test("conformance metadata says whether the role ran and why", () => {
   expect(
     conformanceRunMetadata({
@@ -295,7 +339,9 @@ test("conformance metadata says whether the role ran and why", () => {
     }),
   ).toMatchObject({
     conformance: "not_run",
-    conformance_reason: expect.stringContaining("no acceptance-criteria"),
+    conformance_reason: expect.stringContaining(
+      "no well-formed acceptance-criteria",
+    ),
   });
   expect(
     conformanceRunMetadata({
@@ -487,6 +533,21 @@ test("without criteria the report says the conformance role did not run and why"
   });
 });
 
+test("an explicit criteria file is refused on replay rather than ignored", async () => {
+  await withWorkspace(async (workspace) => {
+    await expect(
+      runCodeReviewFromConfig({
+        agentsDir: AGENTS_DIR,
+        workspacePath: workspace,
+        contextBundlePath: await writeBundle(workspace, undefined),
+        acceptanceCriteriaPath: join(workspace, "criteria.json"),
+        adapter: scriptedConformanceAdapter(),
+        scratchpadRoot: join(workspace, "runs"),
+      }),
+    ).rejects.toThrow("--criteria cannot be combined with a replayed");
+  });
+});
+
 test("reports render no conformance section when the harness has no such role", () => {
   const report = renderMarkdownReport({
     runId: "r",
@@ -526,4 +587,18 @@ test("posted review coverage states the conformance role's outcome", () => {
       timed_out_roles: "conformance",
     }),
   ).toContain("timed out");
+});
+
+test("URL criteria bodies are read only up to the byte cap", async () => {
+  let pulls = 0;
+  const endless = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1;
+      controller.enqueue(new TextEncoder().encode("x".repeat(1024)));
+    },
+  });
+  const text = await readBoundedResponseText(new Response(endless), 4_000);
+  expect(Buffer.byteLength(text, "utf8")).toBe(4_000);
+  // A few chunks of read-ahead at most, not the whole (infinite) body.
+  expect(pulls).toBeLessThan(10);
 });

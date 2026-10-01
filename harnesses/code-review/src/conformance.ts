@@ -38,7 +38,7 @@ function notRunReason(
   criteria: AcceptanceCriteriaArtifactContent | undefined,
 ): string {
   if (criteria === undefined) {
-    return "the context bundle has no acceptance-criteria artifact (no `acceptance-criteria` provider, or a bundle recorded before it existed)";
+    return "the context bundle has no well-formed acceptance-criteria artifact (no `acceptance-criteria` provider, a bundle recorded before it existed, or a malformed one)";
   }
   if (criteria.status === "loaded") {
     return `criteria loaded (${criteria.reason}), but the role's \`enabled\` expression is false`;
