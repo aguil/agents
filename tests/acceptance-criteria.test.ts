@@ -532,6 +532,21 @@ test("without criteria the report says the conformance role did not run and why"
   });
 });
 
+test("an explicit criteria file is refused on replay rather than ignored", async () => {
+  await withWorkspace(async (workspace) => {
+    await expect(
+      runCodeReviewFromConfig({
+        agentsDir: AGENTS_DIR,
+        workspacePath: workspace,
+        contextBundlePath: await writeBundle(workspace, undefined),
+        acceptanceCriteriaPath: join(workspace, "criteria.json"),
+        adapter: scriptedConformanceAdapter(),
+        scratchpadRoot: join(workspace, "runs"),
+      }),
+    ).rejects.toThrow("--criteria cannot be combined with a replayed");
+  });
+});
+
 test("reports render no conformance section when the harness has no such role", () => {
   const report = renderMarkdownReport({
     runId: "r",

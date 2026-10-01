@@ -315,6 +315,16 @@ function assertTrustedHostExec(
 export async function runCodeReviewFromConfig(
   options: ConfigCodeReviewRunOptions = {},
 ): Promise<CodeReviewRunResult> {
+  if (
+    options.contextBundlePath !== undefined &&
+    options.acceptanceCriteriaPath !== undefined
+  ) {
+    // A replay's criteria are whatever its recorded bundle holds; overlaying
+    // a new file would make the run neither a replay nor a fresh review.
+    throw new Error(
+      "code-review: --criteria cannot be combined with a replayed context bundle; the bundle already records its acceptance criteria. Run without --context-bundle to check against a new criteria file.",
+    );
+  }
   const workspacePath = resolve(options.workspacePath ?? process.cwd());
   const harnessSource = await resolveConfigHarnessSource(
     workspacePath,
