@@ -97,11 +97,13 @@ progress.”
    findings into one commit).
 4. Re-run the same verification the project documents after each fix or before
    pushing.
-5. Repeat until a final **code-review → triage ingest** pass yields
+5. Before the final pass, complete the
+   [constraint trace](#constraint-trace-against-acceptance-criteria) for **§6**,
+   so any code or test it forces goes through gates and review like any other
+   fix.
+6. Repeat until a final **code-review → triage ingest** pass yields
    **`items: []`** on the envelope and your gates stay green, then finalize
-   [Reporting work done](#reporting-work-done) **§§1–5** from that pipeline,
-   then complete the
-   [constraint trace](#constraint-trace-against-acceptance-criteria) for **§6**.
+   [Reporting work done](#reporting-work-done) **§§1–6** from that pipeline.
 
 ## Prerequisites
 
@@ -250,6 +252,11 @@ to fix.
 - [ ] **Verify gates:** Re-run the same documented verification after fixes;
       refresh **§1**; rerun **`agents code-review`** when edits are broad or
       touch harness contracts.
+- [ ] **Constraint trace:** for every acceptance-criteria row the change
+      touches, quote the implementing code and name the test that fails if it is
+      violated; fix any row missing either (one commit each) → **§6**. No plan
+      or criteria: say so in **§6**. Do this before the final pipeline so trace
+      fixes are reviewed.
 - [ ] **Final pipeline:** rerun **`agents code-review`** then
       **`agents triage --from code-review`** (add **`--result …`** when not
       using workspace default **`result.json`**); record fresh **§2**
@@ -257,10 +264,6 @@ to fix.
       ingest — read **`items`** from
       **`.agents-triage/<slug>/triage-queue.json`**, scratch **`--output`**, or
       parse **`items`** from **`--stdout --format json`** the same way.
-- [ ] **Constraint trace:** for every acceptance-criteria row the change
-      touches, quote the implementing code and name the test that fails if it is
-      violated; fix any row missing either (one commit each) → **§6**. No plan
-      or criteria: say so in **§6**.
 - [ ] **Closed-out report:** finalize **§4** (done or documented exits); confirm
       **§5** covers every code change vs **`finding.id`** (or duplicated ids in
       one commit body) and every trace fix vs its row `id`.
