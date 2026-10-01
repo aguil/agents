@@ -410,10 +410,14 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     };
 
     // Outcomes are the opt-in surface for execution-configured harnesses;
-    // legacy definitions keep the pre-generalization result shape. Status
-    // ownership is separate (issue #157): findings-blind only when a gate
-    // owns the run, not merely because `execution` is declared.
-    const emitOutcomes = this.options.definition.execution !== undefined;
+    // legacy definitions keep the pre-generalization result shape unless a
+    // role actually emitted a non-finding outcome (code-review's conformance
+    // rows, ADR 0025), which would otherwise be dropped. Status ownership is
+    // separate (issue #157): findings-blind only when a gate owns the run,
+    // not merely because `execution` is declared.
+    const emitOutcomes =
+      this.options.definition.execution !== undefined ||
+      outcomes.some((outcome) => outcome.genericOutcomes.length > 0);
     const findingsBlind = harnessStatusIsFindingsBlind(
       this.options.definition.execution,
       {
