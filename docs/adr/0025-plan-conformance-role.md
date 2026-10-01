@@ -27,9 +27,9 @@ for the author to write once and reuse.
    file, `version: 1`, holding a non-empty `criteria` list. Each row has an
    `id`, a `statement`, an optional `check` (`diff` or `runtime`), and optional
    `required_tests`. Any defect rejects the whole file. The format is specified
-   alongside the harness spec and parsed by one function in the core package.
-   The author-side constraint trace in the `self-review-checks` skill reads the
-   same file.
+   alongside the harness spec and parsed by one function in the core package. An
+   author-side constraint trace in the `self-review-checks` skill is to read the
+   same file, so rows are written once; that skill change lands separately.
 
 2. **A context provider collects the rows.** The `acceptance-criteria` builtin
    takes rows from, in order: the operator's `--criteria` path, its own `path`
