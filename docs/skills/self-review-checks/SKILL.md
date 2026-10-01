@@ -201,14 +201,42 @@ records acceptance criteria or binding constraints. If none exists, skip the
 trace and say so in **§6**.
 
 **Input:** the rows the change touches, as an acceptance-criteria file in the
-Agents format: JSON with `version: 1` and a `criteria` list whose rows carry
-`id`, `statement`, optional `check` (`diff` or `runtime`), and optional
-`required_tests`. The format is specified in the Agents code-review docs
-(`docs/harnesses/code-review/spec/acceptance-criteria.md`). If the plan only has
-a table or prose, write the file first and keep it with the plan; the
-code-review `conformance` role reads the same file, so you write the rows once.
-Copy each condition into `statement`. "Use stored values when non-empty" is a
-different rule from "use stored values".
+Agents format. If the plan only has a table or prose, write the file first and
+keep it with the plan; the code-review `conformance` role reads the same file,
+so you write the rows once.
+
+```json
+{
+  "version": 1,
+  "source": "docs/plans/hashing.md#slice-3",
+  "criteria": [
+    {
+      "id": "AC-1",
+      "statement": "The fallback uses stored values when they are non-empty.",
+      "check": "diff",
+      "required_tests": ["fallback returns stored values when present"]
+    }
+  ]
+}
+```
+
+The rules, all enforced; any violation rejects the whole file:
+
+- Top-level keys are `version` (must be `1`), optional `source` (non-empty
+  string), and `criteria` (non-empty list). No other keys.
+- Row keys are `id`, `statement`, optional `check`, and optional
+  `required_tests`. No other keys, so `requiredTests` or a typo is an error, not
+  "no tests".
+- `id` is unique in the file, starts with a letter or digit, and uses only
+  letters, digits, `.`, `_`, and `-`.
+- `statement` is a non-empty string. Copy each condition into it: "use stored
+  values when non-empty" is a different rule from "use stored values".
+- `check` is `diff` (the default) or `runtime`.
+- `required_tests` is a list of non-empty strings.
+
+The full specification is
+[acceptance-criteria.md](https://github.com/aguil/agents/blob/main/docs/harnesses/code-review/spec/acceptance-criteria.md)
+in the Agents repository.
 
 **For each row:**
 
