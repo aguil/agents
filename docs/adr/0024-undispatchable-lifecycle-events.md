@@ -10,7 +10,8 @@
   / `run_end` (structurally undispatchable by that route), after implementation
   found Claude Code's `SessionStart` is a correct `role_start` native, and
   amended before merge so decision 2's report is also recorded in the run's
-  result, not only printed at setup.
+  result, not only printed at setup, and to add `role_stop`, which an adapter
+  with no hook generator cannot deliver either.
 
 **Context:** `HOOK_EVENTS` in `packages/harness-config/src/index.ts` declares
 six canonical hook events: `pre_tool_call`, `post_tool_call`, `role_start`,
@@ -104,18 +105,21 @@ absence.
    harness declares a handler for a lifecycle event that cannot be dispatched in
    the current configuration, the runtime says so — naming the event and the
    reason — rather than accepting it silently. This covers `run_start`,
-   `run_end` and `role_start` together; closing one third of the trap because
-   one third is what a test fixture happened to name is how it stayed open.
+   `run_end`, `role_start` and `role_stop` together; closing part of the trap
+   because part is what a test fixture happened to name is how it stayed open.
 
    **The test is per-adapter, not global**, which is the practical form of the
    distinction drawn in the context above. `run_start` and `run_end` are
    undispatchable for every adapter and always will be, by decision 1.
-   `role_start` is undispatchable only where the active adapter's generator does
-   not map it, so an adapter that maps a per-session start event must stop
-   warning for it. A warning that fires when the handler would in fact run is
-   the same defect as silence, pointed the other way, and it is worse in one
-   respect: an author who learns to ignore these warnings stops reading the ones
-   that are true. The reason string names which case applies.
+   `role_start` and `role_stop` are undispatchable only where the active
+   adapter's generator does not map them. Claude Code maps both (`SessionStart`
+   and `Stop`), Cursor maps `role_stop` only, and an adapter with no hook
+   generator, such as `opencode` or `fake`, maps neither. So an adapter that
+   maps a per-session event must stop warning for it. A warning that fires when
+   the handler would in fact run is the same defect as silence, pointed the
+   other way, and it is worse in one respect: an author who learns to ignore
+   these warnings stops reading the ones that are true. The reason string names
+   which case applies.
 
    **The report is also recorded in the run.** A warning printed at setup is
    gone once the terminal is, and a person reading a run afterwards opens its
