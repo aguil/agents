@@ -9,8 +9,10 @@
   named as a precondition. `claude --settings` composes and its hooks fire and
   deny, and — measured 2026-09-27 at Claude Code `2.1.283` — a hook's allow lets
   a permitted call run under headless defaults; decision 3's mechanism holds.
-  The probe results are recorded in the context above rather than left in a
-  working note.
+  Amended before merge with decision 9, after a measurement on 2026-10-03 at
+  Claude Code `2.1.288` found the bridge's response on `PostToolUse` recorded as
+  a failed hook. The probe results are recorded in the context above rather than
+  left in a working note.
 
 **Context:** `packages/hooks` exports one generator,
 `generateCursorHooksConfig`, which projects a harness's canonical `hooks:` block
@@ -198,11 +200,42 @@ message, and is covered by unit tests rather than by this probe.
    executable code into a workspace to get there is a different decision and is
    not authorized here.
 
+9. **On Claude Code the bridge is a `PreToolUse` hook only.** This is an
+   exception to ADR 0009 §1, which says the bridge "is never narrowed: it stays
+   first on every mapped tool event", and to ADR 0006's rule that it runs first
+   on every mapped tool event. It is stated here so it reads as a decision, not
+   a drift. On Claude Code the generator maps `post_tool_call` to `PostToolUse`
+   for harness-declared handlers, but does not register the bridge there.
+
+   The exception has two reasons. First, by `PostToolUse` the tool has already
+   run, so no verdict the bridge returns can stop it. Second, the response does
+   harm: decision 6's Claude encoding always answers in the `PreToolUse` shape,
+   and Claude Code rejects that on `PostToolUse`.
+
+   Measured on 2026-10-03 against Claude Code `2.1.288`, one trial per cell,
+   both with the adapter's own argv and with `--setting-sources ''`. A
+   matcher-less `PostToolUse` hook that exited 0 and printed
+   `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}`
+   was recorded with `exit_code: 1` and `outcome: error`: "Hook returned
+   incorrect event name: expected 'PostToolUse' but got 'PreToolUse'". The tool
+   still ran and the run succeeded, so the cost is one hook error per tool call
+   on every policy-declaring run. A hook printing `{}` was indistinguishable
+   from having no `PostToolUse` hook. Answering `{}` per event would remove the
+   error but keep a bridge invocation that can do nothing, so not registering
+   the bridge is preferred. It also halves the bridge's per-call cost on Claude
+   Code, where read calls reach hooks and on Cursor they do not.
+
+   Cursor keeps the bridge on every mapped tool event, unchanged. Should a
+   post-call verdict ever gain a consumer on Claude Code, it needs an encoding
+   for `PostToolUse` of its own (decision 6), not this exception reversed.
+
 **Consequences:**
 
 - Claude Code becomes an adapter on which a declared policy is enforced, and
-  OpenCode does not. The `--allow-unenforced-policy` escape hatch stays, and the
-  set of adapters needing it shrinks by one.
+  OpenCode does not. On Claude Code that enforcement happens before the call
+  only (decision 9); nothing evaluates policy after a Claude Code tool call. The
+  `--allow-unenforced-policy` escape hatch stays, and the set of adapters
+  needing it shrinks by one.
 - Adding an adapter now requires filling a table row that includes a capability
   claim. That is deliberate friction: the claim "this adapter enforces policy"
   is the one most costly to get wrong, and a table entry is harder to add
@@ -252,4 +285,5 @@ message, and is covered by unit tests rather than by this probe.
   `packages/cli/src/policy-eval-main.ts`, `packages/cli/src/hooks-test-main.ts`,
   `packages/policy/src/index.ts`, `packages/execution/src/index.ts`.
 - Claude Code CLI `2.1.220`; OpenCode `1.14.39`; Cursor Agent CLI
-  `2026.07.23-e383d2b`. The allow measurement: Claude Code CLI `2.1.283`.
+  `2026.07.23-e383d2b`. The allow measurement: Claude Code CLI `2.1.283`. The
+  `PostToolUse` measurement behind decision 9: Claude Code CLI `2.1.288`.
