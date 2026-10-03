@@ -192,7 +192,8 @@ message, and is covered by unit tests rather than by this probe.
 8. **An adapter joins the supported set when it satisfies two conditions**: its
    hook mechanism can deny a tool call, and its configuration can be supplied
    run-scoped without installing code into the user's tree. Claude Code
-   satisfies the second as measured and is expected to satisfy the first.
+   satisfies both, as measured: its hooks deny a tool call, and its
+   configuration is supplied run-scoped through `--settings` (context above).
    OpenCode satisfies neither today — its extension surface is an installed npm
    plugin — so it stays out, keeps the refusal of decision 2, and the error
    message says why rather than saying "cursor-only". Should a mechanism appear
