@@ -18,6 +18,12 @@ Practical documentation for running and configuring `agents` workflows.
 | [code-review/workflows.md](code-review/workflows.md)             | HITL, pending review, post, replay, consensus |
 | [code-review/troubleshooting.md](code-review/troubleshooting.md) | Debugging failures, known limitations         |
 
+## Custom harnesses
+
+| Doc                                    | Contents                                                                                     |
+| -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [custom-harness.md](custom-harness.md) | Authoring `.agents/harnesses/<id>/harness.yaml`, policies, `agents harness run`, trust model |
+
 ## `agentsd` daemon
 
 | Doc                                              | Contents                                             |
