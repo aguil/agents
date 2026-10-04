@@ -67,7 +67,7 @@ Role lists are comma-separated strings, not JSON arrays. Use
 finding is uncounted even when it cites the command that failed to reproduce it.
 Runs recorded before the key existed parse as `0`.
 
-The three `conformance*` keys appear only when the run's harness declares the
+The four `conformance*` keys appear only when the run's harness declares the
 `conformance` role. `conformance_criteria` and `conformance_reported` are
 present only when the role was scheduled.
 
