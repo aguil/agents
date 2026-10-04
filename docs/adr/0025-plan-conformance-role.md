@@ -1,10 +1,15 @@
 # ADR 0025: optional plan-conformance role gated on supplied acceptance criteria
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-10-01 — Proposed.
+- 2026-10-04 — Accepted: merged with the plan-conformance implementation. The
+  Consequences note that replay-corpus `report.md` baselines would need
+  re-adjudication did not apply: the replay referee compares findings, triage
+  tier, and status, not `report.md`, and every corpus entry replayed with the
+  same verdict and delta hash before and after the merge.
 
 **Context:** The code-review harness reviews a diff for defects. It has no idea
 what plan or design the change was written against. In one review round, two
