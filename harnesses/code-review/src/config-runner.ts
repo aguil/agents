@@ -50,7 +50,10 @@ import {
   parseTriageTier,
   writeLatestCodeReviewDiscoveryPointer,
 } from "./index";
-import { CODE_REVIEW_RUN_METADATA_KEYS } from "./review-contract";
+import {
+  CODE_REVIEW_CONFORMANCE_ROLE_ID,
+  CODE_REVIEW_RUN_METADATA_KEYS,
+} from "./review-contract";
 
 export type ConfigHarnessSourceKind =
   | "explicit"
@@ -304,6 +307,38 @@ function assertTrustedHostExec(
 }
 
 /**
+ * Refuse `--criteria` when the loaded harness would ignore it. The path only
+ * reaches the `acceptance-criteria` provider, and only the `conformance` role
+ * checks what it loads; a stale or customized harness missing either would
+ * otherwise finish looking like a run that checked the criteria.
+ */
+function assertConsumesCriteria(
+  loaded: LoadedHarness,
+  agentsDir: string,
+): void {
+  const missing = [
+    ...((loaded.contextProviders ?? []).some(
+      (provider) => provider.use === "acceptance-criteria",
+    )
+      ? []
+      : ["the `acceptance-criteria` context provider"]),
+    ...(loaded.definition.roles.some(
+      (role) => role.id === CODE_REVIEW_CONFORMANCE_ROLE_ID,
+    )
+      ? []
+      : [`the \`${CODE_REVIEW_CONFORMANCE_ROLE_ID}\` role`]),
+  ];
+  if (missing.length === 0) {
+    return;
+  }
+  throw new Error(
+    `code-review: --criteria was given, but the harness at ${join(agentsDir, "harnesses", CONFIG_HARNESS_ID, "harness.yaml")} ` +
+      `does not declare ${missing.join(" or ")}, so nothing would check the criteria. ` +
+      "Update the harness (`agents harness install code-review`) or run without --criteria.",
+  );
+}
+
+/**
  * Config-driven code-review run (#73 Tier 1 pass condition): every
  * behavioral decision — providers, role gating, output schemas, finding
  * pipelines, report template — comes from the loaded harness.yaml and its
@@ -336,6 +371,9 @@ export async function runCodeReviewFromConfig(
   });
   assertEnforceableHere(loaded, harnessSource.agentsDir);
   assertTrustedHostExec(loaded, harnessSource.source, harnessSource.agentsDir);
+  if (options.acceptanceCriteriaPath !== undefined) {
+    assertConsumesCriteria(loaded, harnessSource.agentsDir);
+  }
   const runId = options.runId ?? createRunId("code-review");
   const scratchpadRoot = resolve(
     options.scratchpadRoot ?? agentsCodeReviewRunsRoot(workspacePath),

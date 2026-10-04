@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conformanceRunMetadata } from "@aguil/agents-code-review";
@@ -578,6 +578,49 @@ test("an explicit criteria file is refused on replay rather than ignored", async
         scratchpadRoot: join(workspace, "runs"),
       }),
     ).rejects.toThrow("--criteria cannot be combined with a replayed");
+  });
+});
+
+test("an explicit criteria file is refused when the harness would ignore it", async () => {
+  await withWorkspace(async (workspace) => {
+    const packaged = await readFile(
+      join(AGENTS_DIR, "harnesses", "code-review", "harness.yaml"),
+      "utf8",
+    );
+    const absolutePrompts = packaged.replaceAll(
+      "../../../harnesses/",
+      `${join(import.meta.dir, "..", "harnesses")}/`,
+    );
+    const variants: readonly [string, string][] = [
+      [
+        absolutePrompts.replace("    - use: acceptance-criteria\n", ""),
+        "`acceptance-criteria` context provider",
+      ],
+      [
+        absolutePrompts.replace(/ {2}conformance:\n( {4}.*\n)+/, ""),
+        "`conformance` role",
+      ],
+    ];
+    for (const [yaml, missing] of variants) {
+      const agentsDir = join(workspace, `agents-${missing.length}`);
+      await mkdir(join(agentsDir, "harnesses", "code-review"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(agentsDir, "harnesses", "code-review", "harness.yaml"),
+        yaml,
+        "utf8",
+      );
+      await expect(
+        runCodeReviewFromConfig({
+          agentsDir,
+          workspacePath: workspace,
+          acceptanceCriteriaPath: join(workspace, "criteria.json"),
+          adapter: scriptedConformanceAdapter(),
+          scratchpadRoot: join(workspace, "runs"),
+        }),
+      ).rejects.toThrow(missing);
+    }
   });
 });
 
