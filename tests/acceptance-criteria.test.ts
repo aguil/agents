@@ -22,6 +22,7 @@ import {
   type AcceptanceCriteriaArtifactContent,
   createAgentEvent,
   type Finding,
+  findingToHarnessOutcome,
   type HarnessOutcome,
   parseAcceptanceCriteria,
   readAcceptanceCriteriaArtifact,
@@ -715,16 +716,27 @@ test("an unsatisfied verdict without its finding fails the conformance role", as
         conformanceOutcome("AC-1", "satisfied", "ok"),
         conformanceOutcome("AC-2", "unsatisfied", "differs"),
         conformanceOutcome("AC-3", "unverifiable", "runtime only"),
-        {
-          id: "f",
-          kind: "finding",
-          sourceRole: "conformance",
-          title: "[AC-3] Cannot be shown from the diff",
-          data: {},
-        },
+        findingToHarnessOutcome({
+          ...conformanceFinding("f3", "[AC-3] Cannot be shown from the diff"),
+          severity: "warning",
+        }),
+        conformanceOutcome("AC-4", "unsatisfied", "differs"),
+        // Matching title, but a warning for an unsatisfied row.
+        findingToHarnessOutcome({
+          ...conformanceFinding("f4", "[AC-4] Differs"),
+          severity: "warning",
+        }),
+        conformanceOutcome("AC-5", "unsatisfied", "differs"),
+        // Matching title and severity, but no evidence: would not count.
+        findingToHarnessOutcome({
+          ...conformanceFinding("f5", "[AC-5] Differs"),
+          validation: { status: "verified", details: "Looked." },
+        }),
+        conformanceOutcome("AC-6", "unsatisfied", "differs"),
+        findingToHarnessOutcome(conformanceFinding("f6", "[AC-6] Differs")),
       ],
     }).map((violation) => violation.outcomeId),
-  ).toEqual(["conformance-AC-2"]);
+  ).toEqual(["conformance-AC-2", "conformance-AC-4", "conformance-AC-5"]);
   expect(
     conformanceOutcomeViolations({
       roleId: "quality",

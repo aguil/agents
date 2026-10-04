@@ -1,8 +1,11 @@
 import {
   type AcceptanceCriteriaArtifactContent,
+  type Finding,
   type HarnessOutcome,
+  harnessOutcomeToFinding,
   readConformanceVerdict,
 } from "@aguil/agents-core";
+import { isSubstantiatedFinding } from "@aguil/agents-reporting";
 import {
   CODE_REVIEW_CONFORMANCE_ROLE_ID,
   CODE_REVIEW_RUN_METADATA_KEYS,
@@ -99,23 +102,33 @@ export function conformanceOutcomeViolations(input: {
   if (input.roleId !== CODE_REVIEW_CONFORMANCE_ROLE_ID) {
     return [];
   }
-  const findingTitles = input.outcomes
-    .filter((outcome) => outcome.kind === "finding")
-    .map((outcome) => outcome.title);
+  const findings = input.outcomes
+    .map((outcome) => harnessOutcomeToFinding(outcome))
+    .filter((finding): finding is Finding => finding !== undefined);
   return input.outcomes.flatMap((outcome) => {
     const verdict = readConformanceVerdict(outcome);
     if (verdict === undefined || verdict.status === "satisfied") {
       return [];
     }
     const prefix = `[${verdict.criterion}]`;
-    return findingTitles.some((title) => title.startsWith(prefix))
+    // The finding has to count toward status: an unsubstantiated one is set
+    // aside by the actionable filter, and a warning for an unsatisfied row
+    // would understate it.
+    const severity = verdict.status === "unsatisfied" ? "critical" : undefined;
+    const counted = findings.some(
+      (finding) =>
+        finding.title.startsWith(prefix) &&
+        isSubstantiatedFinding(finding) &&
+        (severity === undefined || finding.severity === severity),
+    );
+    return counted
       ? []
       : [
           {
             outcomeId: outcome.id,
             kind: outcome.kind,
             errors: [
-              `criterion ${verdict.criterion} is ${verdict.status} but no finding titled "${prefix} …" was emitted`,
+              `criterion ${verdict.criterion} is ${verdict.status} but no ${severity ?? "verified"} finding titled "${prefix} …" with validation evidence was emitted`,
             ],
           },
         ];
