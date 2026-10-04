@@ -1,6 +1,12 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
+  conformanceReportedMetadata,
+  conformanceRunMetadata,
+} from "@aguil/agents-code-review";
+import type { ContextArtifact } from "@aguil/agents-context";
+import {
+  acceptanceCriteriaFromArtifacts,
   acceptanceCriteriaRowCount,
   collectContextBundle,
   resolveContextProvider,
@@ -376,6 +382,7 @@ export async function runHarnessRunCli(
   const enablementEnv: Record<string, string | number | boolean> = {
     acceptance_criteria: 0,
   };
+  let collectedArtifacts: readonly ContextArtifact[] = [];
   if (loaded.contextProviders !== undefined) {
     // Declared providers resolve against the builtin registry; resolution
     // errors (unknown name, bad params) abort before any role runs.
@@ -400,6 +407,7 @@ export async function runHarnessRunCli(
       enablementEnv.acceptance_criteria = acceptanceCriteriaRowCount(
         bundle.artifacts,
       );
+      collectedArtifacts = bundle.artifacts;
     } catch (error) {
       console.error(
         `harness run: context collection failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -465,21 +473,41 @@ export async function runHarnessRunCli(
         )
       : undefined;
 
-  const result = await orchestrator.run({
+  // Same conformance bookkeeping as `agents code-review` (ADR 0025): empty
+  // unless the harness declares a `conformance` role, so other harnesses'
+  // results and reports are unchanged.
+  const conformanceMetadata = conformanceRunMetadata({
+    declaredRoleIds: loaded.definition.roles.map((role) => role.id),
+    enabledRoleIds: definition.roles.map((role) => role.id),
+    criteria: acceptanceCriteriaFromArtifacts(collectedArtifacts),
+  });
+  const runMetadata = {
+    ...conformanceMetadata,
+    ...(cursorApproval === undefined
+      ? {}
+      : {
+          cursor_force: cursorApproval.force ? "true" : "false",
+          cursor_sandbox: cursorApproval.sandbox ?? "",
+        }),
+  };
+  const ranResult = await orchestrator.run({
     runId,
     harnessId: parsed.harnessId,
     workspacePath,
     scratchpadPath,
     strictMode: parsed.strict,
-    ...(cursorApproval === undefined
-      ? {}
-      : {
-          metadata: {
-            cursor_force: cursorApproval.force ? "true" : "false",
-            cursor_sandbox: cursorApproval.sandbox ?? "",
-          },
-        }),
+    ...(Object.keys(runMetadata).length === 0 ? {} : { metadata: runMetadata }),
   });
+  const result = {
+    ...ranResult,
+    metadata: {
+      ...ranResult.metadata,
+      ...conformanceReportedMetadata({
+        metadata: conformanceMetadata,
+        outcomes: ranResult.outcomes,
+      }),
+    },
+  };
 
   // Declared pipelines shape the reported findings the same way the
   // code-review package does imperatively (it renders report.md AFTER
