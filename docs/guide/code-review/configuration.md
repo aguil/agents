@@ -139,8 +139,9 @@ In JSON config files, either that string or an object:
 ```
 
 Role ids are the harness's role ids (for the packaged code-review harness:
-`security`, `performance`, `quality`, `compliance`). Unknown role ids are
-ignored by resolution — they match no spawn.
+`security`, `performance`, `quality`, `compliance`, and the optional
+`conformance` role, which runs only when acceptance criteria are supplied).
+Unknown role ids are ignored by resolution — they match no spawn.
 
 ## Example repo config
 
