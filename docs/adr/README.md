@@ -136,7 +136,8 @@ so it is upheld in review.
   adapter name; generated configuration is run-scoped rather than written into
   the workspace, and is validated because the Claude Code CLI ignores an invalid
   settings file silently; the bridge's response encoding is selected explicitly,
-  never inferred from hook stdin.
+  never inferred from hook stdin; on Claude Code the bridge is a `PreToolUse`
+  hook only, an exception to ADR 0009 §1.
 - [0024-undispatchable-lifecycle-events.md](0024-undispatchable-lifecycle-events.md)
   — ADR 0024: run-level events are the orchestrator's to dispatch and no adapter
   mapping can supply them, because an adapter is invoked once per role
