@@ -113,9 +113,7 @@ export function normalizeHookPayload(payload: unknown): PolicyHookInput {
       ? { tool_name: record.tool_name }
       : eventRaw === "beforeShellExecution"
         ? { tool_name: "Execute" }
-        : eventRaw === "PreToolUse" && typeof record.tool_name !== "string"
-          ? {}
-          : {}),
+        : {}),
     tool_input: toolInput,
   };
 }
