@@ -55,6 +55,7 @@ used by `parseCodeReviewRunMetadata`:
 | `CODE_REVIEW_RUN_METADATA_KEYS.conformance`             | `"conformance"`              | `scheduled` or `not_run`                    |
 | `CODE_REVIEW_RUN_METADATA_KEYS.conformanceReason`       | `"conformance_reason"`       | Why the conformance role did or did not run |
 | `CODE_REVIEW_RUN_METADATA_KEYS.conformanceCriteria`     | `"conformance_criteria"`     | Comma-separated criterion ids               |
+| `CODE_REVIEW_RUN_METADATA_KEYS.conformanceReported`     | `"conformance_reported"`     | Criterion ids that got a verdict            |
 
 Role lists are comma-separated strings, not JSON arrays. Use
 `parseMetadataRolesList` to parse them.
@@ -67,8 +68,8 @@ finding is uncounted even when it cites the command that failed to reproduce it.
 Runs recorded before the key existed parse as `0`.
 
 The three `conformance*` keys appear only when the run's harness declares the
-`conformance` role. `conformance_criteria` is present only when the role was
-scheduled.
+`conformance` role. `conformance_criteria` and `conformance_reported` are
+present only when the role was scheduled.
 
 ## Scratchpad artifact layout
 

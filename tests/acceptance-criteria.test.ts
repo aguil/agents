@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conformanceRunMetadata } from "@aguil/agents-code-review";
@@ -10,6 +10,7 @@ import {
   acceptanceCriteriaFromArtifacts,
   acceptanceCriteriaRowCount,
   type ContextBundle,
+  MAX_ACCEPTANCE_CRITERIA_REFERENCES,
   readBoundedResponseText,
   resolveContextProvider,
 } from "@aguil/agents-context";
@@ -204,6 +205,11 @@ test("reads Acceptance-Criteria lines from the PR description", async () => {
       "utf8",
     );
     await writeFile(
+      join(workspace, "a-again.json"),
+      JSON.stringify({ version: 1, criteria: [CRITERIA.criteria[0]] }),
+      "utf8",
+    );
+    await writeFile(
       join(workspace, "b.json"),
       JSON.stringify({ version: 1, criteria: [CRITERIA.criteria[1]] }),
       "utf8",
@@ -233,10 +239,35 @@ test("reads Acceptance-Criteria lines from the PR description", async () => {
     );
     expect(noPr.status).toBe("absent");
 
+    const repeated = await collectCriteria(
+      new AcceptanceCriteriaProvider({
+        commandRunner: prRunner("Acceptance-Criteria: b.json\n".repeat(50)),
+      }),
+      workspace,
+    );
+    expect(repeated.status).toBe("loaded");
+    expect(repeated.sources).toEqual(["b.json"]);
+
+    const tooMany = await collectCriteria(
+      new AcceptanceCriteriaProvider({
+        commandRunner: prRunner(
+          Array.from(
+            { length: MAX_ACCEPTANCE_CRITERIA_REFERENCES + 1 },
+            (_, index) => `Acceptance-Criteria: c${index}.json`,
+          ).join("\n"),
+        ),
+      }),
+      workspace,
+    );
+    expect(tooMany.status).toBe("invalid");
+    expect(tooMany.reason).toContain(
+      `at most ${MAX_ACCEPTANCE_CRITERIA_REFERENCES} are read`,
+    );
+
     const duplicate = await collectCriteria(
       new AcceptanceCriteriaProvider({
         commandRunner: prRunner(
-          "Acceptance-Criteria: a.json\nAcceptance-Criteria: a.json",
+          "Acceptance-Criteria: a.json\nAcceptance-Criteria: a-again.json",
         ),
       }),
       workspace,
@@ -311,6 +342,8 @@ test("a malformed replayed artifact counts no rows instead of crashing", () => {
       { id: "AC-1", statement: "x", check: "diff", requiredTests: [] },
       { id: "AC-1", statement: "y", check: "diff", requiredTests: [] },
     ],
+    [{ id: "AC-1", statement: " ", check: "diff", requiredTests: [] }],
+    [{ id: "AC-1", statement: "x", check: "diff", requiredTests: [""] }],
   ]) {
     expect(acceptanceCriteriaRowCount([artifact(criteria)])).toBe(0);
     expect(
@@ -482,6 +515,7 @@ test("a change that violates a stated row gets an unsatisfied finding and a per-
     expect(result.metadata?.completed_roles).toBe("quality,conformance");
     expect(result.metadata?.conformance).toBe("scheduled");
     expect(result.metadata?.conformance_criteria).toBe("AC-1,AC-2,AC-3");
+    expect(result.metadata?.conformance_reported).toBe("AC-1,AC-2");
     expect(result.status).toBe("failed");
     expect(result.findings.map((finding) => finding.title)).toEqual([
       "[AC-2] Fallback returns early instead of using stored values",
@@ -548,6 +582,49 @@ test("an explicit criteria file is refused on replay rather than ignored", async
   });
 });
 
+test("an explicit criteria file is refused when the harness would ignore it", async () => {
+  await withWorkspace(async (workspace) => {
+    const packaged = await readFile(
+      join(AGENTS_DIR, "harnesses", "code-review", "harness.yaml"),
+      "utf8",
+    );
+    const absolutePrompts = packaged.replaceAll(
+      "../../../harnesses/",
+      `${join(import.meta.dir, "..", "harnesses")}/`,
+    );
+    const variants: readonly [string, string][] = [
+      [
+        absolutePrompts.replace("    - use: acceptance-criteria\n", ""),
+        "`acceptance-criteria` context provider",
+      ],
+      [
+        absolutePrompts.replace(/ {2}conformance:\n( {4}.*\n)+/, ""),
+        "`conformance` role",
+      ],
+    ];
+    for (const [yaml, missing] of variants) {
+      const agentsDir = join(workspace, `agents-${missing.length}`);
+      await mkdir(join(agentsDir, "harnesses", "code-review"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(agentsDir, "harnesses", "code-review", "harness.yaml"),
+        yaml,
+        "utf8",
+      );
+      await expect(
+        runCodeReviewFromConfig({
+          agentsDir,
+          workspacePath: workspace,
+          acceptanceCriteriaPath: join(workspace, "criteria.json"),
+          adapter: scriptedConformanceAdapter(),
+          scratchpadRoot: join(workspace, "runs"),
+        }),
+      ).rejects.toThrow(missing);
+    }
+  });
+});
+
 test("reports render no conformance section when the harness has no such role", () => {
   const report = renderMarkdownReport({
     runId: "r",
@@ -575,11 +652,29 @@ test("posted review coverage states the conformance role's outcome", () => {
     line({
       conformance: "scheduled",
       conformance_criteria: "AC-1,AC-2",
+      conformance_reported: "AC-1,AC-2",
       completed_roles: "security,quality,compliance,conformance",
     }),
   ).toBe(
     "- **Plan Conformance:** checked against 2 acceptance criteria (AC-1, AC-2).",
   );
+  expect(
+    line({
+      conformance: "scheduled",
+      conformance_criteria: "AC-1,AC-2,AC-3",
+      conformance_reported: "AC-1,AC-2",
+      completed_roles: "security,quality,compliance,conformance",
+    }),
+  ).toBe(
+    "- **Plan Conformance:** checked 2 of 3 acceptance criteria; **no result** for AC-3 (treat as unchecked).",
+  );
+  expect(
+    line({
+      conformance: "scheduled",
+      conformance_criteria: "AC-1",
+      completed_roles: "security,quality,compliance,conformance",
+    }),
+  ).toContain("per-row results not recorded");
   expect(
     line({
       conformance: "scheduled",

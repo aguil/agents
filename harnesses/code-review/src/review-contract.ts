@@ -21,6 +21,11 @@ export const CODE_REVIEW_RUN_METADATA_KEYS = {
   conformanceReason: "conformance_reason",
   /** Comma-separated criterion ids the conformance role was given. */
   conformanceCriteria: "conformance_criteria",
+  /**
+   * Comma-separated criterion ids the role returned a verdict for, in
+   * criteria order. Present only when the role was scheduled.
+   */
+  conformanceReported: "conformance_reported",
 } as const;
 
 /**
@@ -61,6 +66,8 @@ export interface CodeReviewRunMetadata {
   readonly conformance: CodeReviewConformanceState | undefined;
   readonly conformanceReason: string | undefined;
   readonly conformanceCriteria: readonly string[];
+  /** Undefined when not recorded (role not scheduled, or an older run). */
+  readonly conformanceReported: readonly string[] | undefined;
 }
 
 /** Same type as {@link CodeReviewRunMetadata}; named for tooling / schema references. */
@@ -101,6 +108,7 @@ export function parseCodeReviewRunMetadata(
       conformance: undefined,
       conformanceReason: undefined,
       conformanceCriteria: [],
+      conformanceReported: undefined,
     };
   }
   const trimmedTriage =
@@ -130,6 +138,12 @@ export function parseCodeReviewRunMetadata(
     conformanceCriteria: parseMetadataRolesList(
       record[CODE_REVIEW_RUN_METADATA_KEYS.conformanceCriteria],
     ),
+    conformanceReported:
+      record[CODE_REVIEW_RUN_METADATA_KEYS.conformanceReported] === undefined
+        ? undefined
+        : parseMetadataRolesList(
+            record[CODE_REVIEW_RUN_METADATA_KEYS.conformanceReported],
+          ),
   };
 }
 

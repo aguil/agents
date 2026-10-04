@@ -74,8 +74,10 @@ the first source it finds:
    missing file means no criteria.
 3. `Acceptance-Criteria: <path-or-url>` lines in the PR description, one per
    file. Paths must stay inside the workspace. URLs must be on the same host and
-   owner as the tracked remote, the same rule PR-referenced docs follow. Rows
-   from several lines merge; a repeated `id` makes the set invalid.
+   owner as the tracked remote, the same rule PR-referenced docs follow. A line
+   repeated verbatim counts once, and more than 10 distinct references make the
+   set invalid. Rows from several lines merge; a repeated `id` makes the set
+   invalid.
 
 The provider always emits one `acceptance-criteria` artifact whose JSON content
 has `status` (`loaded`, `absent`, or `invalid`), `reason`, `sources`, and

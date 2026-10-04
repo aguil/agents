@@ -93,6 +93,7 @@ Present only when the harness declares the `conformance` role
 | `conformance`          | `scheduled` or `not_run`                                     |
 | `conformance_reason`   | Where the criteria came from, or why the role did not run    |
 | `conformance_criteria` | Comma-separated criterion ids the role was given (scheduled) |
+| `conformance_reported` | Criterion ids the role returned a verdict for (scheduled)    |
 
 When the role emits per-row results, `result.json` also carries `outcomes`, with
 one `kind: "conformance"` entry per row (`data.criterion`, `data.status`,

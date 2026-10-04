@@ -303,7 +303,10 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-export { conformanceRunMetadata } from "./conformance";
+export {
+  conformanceReportedMetadata,
+  conformanceRunMetadata,
+} from "./conformance";
 export {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   codeReviewHarnessPackageCliDefaults,
