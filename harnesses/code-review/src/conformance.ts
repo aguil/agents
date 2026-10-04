@@ -1,5 +1,6 @@
 import {
   type AcceptanceCriteriaArtifactContent,
+  CONFORMANCE_OUTCOME_KIND,
   type Finding,
   type HarnessOutcome,
   harnessOutcomeToFinding,
@@ -107,7 +108,20 @@ export function conformanceOutcomeViolations(input: {
     .filter((finding): finding is Finding => finding !== undefined);
   return input.outcomes.flatMap((outcome) => {
     const verdict = readConformanceVerdict(outcome);
-    if (verdict === undefined || verdict.status === "satisfied") {
+    if (verdict === undefined) {
+      return outcome.kind === CONFORMANCE_OUTCOME_KIND
+        ? [
+            {
+              outcomeId: outcome.id,
+              kind: outcome.kind,
+              errors: [
+                "conformance verdict needs a string criterion, a status of satisfied, unsatisfied, or unverifiable, and a non-empty detail",
+              ],
+            },
+          ]
+        : [];
+    }
+    if (verdict.status === "satisfied") {
       return [];
     }
     const prefix = `[${verdict.criterion}]`;

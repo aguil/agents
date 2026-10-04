@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   conformanceOutcomeViolations,
+  conformanceReportedMetadata,
   conformanceRunMetadata,
 } from "@aguil/agents-code-review";
 import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
@@ -26,6 +27,7 @@ import {
   type HarnessOutcome,
   parseAcceptanceCriteria,
   readAcceptanceCriteriaArtifact,
+  readConformanceVerdict,
 } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
 import { renderMarkdownReport } from "@aguil/agents-reporting";
@@ -765,4 +767,22 @@ test("an unsatisfied verdict without its finding fails the conformance role", as
       "The conformance role failed",
     );
   });
+});
+
+test("a verdict without detail is not counted and fails the role", () => {
+  expect(
+    readConformanceVerdict(conformanceOutcome("AC-1", "satisfied", "  ")),
+  ).toBeUndefined();
+  expect(
+    conformanceOutcomeViolations({
+      roleId: "conformance",
+      outcomes: [conformanceOutcome("AC-1", "satisfied", "")],
+    }).map((violation) => violation.outcomeId),
+  ).toEqual(["conformance-AC-1"]);
+  expect(
+    conformanceReportedMetadata({
+      metadata: { conformance: "scheduled", conformance_criteria: "AC-1" },
+      outcomes: [conformanceOutcome("AC-1", "satisfied", "")],
+    }),
+  ).toEqual({ conformance_reported: "" });
 });
