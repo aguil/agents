@@ -8,7 +8,10 @@ import {
   conformanceRunMetadata,
 } from "@aguil/agents-code-review";
 import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
-import { formatReviewCoverageSectionLines } from "@aguil/agents-code-review-post";
+import {
+  buildPendingReviewSummaryBody,
+  formatReviewCoverageSectionLines,
+} from "@aguil/agents-code-review-post";
 import {
   AcceptanceCriteriaProvider,
   acceptanceCriteriaFromArtifacts,
@@ -791,6 +794,10 @@ test("posted coverage does not call a review complete when conformance failed", 
   for (const problem of [
     { failed_roles: "conformance" },
     { timed_out_roles: "conformance" },
+    {
+      completed_roles: "security,quality,compliance,conformance",
+      conformance_reported: "",
+    },
   ]) {
     const lines = formatReviewCoverageSectionLines({
       triage: "lite",
@@ -801,8 +808,10 @@ test("posted coverage does not call a review complete when conformance failed", 
     });
     expect(lines.join("\n")).not.toContain("All scheduled reviewers");
     expect(
-      lines.some((line) =>
-        line.startsWith("- **Plan Conformance:** not performed"),
+      lines.some(
+        (line) =>
+          line.startsWith("- **Plan Conformance:**") &&
+          (line.includes("not performed") || line.includes("**no result**")),
       ),
     ).toBe(true);
   }
@@ -868,4 +877,31 @@ test("a finding sharing a verdict's id does not hide the verdict", async () => {
     expect(result.metadata?.failed_roles).toBe("conformance");
     expect(result.status).not.toBe("passed");
   });
+});
+
+test("a clean review with unchecked criteria does not close green", () => {
+  const body = (runMetadata: Readonly<Record<string, string>>) =>
+    ["triage", "impact", "evidence"].map((style) =>
+      buildPendingReviewSummaryBody({
+        style: style as "triage" | "impact" | "evidence",
+        findings: [],
+        postedCommentCount: 0,
+        skippedUnanchorable: 0,
+        runMetadata: {
+          triage: "full",
+          completed_roles:
+            "security,performance,quality,compliance,conformance",
+          conformance: "scheduled",
+          conformance_criteria: "AC-1,AC-2",
+          ...runMetadata,
+        },
+      }),
+    );
+  for (const text of body({ conformance_reported: "AC-1" })) {
+    expect(text).not.toContain("code looks good");
+    expect(text).toContain("plan conformance is incomplete");
+  }
+  for (const text of body({ conformance_reported: "AC-1,AC-2" })) {
+    expect(text).toContain("✅ No findings - code looks good!");
+  }
 });

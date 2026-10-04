@@ -1587,10 +1587,7 @@ export function formatReviewCoverageSectionLines(
   // The tier lists above leave conformance out (it is not a tier role), so a
   // failed or timed-out conformance run has to count here explicitly or the
   // summary below would call the review complete (ADR 0025).
-  const conformanceIncomplete =
-    parsed.conformance === "scheduled" &&
-    (timedOutRolesRaw.includes(CODE_REVIEW_CONFORMANCE_ROLE_ID) ||
-      failedRolesRaw.includes(CODE_REVIEW_CONFORMANCE_ROLE_ID));
+  const conformanceIncomplete = conformanceCoverageIncomplete(parsed);
 
   const hasProblem =
     skippedByTriage.length > 0 ||
@@ -1645,6 +1642,43 @@ export function formatReviewCoverageSectionLines(
 
   lines.push(...formatConformanceCoverageLines(parsed));
   return lines;
+}
+
+/**
+ * Whether a scheduled conformance check left any row unchecked: the role
+ * failed or timed out, or it finished without a verdict for every criterion.
+ * Runs recorded before per-row tracking count as complete when the role
+ * finished, which is all they can show.
+ */
+function conformanceCoverageIncomplete(
+  parsed: ReturnType<typeof parseCodeReviewRunMetadata>,
+): boolean {
+  if (parsed.conformance !== "scheduled") {
+    return false;
+  }
+  const roleId = CODE_REVIEW_CONFORMANCE_ROLE_ID;
+  if (
+    parsed.timedOutRoles.includes(roleId) ||
+    parsed.failedRoles.includes(roleId)
+  ) {
+    return true;
+  }
+  const reported = parsed.conformanceReported;
+  return (
+    reported !== undefined &&
+    parsed.conformanceCriteria.some(
+      (criterion) => !reported.includes(criterion),
+    )
+  );
+}
+
+/** Closing line for a review with no findings; never green over a gap. */
+function noFindingsClosingLine(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): string {
+  return conformanceCoverageIncomplete(parseCodeReviewRunMetadata(runMetadata))
+    ? "No findings, but plan conformance is incomplete: see Review coverage."
+    : "✅ No findings - code looks good!";
 }
 
 /**
@@ -1720,7 +1754,7 @@ function renderTriageSummary(
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
-    lines.push("", "✅ No findings - code looks good!");
+    lines.push("", noFindingsClosingLine(runMetadata));
     return lines.join("\n");
   }
 
@@ -1757,7 +1791,7 @@ function renderImpactSummary(
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
-    lines.push("", "✅ No findings - code looks good!");
+    lines.push("", noFindingsClosingLine(runMetadata));
     return lines.join("\n");
   }
 
@@ -1858,7 +1892,7 @@ function renderEvidenceSummary(
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
-    lines.push("", "✅ No findings - code looks good!");
+    lines.push("", noFindingsClosingLine(runMetadata));
     return lines.join("\n");
   }
 
