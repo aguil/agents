@@ -304,15 +304,22 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 export {
+  conformanceOutcomeViolations,
+  conformanceReportedMetadata,
+  conformanceRunMetadata,
+} from "./conformance";
+export {
   CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT,
   codeReviewHarnessPackageCliDefaults,
 } from "./harness-package-defaults";
 export type {
+  CodeReviewConformanceState,
   CodeReviewRoleId,
   CodeReviewRunMetadata,
   RunMetadataSchema,
 } from "./review-contract";
 export {
+  CODE_REVIEW_CONFORMANCE_ROLE_ID,
   CODE_REVIEW_ROLE_IDS,
   CODE_REVIEW_RUN_METADATA_KEYS,
   expectedRolesForTriageTier,

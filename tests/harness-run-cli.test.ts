@@ -782,3 +782,149 @@ test("harness run surfaces loader errors with a nonzero exit", async () => {
   expect(result.exitCode).toBe(1);
   expect(result.stderr).toContain('harness "no-such-harness" not readable');
 });
+
+test("harness run reports plan conformance like agents code-review", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-conformance-"));
+  const agentsDir = await mkdtemp(
+    join(tmpdir(), "harness-conformance-agents-"),
+  );
+  try {
+    const {
+      mkdir: mkdirP,
+      writeFile: writeFileP,
+      readFile: readFileP,
+      readdir: readdirP,
+    } = await import("node:fs/promises");
+    const dir = join(agentsDir, "harnesses", "planned");
+    await mkdirP(dir, { recursive: true });
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: planned }",
+        "context:",
+        "  providers:",
+        "    - use: acceptance-criteria",
+        "      path: criteria.json",
+        "reporting:",
+        "  template: builtin:code-review-markdown",
+        "roles:",
+        "  quality:",
+        "    description: Q",
+        '    prompt: "p"',
+        "  conformance:",
+        "    description: C",
+        '    prompt: "p"',
+        "    enabled: acceptance_criteria > 0",
+      ].join("\n"),
+    );
+    const runsDir = join(workspace, ".agents-harness", "runs");
+    const latestReport = async (): Promise<string> => {
+      const runs = (await readdirP(runsDir)).sort();
+      return await readFileP(
+        join(runsDir, runs[runs.length - 1] ?? "", "report.md"),
+        "utf8",
+      );
+    };
+    const run = () =>
+      runHarnessCli([
+        "planned",
+        "--agents-dir",
+        agentsDir,
+        "--workspace",
+        workspace,
+        "--adapter",
+        "fake",
+      ]);
+
+    await run();
+    expect(await latestReport()).toContain(
+      "## Plan Conformance\n\nNot run: no acceptance criteria supplied",
+    );
+
+    await writeFileP(
+      join(workspace, "criteria.json"),
+      JSON.stringify({
+        version: 1,
+        criteria: [{ id: "AC-1", statement: "Holds." }],
+      }),
+    );
+    // Run ids sort by a random suffix within the same second, so clear the
+    // first run rather than relying on "latest" ordering.
+    await rm(runsDir, { recursive: true, force: true });
+    const scheduled = await run();
+    expect(scheduled.stdout).toContain("conformance");
+    const report = await latestReport();
+    // The fake agent reports nothing, so the row is listed, not dropped.
+    expect(report).toContain("1 criterion: 0 satisfied");
+    expect(report).toContain("- ❔ **AC-1**: no result.");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});
+
+test("harness run leaves an unrelated conformance role alone", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-own-conformance-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-own-conformance-a-"));
+  try {
+    const { mkdir: mkdirP, writeFile: writeFileP } = await import(
+      "node:fs/promises"
+    );
+    const dir = join(agentsDir, "harnesses", "own");
+    await mkdirP(dir, { recursive: true });
+    // A role named `conformance`, but no acceptance-criteria provider.
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: own }",
+        "roles:",
+        "  conformance:",
+        "    description: C",
+        '    prompt: "p"',
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "own",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    expect(result.stdout).toContain("roles completed: conformance");
+    expect(result.stdout).not.toContain("roles failed");
+
+    // The fake agent emits nothing, so check the validator directly with a
+    // conformance outcome that is not a code-review verdict.
+    const { roleOutcomeValidator } = await import(
+      "../packages/cli/src/harness-run-main"
+    );
+    const ownOutcome = {
+      id: "own-1",
+      kind: "conformance",
+      sourceRole: "conformance",
+      title: "Own shape",
+      data: { score: 3 },
+    };
+    expect(
+      roleOutcomeValidator({ contextProviders: [], outputSchemas: undefined })({
+        roleId: "conformance",
+        outcomes: [ownOutcome],
+      }),
+    ).toEqual([]);
+    expect(
+      roleOutcomeValidator({
+        contextProviders: [{ use: "acceptance-criteria", params: {} }],
+        outputSchemas: undefined,
+      })({ roleId: "conformance", outcomes: [ownOutcome] }),
+    ).toHaveLength(1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});

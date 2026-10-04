@@ -130,3 +130,9 @@ so it is upheld in review.
   binding defaults, recency-then-identifier admission order, and overflow
   recorded in the bundle rather than failing the run. Qualifies ADR 0017 §6 on
   where the budget is declared.
+- [0025-plan-conformance-role.md](0025-plan-conformance-role.md) — ADR 0025: an
+  optional code-review `conformance` role checks a change against
+  acceptance-criteria rows; one row format meant to be shared with an
+  author-side self-review trace; an `acceptance-criteria` provider that records
+  why rows are absent; an always-bound `acceptance_criteria` CEL count; per-row
+  outcomes plus findings for rows that are not satisfied.

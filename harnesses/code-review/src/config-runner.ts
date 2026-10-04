@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  acceptanceCriteriaFromArtifacts,
+  acceptanceCriteriaRowCount,
   type ContextBundle,
   collectContextBundle,
   resolveContextProvider,
@@ -39,6 +41,11 @@ import {
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import {
+  conformanceOutcomeViolations,
+  conformanceReportedMetadata,
+  conformanceRunMetadata,
+} from "./conformance";
+import {
   type CodeReviewRunResult,
   defaultCommandsForVcsMode,
   detectWorkspaceVcsMode,
@@ -47,7 +54,10 @@ import {
   parseTriageTier,
   writeLatestCodeReviewDiscoveryPointer,
 } from "./index";
-import { CODE_REVIEW_RUN_METADATA_KEYS } from "./review-contract";
+import {
+  CODE_REVIEW_CONFORMANCE_ROLE_ID,
+  CODE_REVIEW_RUN_METADATA_KEYS,
+} from "./review-contract";
 
 export type ConfigHarnessSourceKind =
   | "explicit"
@@ -202,6 +212,11 @@ export interface ConfigCodeReviewRunOptions {
   /** Replay seam: skip provider collection and load this bundle instead. */
   readonly contextBundlePath?: string;
   readonly reviewPrNumber?: number;
+  /**
+   * Operator-supplied acceptance-criteria file (`--criteria`); takes
+   * precedence over the provider's own sources (ADR 0025).
+   */
+  readonly acceptanceCriteriaPath?: string;
   readonly adapter?: AgentAdapter;
   readonly metadata?: Readonly<Record<string, string>>;
   readonly onEvent?: (event: AgentEvent) => void | Promise<void>;
@@ -296,6 +311,38 @@ function assertTrustedHostExec(
 }
 
 /**
+ * Refuse `--criteria` when the loaded harness would ignore it. The path only
+ * reaches the `acceptance-criteria` provider, and only the `conformance` role
+ * checks what it loads; a stale or customized harness missing either would
+ * otherwise finish looking like a run that checked the criteria.
+ */
+function assertConsumesCriteria(
+  loaded: LoadedHarness,
+  agentsDir: string,
+): void {
+  const missing = [
+    ...((loaded.contextProviders ?? []).some(
+      (provider) => provider.use === "acceptance-criteria",
+    )
+      ? []
+      : ["the `acceptance-criteria` context provider"]),
+    ...(loaded.definition.roles.some(
+      (role) => role.id === CODE_REVIEW_CONFORMANCE_ROLE_ID,
+    )
+      ? []
+      : [`the \`${CODE_REVIEW_CONFORMANCE_ROLE_ID}\` role`]),
+  ];
+  if (missing.length === 0) {
+    return;
+  }
+  throw new Error(
+    `code-review: --criteria was given, but the harness at ${join(agentsDir, "harnesses", CONFIG_HARNESS_ID, "harness.yaml")} ` +
+      `does not declare ${missing.join(" or ")}, so nothing would check the criteria. ` +
+      "Update the harness (`agents harness install code-review`) or run without --criteria.",
+  );
+}
+
+/**
  * Config-driven code-review run (#73 Tier 1 pass condition): every
  * behavioral decision — providers, role gating, output schemas, finding
  * pipelines, report template — comes from the loaded harness.yaml and its
@@ -307,6 +354,16 @@ function assertTrustedHostExec(
 export async function runCodeReviewFromConfig(
   options: ConfigCodeReviewRunOptions = {},
 ): Promise<CodeReviewRunResult> {
+  if (
+    options.contextBundlePath !== undefined &&
+    options.acceptanceCriteriaPath !== undefined
+  ) {
+    // A replay's criteria are whatever its recorded bundle holds; overlaying
+    // a new file would make the run neither a replay nor a fresh review.
+    throw new Error(
+      "code-review: --criteria cannot be combined with a replayed context bundle; the bundle already records its acceptance criteria. Run without --context-bundle to check against a new criteria file.",
+    );
+  }
   const workspacePath = resolve(options.workspacePath ?? process.cwd());
   const harnessSource = await resolveConfigHarnessSource(
     workspacePath,
@@ -318,6 +375,9 @@ export async function runCodeReviewFromConfig(
   });
   assertEnforceableHere(loaded, harnessSource.agentsDir);
   assertTrustedHostExec(loaded, harnessSource.source, harnessSource.agentsDir);
+  if (options.acceptanceCriteriaPath !== undefined) {
+    assertConsumesCriteria(loaded, harnessSource.agentsDir);
+  }
   const runId = options.runId ?? createRunId("code-review");
   const scratchpadRoot = resolve(
     options.scratchpadRoot ?? agentsCodeReviewRunsRoot(workspacePath),
@@ -334,6 +394,13 @@ export async function runCodeReviewFromConfig(
             workspacePath,
             scratchpadPath,
             pullRequestNumber: options.reviewPrNumber,
+            ...(options.acceptanceCriteriaPath === undefined
+              ? {}
+              : {
+                  params: {
+                    acceptanceCriteriaPath: options.acceptanceCriteriaPath,
+                  },
+                }),
           },
           (loaded.contextProviders ?? []).map((spec) =>
             resolveContextProvider(spec.use, spec.params),
@@ -355,7 +422,15 @@ export async function runCodeReviewFromConfig(
   const vcsMode = await detectWorkspaceVcsMode(workspacePath);
   await writeJsonFile(join(scratchpadPath, "triage.json"), { tier: triage });
 
-  const enablement = filterEnabledRoles(loaded.definition, { tier: triage });
+  const enablement = filterEnabledRoles(loaded.definition, {
+    tier: triage,
+    acceptance_criteria: acceptanceCriteriaRowCount(context.artifacts),
+  });
+  const conformanceMetadata = conformanceRunMetadata({
+    declaredRoleIds: loaded.definition.roles.map((role) => role.id),
+    enabledRoleIds: enablement.definition.roles.map((role) => role.id),
+    criteria: acceptanceCriteriaFromArtifacts(context.artifacts),
+  });
   const definition = {
     ...enablement.definition,
     // Union, because the two lists answer different questions and neither may
@@ -399,13 +474,15 @@ export async function runCodeReviewFromConfig(
           },
     contextBundlePath: writtenContext.jsonPath,
     ...(passGate === undefined ? {} : { passGate }),
-    ...(outputSchemas === undefined
-      ? {}
-      : {
-          validateRoleOutcomes: (input: {
-            readonly outcomes: readonly import("@aguil/agents-core").HarnessOutcome[];
-          }) => validateOutcomesAgainstSchemas(input.outcomes, outputSchemas),
-        }),
+    validateRoleOutcomes: (input: {
+      readonly roleId: string;
+      readonly outcomes: readonly import("@aguil/agents-core").HarnessOutcome[];
+    }) => [
+      ...(outputSchemas === undefined
+        ? []
+        : validateOutcomesAgainstSchemas(input.outcomes, outputSchemas)),
+      ...conformanceOutcomeViolations(input),
+    ],
   });
 
   /**
@@ -434,6 +511,7 @@ export async function runCodeReviewFromConfig(
           pr_reviewed_head_sha: reviewPrMetadata.headSha ?? "",
           pr_reviewed_at: reviewPrMetadata.reviewedAt,
         }),
+    ...conformanceMetadata,
     ...options.metadata,
   };
 
@@ -478,6 +556,10 @@ export async function runCodeReviewFromConfig(
     consensus_runs: "1",
     consensus_mode: "off",
     consensus_dropped_findings: "0",
+    ...conformanceReportedMetadata({
+      metadata: baseMetadata,
+      outcomes: rawResult.outcomes,
+    }),
   };
   // Parity subtlety: runCodeReview derives the pre-combine status through
   // combinePassResults, which is findings-BLIND (error/failed/timeout,

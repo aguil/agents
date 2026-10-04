@@ -83,6 +83,22 @@ Present on every config-declared code-review run.
 | `consensus_mode`             | `"off"` or `"intersection"`             |
 | `consensus_dropped_findings` | Count of findings filtered by consensus |
 
+### Plan conformance
+
+Present only when the harness declares the `conformance` role
+([ADR 0025](../../../adr/0025-plan-conformance-role.md)).
+
+| Field                  | Description                                                  |
+| ---------------------- | ------------------------------------------------------------ |
+| `conformance`          | `scheduled` or `not_run`                                     |
+| `conformance_reason`   | Where the criteria came from, or why the role did not run    |
+| `conformance_criteria` | Comma-separated criterion ids the role was given (scheduled) |
+| `conformance_reported` | Criterion ids the role returned a verdict for (scheduled)    |
+
+When the role emits per-row results, `result.json` also carries `outcomes`, with
+one `kind: "conformance"` entry per row (`data.criterion`, `data.status`,
+`data.detail`). Runs with no such outcome keep the shape without `outcomes`.
+
 ### PR context
 
 | Field                  | Description                                                      |

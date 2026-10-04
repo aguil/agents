@@ -1,6 +1,14 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
+  conformanceOutcomeViolations,
+  conformanceReportedMetadata,
+  conformanceRunMetadata,
+} from "@aguil/agents-code-review";
+import type { ContextArtifact } from "@aguil/agents-context";
+import {
+  acceptanceCriteriaFromArtifacts,
+  acceptanceCriteriaRowCount,
   collectContextBundle,
   resolveContextProvider,
   writeContextBundle,
@@ -370,7 +378,12 @@ export async function runHarnessRunCli(
   const scratchpadPath = join(workspacePath, ".agents-harness", "runs", runId);
   await mkdir(scratchpadPath, { recursive: true });
   let contextBundlePath: string;
-  const enablementEnv: Record<string, string | number | boolean> = {};
+  // A row count has an exact meaning when nothing was collected (no rows),
+  // unlike `tier`, so it is always bound (ADR 0025).
+  const enablementEnv: Record<string, string | number | boolean> = {
+    acceptance_criteria: 0,
+  };
+  let collectedArtifacts: readonly ContextArtifact[] = [];
   if (loaded.contextProviders !== undefined) {
     // Declared providers resolve against the builtin registry; resolution
     // errors (unknown name, bad params) abort before any role runs.
@@ -392,6 +405,10 @@ export async function runHarnessRunCli(
       if (tier !== undefined) {
         enablementEnv.tier = tier;
       }
+      enablementEnv.acceptance_criteria = acceptanceCriteriaRowCount(
+        bundle.artifacts,
+      );
+      collectedArtifacts = bundle.artifacts;
     } catch (error) {
       console.error(
         `harness run: context collection failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -433,12 +450,7 @@ export async function runHarnessRunCli(
   }
 
   const passGate = makePassGate(loaded.definition.execution, workspacePath);
-  const outputSchemas = loaded.outputSchemas;
-  const validateRoleOutcomes =
-    outputSchemas === undefined
-      ? undefined
-      : (input: { readonly outcomes: readonly HarnessOutcome[] }) =>
-          validateOutcomesAgainstSchemas(input.outcomes, outputSchemas);
+  const validateRoleOutcomes = roleOutcomeValidator(loaded);
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
@@ -447,7 +459,7 @@ export async function runHarnessRunCli(
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),
     ...(passGate === undefined ? {} : { passGate }),
-    ...(validateRoleOutcomes === undefined ? {} : { validateRoleOutcomes }),
+    validateRoleOutcomes,
   });
 
   const cursorApproval =
@@ -457,21 +469,41 @@ export async function runHarnessRunCli(
         )
       : undefined;
 
-  const result = await orchestrator.run({
+  // Same conformance bookkeeping as `agents code-review` (ADR 0025): empty
+  // unless the harness declares a `conformance` role, so other harnesses'
+  // results and reports are unchanged.
+  const conformanceMetadata = conformanceRunMetadata({
+    declaredRoleIds: loaded.definition.roles.map((role) => role.id),
+    enabledRoleIds: definition.roles.map((role) => role.id),
+    criteria: acceptanceCriteriaFromArtifacts(collectedArtifacts),
+  });
+  const runMetadata = {
+    ...conformanceMetadata,
+    ...(cursorApproval === undefined
+      ? {}
+      : {
+          cursor_force: cursorApproval.force ? "true" : "false",
+          cursor_sandbox: cursorApproval.sandbox ?? "",
+        }),
+  };
+  const ranResult = await orchestrator.run({
     runId,
     harnessId: parsed.harnessId,
     workspacePath,
     scratchpadPath,
     strictMode: parsed.strict,
-    ...(cursorApproval === undefined
-      ? {}
-      : {
-          metadata: {
-            cursor_force: cursorApproval.force ? "true" : "false",
-            cursor_sandbox: cursorApproval.sandbox ?? "",
-          },
-        }),
+    ...(Object.keys(runMetadata).length === 0 ? {} : { metadata: runMetadata }),
   });
+  const result = {
+    ...ranResult,
+    metadata: {
+      ...ranResult.metadata,
+      ...conformanceReportedMetadata({
+        metadata: conformanceMetadata,
+        outcomes: ranResult.outcomes,
+      }),
+    },
+  };
 
   // Declared pipelines shape the reported findings the same way the
   // code-review package does imperatively (it renders report.md AFTER
@@ -552,4 +584,32 @@ export async function runHarnessRunCli(
   }
   console.log(`artifacts: ${scratchpadPath}`);
   return status === "passed" ? 0 : 1;
+}
+
+/**
+ * Per-role output check for `harness run`: declared outcome schemas, plus the
+ * conformance contract (ADR 0025) only for a harness that opts into it by
+ * collecting acceptance criteria. Any other harness may have its own role
+ * named `conformance` with its own outcome shape.
+ */
+export function roleOutcomeValidator(
+  loaded: Pick<LoadedHarness, "contextProviders" | "outputSchemas">,
+): (input: {
+  readonly roleId: string;
+  readonly outcomes: readonly HarnessOutcome[];
+}) => readonly {
+  readonly outcomeId: string;
+  readonly kind: string;
+  readonly errors: readonly string[];
+}[] {
+  const outputSchemas = loaded.outputSchemas;
+  const checksConformance = (loaded.contextProviders ?? []).some(
+    (provider) => provider.use === "acceptance-criteria",
+  );
+  return (input) => [
+    ...(outputSchemas === undefined
+      ? []
+      : validateOutcomesAgainstSchemas(input.outcomes, outputSchemas)),
+    ...(checksConformance ? conformanceOutcomeViolations(input) : []),
+  ];
 }

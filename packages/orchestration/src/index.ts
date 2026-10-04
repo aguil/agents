@@ -410,10 +410,14 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     };
 
     // Outcomes are the opt-in surface for execution-configured harnesses;
-    // legacy definitions keep the pre-generalization result shape. Status
-    // ownership is separate (issue #157): findings-blind only when a gate
-    // owns the run, not merely because `execution` is declared.
-    const emitOutcomes = this.options.definition.execution !== undefined;
+    // legacy definitions keep the pre-generalization result shape unless a
+    // role actually emitted a non-finding outcome (code-review's conformance
+    // rows, ADR 0025), which would otherwise be dropped. Status ownership is
+    // separate (issue #157): findings-blind only when a gate owns the run,
+    // not merely because `execution` is declared.
+    const emitOutcomes =
+      this.options.definition.execution !== undefined ||
+      outcomes.some((outcome) => outcome.genericOutcomes.length > 0);
     const findingsBlind = harnessStatusIsFindingsBlind(
       this.options.definition.execution,
       {
@@ -546,7 +550,10 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
         !seenOutcomeIds.has(event.data.id)
       ) {
         seenOutcomeIds.add(event.data.id);
-        genericOutcomes.push(event.data);
+        // The role that ran is the source, whatever the agent wrote: run-level
+        // consumers (conformance verdicts, ADR 0025) trust sourceRole to tell
+        // which reviewer produced an outcome.
+        genericOutcomes.push({ ...event.data, sourceRole: role.id });
       }
       if (event.type === "error") {
         outcome = hasTimedOut(event.data) ? "timed_out" : "failed";
@@ -607,20 +614,24 @@ function resolveRoleOrder(
 }
 
 function roleHarnessOutcomes(outcome: RoleRunOutcome): HarnessOutcome[] {
-  // The outcomes view is deduped by id (first wins): a stream-echoed
-  // duplicate finding must not appear twice after conversion. Deliberately
-  // NOT applied to result.findings itself — code-review reporting owns
-  // finding dedup (canonical fingerprint), and its semantics differ.
+  // The outcomes view is deduped by kind and id (first wins): a
+  // stream-echoed duplicate finding must not appear twice after conversion.
+  // Keying on id alone let a finding silently drop a different-kind outcome
+  // that happened to share its id (a conformance verdict, ADR 0025).
+  // Deliberately NOT applied to result.findings itself — code-review
+  // reporting owns finding dedup (canonical fingerprint), and its semantics
+  // differ.
   const seen = new Set<string>();
   const combined = [
     ...outcome.findings.map(findingToHarnessOutcome),
     ...outcome.genericOutcomes,
   ];
   return combined.filter((entry) => {
-    if (seen.has(entry.id)) {
+    const key = JSON.stringify([entry.kind, entry.id]);
+    if (seen.has(key)) {
       return false;
     }
-    seen.add(entry.id);
+    seen.add(key);
     return true;
   });
 }

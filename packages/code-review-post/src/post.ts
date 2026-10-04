@@ -2,6 +2,7 @@ import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import {
+  CODE_REVIEW_CONFORMANCE_ROLE_ID,
   CODE_REVIEW_ROLE_IDS,
   type CodeReviewRoleId,
   expectedRolesForTriageTier,
@@ -1583,11 +1584,17 @@ export function formatReviewCoverageSectionLines(
     );
   }
 
+  // The tier lists above leave conformance out (it is not a tier role), so a
+  // failed or timed-out conformance run has to count here explicitly or the
+  // summary below would call the review complete (ADR 0025).
+  const conformanceIncomplete = conformanceCoverageIncomplete(parsed);
+
   const hasProblem =
     skippedByTriage.length > 0 ||
     timedOut.length > 0 ||
     failed.length > 0 ||
-    missingOutcome.length > 0;
+    missingOutcome.length > 0 ||
+    conformanceIncomplete;
 
   const lines: string[] = ["", "### Review coverage"];
 
@@ -1633,7 +1640,94 @@ export function formatReviewCoverageSectionLines(
     );
   }
 
+  lines.push(...formatConformanceCoverageLines(parsed));
   return lines;
+}
+
+/**
+ * Whether a scheduled conformance check left any row unchecked: the role
+ * failed or timed out, or it finished without a verdict for every criterion.
+ * Runs recorded before per-row tracking count as complete when the role
+ * finished, which is all they can show.
+ */
+function conformanceCoverageIncomplete(
+  parsed: ReturnType<typeof parseCodeReviewRunMetadata>,
+): boolean {
+  if (parsed.conformance !== "scheduled") {
+    return false;
+  }
+  const roleId = CODE_REVIEW_CONFORMANCE_ROLE_ID;
+  if (
+    parsed.timedOutRoles.includes(roleId) ||
+    parsed.failedRoles.includes(roleId)
+  ) {
+    return true;
+  }
+  const reported = parsed.conformanceReported;
+  return (
+    reported !== undefined &&
+    parsed.conformanceCriteria.some(
+      (criterion) => !reported.includes(criterion),
+    )
+  );
+}
+
+/** Closing line for a review with no findings; never green over a gap. */
+function noFindingsClosingLine(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): string {
+  return conformanceCoverageIncomplete(parseCodeReviewRunMetadata(runMetadata))
+    ? "No findings, but plan conformance is incomplete: see Review coverage."
+    : "✅ No findings - code looks good!";
+}
+
+/**
+ * The conformance role is gated by supplied criteria, not by triage tier
+ * (ADR 0025), so the tier bookkeeping above never mentions it. State it on
+ * its own line whenever the harness declared it, including why it did not run.
+ */
+function formatConformanceCoverageLines(
+  parsed: ReturnType<typeof parseCodeReviewRunMetadata>,
+): readonly string[] {
+  const label = `**${roleReviewSectionLabel(CODE_REVIEW_CONFORMANCE_ROLE_ID)}:**`;
+  if (parsed.conformance === "not_run") {
+    return [
+      `- ${label} not performed — ${parsed.conformanceReason ?? "no reason recorded"}.`,
+    ];
+  }
+  if (parsed.conformance !== "scheduled") {
+    return [];
+  }
+  const roleId = CODE_REVIEW_CONFORMANCE_ROLE_ID;
+  if (parsed.timedOutRoles.includes(roleId)) {
+    return [
+      `- ${label} not performed — reviewer **timed out** before completion.`,
+    ];
+  }
+  if (parsed.failedRoles.includes(roleId)) {
+    return [
+      `- ${label} not performed — reviewer **failed** (adapter error or non-timeout failure).`,
+    ];
+  }
+  const criteria = parsed.conformanceCriteria;
+  const count = criteria.length;
+  const noun = `acceptance criteri${count === 1 ? "on" : "a"}`;
+  if (parsed.conformanceReported === undefined) {
+    // Recorded before per-row results were tracked: say only what is known.
+    return [
+      `- ${label} ran against ${count} ${noun} (${criteria.join(", ")}); per-row results not recorded.`,
+    ];
+  }
+  const reported = new Set(parsed.conformanceReported);
+  const missing = criteria.filter((criterion) => !reported.has(criterion));
+  if (missing.length === 0) {
+    return [
+      `- ${label} checked against ${count} ${noun} (${criteria.join(", ")}).`,
+    ];
+  }
+  return [
+    `- ${label} checked ${count - missing.length} of ${count} ${noun}; **no result** for ${missing.join(", ")} (treat as unchecked).`,
+  ];
 }
 
 function renderTriageSummary(
@@ -1660,7 +1754,7 @@ function renderTriageSummary(
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
-    lines.push("", "✅ No findings - code looks good!");
+    lines.push("", noFindingsClosingLine(runMetadata));
     return lines.join("\n");
   }
 
@@ -1697,7 +1791,7 @@ function renderImpactSummary(
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
-    lines.push("", "✅ No findings - code looks good!");
+    lines.push("", noFindingsClosingLine(runMetadata));
     return lines.join("\n");
   }
 
@@ -1798,7 +1892,7 @@ function renderEvidenceSummary(
   lines.push(...formatReviewCoverageSectionLines(runMetadata));
 
   if (findings.length === 0) {
-    lines.push("", "✅ No findings - code looks good!");
+    lines.push("", noFindingsClosingLine(runMetadata));
     return lines.join("\n");
   }
 

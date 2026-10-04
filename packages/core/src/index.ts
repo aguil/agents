@@ -2,6 +2,22 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 export {
+  ACCEPTANCE_CRITERIA_ARTIFACT_ID,
+  ACCEPTANCE_CRITERIA_FORMAT_VERSION,
+  type AcceptanceCriteriaArtifactContent,
+  type AcceptanceCriteriaDocument,
+  type AcceptanceCriterion,
+  type AcceptanceCriterionCheck,
+  CONFORMANCE_OUTCOME_KIND,
+  CONFORMANCE_STATUSES,
+  type ConformanceStatus,
+  type ConformanceVerdict,
+  type ParsedAcceptanceCriteria,
+  parseAcceptanceCriteria,
+  readAcceptanceCriteriaArtifact,
+  readConformanceVerdict,
+} from "./acceptance-criteria";
+export {
   AGENTS_CODE_REVIEW_DIR,
   agentsCodeReviewDryRunRoot,
   agentsCodeReviewRunsRoot,

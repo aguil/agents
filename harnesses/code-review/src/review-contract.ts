@@ -12,7 +12,30 @@ export const CODE_REVIEW_RUN_METADATA_KEYS = {
    * (ADR 0019 §4).
    */
   unsubstantiatedFindings: "unsubstantiated_findings",
+  /**
+   * `scheduled` or `not_run` for the optional conformance role (ADR 0025).
+   * Absent when the harness declares no such role.
+   */
+  conformance: "conformance",
+  /** Why the conformance role was or was not scheduled. */
+  conformanceReason: "conformance_reason",
+  /** Comma-separated criterion ids the conformance role was given. */
+  conformanceCriteria: "conformance_criteria",
+  /**
+   * Comma-separated criterion ids the role returned a verdict for, in
+   * criteria order. Present only when the role was scheduled.
+   */
+  conformanceReported: "conformance_reported",
 } as const;
+
+/**
+ * Optional role that checks a change against acceptance-criteria rows
+ * (ADR 0025). Gated by its own CEL binding, not by triage tier, so it is
+ * deliberately absent from {@link CODE_REVIEW_ROLE_IDS}.
+ */
+export const CODE_REVIEW_CONFORMANCE_ROLE_ID = "conformance";
+
+export type CodeReviewConformanceState = "scheduled" | "not_run";
 
 /** Canonical full role order for scheduling and review-coverage summaries. */
 export const CODE_REVIEW_ROLE_IDS = [
@@ -39,6 +62,12 @@ export interface CodeReviewRunMetadata {
    * older runs, which is why it parses to 0 rather than being required.
    */
   readonly unsubstantiatedFindings: number;
+  /** Undefined when the run's harness declared no conformance role. */
+  readonly conformance: CodeReviewConformanceState | undefined;
+  readonly conformanceReason: string | undefined;
+  readonly conformanceCriteria: readonly string[];
+  /** Undefined when not recorded (role not scheduled, or an older run). */
+  readonly conformanceReported: readonly string[] | undefined;
 }
 
 /** Same type as {@link CodeReviewRunMetadata}; named for tooling / schema references. */
@@ -76,6 +105,10 @@ export function parseCodeReviewRunMetadata(
       timedOutRoles: [],
       failedRoles: [],
       unsubstantiatedFindings: 0,
+      conformance: undefined,
+      conformanceReason: undefined,
+      conformanceCriteria: [],
+      conformanceReported: undefined,
     };
   }
   const trimmedTriage =
@@ -96,7 +129,28 @@ export function parseCodeReviewRunMetadata(
     unsubstantiatedFindings: parseMetadataCount(
       record[CODE_REVIEW_RUN_METADATA_KEYS.unsubstantiatedFindings],
     ),
+    conformance: parseConformanceState(
+      record[CODE_REVIEW_RUN_METADATA_KEYS.conformance],
+    ),
+    conformanceReason:
+      record[CODE_REVIEW_RUN_METADATA_KEYS.conformanceReason]?.trim() ||
+      undefined,
+    conformanceCriteria: parseMetadataRolesList(
+      record[CODE_REVIEW_RUN_METADATA_KEYS.conformanceCriteria],
+    ),
+    conformanceReported:
+      record[CODE_REVIEW_RUN_METADATA_KEYS.conformanceReported] === undefined
+        ? undefined
+        : parseMetadataRolesList(
+            record[CODE_REVIEW_RUN_METADATA_KEYS.conformanceReported],
+          ),
   };
+}
+
+function parseConformanceState(
+  raw: string | undefined,
+): CodeReviewConformanceState | undefined {
+  return raw === "scheduled" || raw === "not_run" ? raw : undefined;
 }
 
 /**
@@ -134,6 +188,9 @@ export function roleReviewSectionLabel(roleId: string): string {
   }
   if (roleId === "compliance") {
     return "Documentation / Compliance";
+  }
+  if (roleId === CODE_REVIEW_CONFORMANCE_ROLE_ID) {
+    return "Plan Conformance";
   }
   return roleId;
 }

@@ -33,6 +33,12 @@ export interface CliOptions {
   /** Comma-separated finding ids, or `all`, to publish despite being unsubstantiated. */
   readonly includeUnsubstantiated?: string;
   /**
+   * Acceptance-criteria file for the conformance role (ADR 0025). CLI-only:
+   * which plan a change is checked against is a per-run choice, and the path
+   * may sit outside the workspace, so repo JSON must not be able to set it.
+   */
+  readonly criteria?: string;
+  /**
    * Explicit `.agents/` directory for harness resolution; flag/env only.
    * Repo JSON must not choose harness definitions for another checkout.
    */

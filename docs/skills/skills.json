@@ -4,7 +4,7 @@
     {
       "id": "self-review-checks",
       "path": "self-review-checks/SKILL.md",
-      "summary": "PR author checklist: gates, agents code-review, agents triage, one commit per finding; draft → ready for review.",
+      "summary": "PR author checklist: gates, agents code-review, agents triage, one commit per finding, constraint trace against acceptance criteria; draft → ready for review.",
       "minAgentsVersion": "0.0.0",
       "tags": ["code-review", "triage"]
     },
