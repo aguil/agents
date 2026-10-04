@@ -264,6 +264,11 @@ function renderConformanceSection(result: HarnessRunResult): readonly string[] {
 
   const verdicts = new Map<string, ConformanceVerdict>();
   for (const outcome of result.outcomes ?? []) {
+    // Only the conformance role's verdicts count; the orchestrator stamps
+    // sourceRole with the role that actually ran.
+    if (outcome.sourceRole !== "conformance") {
+      continue;
+    }
     const verdict = readConformanceVerdict(outcome);
     if (verdict !== undefined && !verdicts.has(verdict.criterion)) {
       verdicts.set(verdict.criterion, verdict);

@@ -71,6 +71,11 @@ export function conformanceReportedMetadata(input: {
   }
   const reported = new Set(
     (input.outcomes ?? [])
+      // Only the conformance role's verdicts count (the orchestrator stamps
+      // sourceRole with the role that actually ran).
+      .filter(
+        (outcome) => outcome.sourceRole === CODE_REVIEW_CONFORMANCE_ROLE_ID,
+      )
       .map((outcome) => readConformanceVerdict(outcome)?.criterion)
       .filter((criterion) => criterion !== undefined),
   );
