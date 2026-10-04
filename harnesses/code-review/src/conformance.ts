@@ -1,4 +1,8 @@
-import type { AcceptanceCriteriaArtifactContent } from "@aguil/agents-core";
+import {
+  type AcceptanceCriteriaArtifactContent,
+  type HarnessOutcome,
+  readConformanceVerdict,
+} from "@aguil/agents-core";
 import {
   CODE_REVIEW_CONFORMANCE_ROLE_ID,
   CODE_REVIEW_RUN_METADATA_KEYS,
@@ -46,4 +50,32 @@ function notRunReason(
   return criteria.status === "invalid"
     ? `acceptance criteria could not be used: ${criteria.reason}`
     : criteria.reason;
+}
+
+/**
+ * Which scheduled criteria actually got a verdict, recorded after the run so
+ * consumers that only see metadata (posted reviews) cannot claim a row was
+ * checked when the role never reported it.
+ */
+export function conformanceReportedMetadata(input: {
+  readonly metadata: Readonly<Record<string, string>>;
+  readonly outcomes: readonly HarnessOutcome[] | undefined;
+}): Readonly<Record<string, string>> {
+  const keys = CODE_REVIEW_RUN_METADATA_KEYS;
+  if (input.metadata[keys.conformance] !== "scheduled") {
+    return {};
+  }
+  const reported = new Set(
+    (input.outcomes ?? [])
+      .map((outcome) => readConformanceVerdict(outcome)?.criterion)
+      .filter((criterion) => criterion !== undefined),
+  );
+  const criteria = (input.metadata[keys.conformanceCriteria] ?? "")
+    .split(",")
+    .filter((criterion) => criterion.length > 0);
+  return {
+    [keys.conformanceReported]: criteria
+      .filter((criterion) => reported.has(criterion))
+      .join(","),
+  };
 }

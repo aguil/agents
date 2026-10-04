@@ -1666,9 +1666,24 @@ function formatConformanceCoverageLines(
       `- ${label} not performed — reviewer **failed** (adapter error or non-timeout failure).`,
     ];
   }
-  const count = parsed.conformanceCriteria.length;
+  const criteria = parsed.conformanceCriteria;
+  const count = criteria.length;
+  const noun = `acceptance criteri${count === 1 ? "on" : "a"}`;
+  if (parsed.conformanceReported === undefined) {
+    // Recorded before per-row results were tracked: say only what is known.
+    return [
+      `- ${label} ran against ${count} ${noun} (${criteria.join(", ")}); per-row results not recorded.`,
+    ];
+  }
+  const reported = new Set(parsed.conformanceReported);
+  const missing = criteria.filter((criterion) => !reported.has(criterion));
+  if (missing.length === 0) {
+    return [
+      `- ${label} checked against ${count} ${noun} (${criteria.join(", ")}).`,
+    ];
+  }
   return [
-    `- ${label} checked against ${count} acceptance criteri${count === 1 ? "on" : "a"} (${parsed.conformanceCriteria.join(", ")}).`,
+    `- ${label} checked ${count - missing.length} of ${count} ${noun}; **no result** for ${missing.join(", ")} (treat as unchecked).`,
   ];
 }
 

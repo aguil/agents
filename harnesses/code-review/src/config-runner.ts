@@ -40,7 +40,10 @@ import {
   statusAfterFindingPipelines,
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
-import { conformanceRunMetadata } from "./conformance";
+import {
+  conformanceReportedMetadata,
+  conformanceRunMetadata,
+} from "./conformance";
 import {
   type CodeReviewRunResult,
   defaultCommandsForVcsMode,
@@ -550,6 +553,10 @@ export async function runCodeReviewFromConfig(
     consensus_runs: "1",
     consensus_mode: "off",
     consensus_dropped_findings: "0",
+    ...conformanceReportedMetadata({
+      metadata: baseMetadata,
+      outcomes: rawResult.outcomes,
+    }),
   };
   // Parity subtlety: runCodeReview derives the pre-combine status through
   // combinePassResults, which is findings-BLIND (error/failed/timeout,

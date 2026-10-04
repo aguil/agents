@@ -515,6 +515,7 @@ test("a change that violates a stated row gets an unsatisfied finding and a per-
     expect(result.metadata?.completed_roles).toBe("quality,conformance");
     expect(result.metadata?.conformance).toBe("scheduled");
     expect(result.metadata?.conformance_criteria).toBe("AC-1,AC-2,AC-3");
+    expect(result.metadata?.conformance_reported).toBe("AC-1,AC-2");
     expect(result.status).toBe("failed");
     expect(result.findings.map((finding) => finding.title)).toEqual([
       "[AC-2] Fallback returns early instead of using stored values",
@@ -651,11 +652,29 @@ test("posted review coverage states the conformance role's outcome", () => {
     line({
       conformance: "scheduled",
       conformance_criteria: "AC-1,AC-2",
+      conformance_reported: "AC-1,AC-2",
       completed_roles: "security,quality,compliance,conformance",
     }),
   ).toBe(
     "- **Plan Conformance:** checked against 2 acceptance criteria (AC-1, AC-2).",
   );
+  expect(
+    line({
+      conformance: "scheduled",
+      conformance_criteria: "AC-1,AC-2,AC-3",
+      conformance_reported: "AC-1,AC-2",
+      completed_roles: "security,quality,compliance,conformance",
+    }),
+  ).toBe(
+    "- **Plan Conformance:** checked 2 of 3 acceptance criteria; **no result** for AC-3 (treat as unchecked).",
+  );
+  expect(
+    line({
+      conformance: "scheduled",
+      conformance_criteria: "AC-1",
+      completed_roles: "security,quality,compliance,conformance",
+    }),
+  ).toContain("per-row results not recorded");
   expect(
     line({
       conformance: "scheduled",
