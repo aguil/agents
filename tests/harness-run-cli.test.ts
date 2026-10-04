@@ -864,3 +864,67 @@ test("harness run reports plan conformance like agents code-review", async () =>
     await rm(agentsDir, { recursive: true, force: true });
   }
 });
+
+test("harness run leaves an unrelated conformance role alone", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-own-conformance-"));
+  const agentsDir = await mkdtemp(join(tmpdir(), "harness-own-conformance-a-"));
+  try {
+    const { mkdir: mkdirP, writeFile: writeFileP } = await import(
+      "node:fs/promises"
+    );
+    const dir = join(agentsDir, "harnesses", "own");
+    await mkdirP(dir, { recursive: true });
+    // A role named `conformance`, but no acceptance-criteria provider.
+    await writeFileP(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: own }",
+        "roles:",
+        "  conformance:",
+        "    description: C",
+        '    prompt: "p"',
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "own",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    expect(result.stdout).toContain("roles completed: conformance");
+    expect(result.stdout).not.toContain("roles failed");
+
+    // The fake agent emits nothing, so check the validator directly with a
+    // conformance outcome that is not a code-review verdict.
+    const { roleOutcomeValidator } = await import(
+      "../packages/cli/src/harness-run-main"
+    );
+    const ownOutcome = {
+      id: "own-1",
+      kind: "conformance",
+      sourceRole: "conformance",
+      title: "Own shape",
+      data: { score: 3 },
+    };
+    expect(
+      roleOutcomeValidator({ contextProviders: [], outputSchemas: undefined })({
+        roleId: "conformance",
+        outcomes: [ownOutcome],
+      }),
+    ).toEqual([]);
+    expect(
+      roleOutcomeValidator({
+        contextProviders: [{ use: "acceptance-criteria", params: {} }],
+        outputSchemas: undefined,
+      })({ roleId: "conformance", outcomes: [ownOutcome] }),
+    ).toHaveLength(1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
+  }
+});

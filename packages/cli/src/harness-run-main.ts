@@ -450,17 +450,7 @@ export async function runHarnessRunCli(
   }
 
   const passGate = makePassGate(loaded.definition.execution, workspacePath);
-  const outputSchemas = loaded.outputSchemas;
-  const validateRoleOutcomes = (input: {
-    readonly roleId: string;
-    readonly outcomes: readonly HarnessOutcome[];
-  }) => [
-    ...(outputSchemas === undefined
-      ? []
-      : validateOutcomesAgainstSchemas(input.outcomes, outputSchemas)),
-    // Inert unless the harness declares a `conformance` role (ADR 0025).
-    ...conformanceOutcomeViolations(input),
-  ];
+  const validateRoleOutcomes = roleOutcomeValidator(loaded);
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
@@ -594,4 +584,32 @@ export async function runHarnessRunCli(
   }
   console.log(`artifacts: ${scratchpadPath}`);
   return status === "passed" ? 0 : 1;
+}
+
+/**
+ * Per-role output check for `harness run`: declared outcome schemas, plus the
+ * conformance contract (ADR 0025) only for a harness that opts into it by
+ * collecting acceptance criteria. Any other harness may have its own role
+ * named `conformance` with its own outcome shape.
+ */
+export function roleOutcomeValidator(
+  loaded: Pick<LoadedHarness, "contextProviders" | "outputSchemas">,
+): (input: {
+  readonly roleId: string;
+  readonly outcomes: readonly HarnessOutcome[];
+}) => readonly {
+  readonly outcomeId: string;
+  readonly kind: string;
+  readonly errors: readonly string[];
+}[] {
+  const outputSchemas = loaded.outputSchemas;
+  const checksConformance = (loaded.contextProviders ?? []).some(
+    (provider) => provider.use === "acceptance-criteria",
+  );
+  return (input) => [
+    ...(outputSchemas === undefined
+      ? []
+      : validateOutcomesAgainstSchemas(input.outcomes, outputSchemas)),
+    ...(checksConformance ? conformanceOutcomeViolations(input) : []),
+  ];
 }
