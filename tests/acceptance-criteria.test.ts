@@ -10,6 +10,7 @@ import {
   acceptanceCriteriaFromArtifacts,
   acceptanceCriteriaRowCount,
   type ContextBundle,
+  MAX_ACCEPTANCE_CRITERIA_REFERENCES,
   readBoundedResponseText,
   resolveContextProvider,
 } from "@aguil/agents-context";
@@ -204,6 +205,11 @@ test("reads Acceptance-Criteria lines from the PR description", async () => {
       "utf8",
     );
     await writeFile(
+      join(workspace, "a-again.json"),
+      JSON.stringify({ version: 1, criteria: [CRITERIA.criteria[0]] }),
+      "utf8",
+    );
+    await writeFile(
       join(workspace, "b.json"),
       JSON.stringify({ version: 1, criteria: [CRITERIA.criteria[1]] }),
       "utf8",
@@ -233,10 +239,35 @@ test("reads Acceptance-Criteria lines from the PR description", async () => {
     );
     expect(noPr.status).toBe("absent");
 
+    const repeated = await collectCriteria(
+      new AcceptanceCriteriaProvider({
+        commandRunner: prRunner("Acceptance-Criteria: b.json\n".repeat(50)),
+      }),
+      workspace,
+    );
+    expect(repeated.status).toBe("loaded");
+    expect(repeated.sources).toEqual(["b.json"]);
+
+    const tooMany = await collectCriteria(
+      new AcceptanceCriteriaProvider({
+        commandRunner: prRunner(
+          Array.from(
+            { length: MAX_ACCEPTANCE_CRITERIA_REFERENCES + 1 },
+            (_, index) => `Acceptance-Criteria: c${index}.json`,
+          ).join("\n"),
+        ),
+      }),
+      workspace,
+    );
+    expect(tooMany.status).toBe("invalid");
+    expect(tooMany.reason).toContain(
+      `at most ${MAX_ACCEPTANCE_CRITERIA_REFERENCES} are read`,
+    );
+
     const duplicate = await collectCriteria(
       new AcceptanceCriteriaProvider({
         commandRunner: prRunner(
-          "Acceptance-Criteria: a.json\nAcceptance-Criteria: a.json",
+          "Acceptance-Criteria: a.json\nAcceptance-Criteria: a-again.json",
         ),
       }),
       workspace,

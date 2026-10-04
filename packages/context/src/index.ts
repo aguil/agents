@@ -1050,6 +1050,13 @@ export interface AcceptanceCriteriaProviderOptions {
   readonly timeoutMs?: number;
 }
 
+/**
+ * Most distinct `Acceptance-Criteria:` references one PR description may
+ * name. The PR author controls the description, so the count of loads it
+ * can start has to be bounded; a slice rarely needs more than a few files.
+ */
+export const MAX_ACCEPTANCE_CRITERIA_REFERENCES = 10;
+
 /** PR-description line that points at a criteria file or URL. */
 const ACCEPTANCE_CRITERIA_PR_LINE =
   /^[ \t]*Acceptance-Criteria:[ \t]*(\S+)[ \t]*$/gim;
@@ -1120,8 +1127,18 @@ export class AcceptanceCriteriaProvider implements ContextProvider {
       );
     }
     const references = [
-      ...pullRequest.body.matchAll(ACCEPTANCE_CRITERIA_PR_LINE),
-    ].map((match) => match[1] ?? "");
+      ...new Set(
+        [...pullRequest.body.matchAll(ACCEPTANCE_CRITERIA_PR_LINE)].map(
+          (match) => match[1] ?? "",
+        ),
+      ),
+    ];
+    if (references.length > MAX_ACCEPTANCE_CRITERIA_REFERENCES) {
+      return invalidCriteria(
+        [],
+        `PR #${pullRequest.number} names ${references.length} distinct \`Acceptance-Criteria:\` references; at most ${MAX_ACCEPTANCE_CRITERIA_REFERENCES} are read`,
+      );
+    }
     if (references.length === 0) {
       return absentCriteria(
         `no acceptance criteria supplied: PR #${pullRequest.number} has no \`Acceptance-Criteria:\` line, and no --criteria path or provider \`path\` was set`,
