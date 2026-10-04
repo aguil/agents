@@ -153,9 +153,13 @@ test("Claude generator projects events, matchers, and policy bridge format", asy
   expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
     '"agents" policy-eval --format claude',
   );
-  expect(config.hooks.PostToolUse?.[0].hooks[0].command).toBe(
-    '"agents" policy-eval --format claude',
+  // The bridge is a PreToolUse hook only on Claude (ADR 0023 decision 9); the
+  // user's post_tool_call handler still maps to PostToolUse.
+  const postCommands = (config.hooks.PostToolUse ?? []).flatMap((group) =>
+    group.hooks.map((hook) => hook.command),
   );
+  expect(postCommands).not.toContain('"agents" policy-eval --format claude');
+  expect(postCommands).toEqual(["prettier --write {{tool_input.file_path}}"]);
   // User pre_tool_call carries matcher as Claude's matcher field.
   const preUser = config.hooks.PreToolUse?.find(
     (group) => group.matcher === "Execute",
@@ -173,6 +177,20 @@ test("Claude generator projects events, matchers, and policy bridge format", asy
       hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "" }] }] },
     }),
   ).toThrow(/non-empty string/);
+});
+
+test("Claude generator without a policy registers no bridge", async () => {
+  const { generateClaudeHooksConfig } = await import("@aguil/agents-hooks");
+  const { config } = generateClaudeHooksConfig({ hooks: sampleHooks });
+  const commands = Object.values(config.hooks).flatMap((groups) =>
+    (groups ?? []).flatMap((group) => group.hooks.map((hook) => hook.command)),
+  );
+  expect(commands.some((command) => command.includes("policy-eval"))).toBe(
+    false,
+  );
+  expect(config.hooks.PostToolUse?.[0].hooks[0].command).toBe(
+    "prettier --write {{tool_input.file_path}}",
+  );
 });
 
 test("Claude applies_to scopes matchers to tool classes", async () => {

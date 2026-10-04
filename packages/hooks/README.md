@@ -28,8 +28,10 @@ true. Adding a `HookEvent` without filling every adapter column fails
 ## Policy bridge
 
 When `policyBridge: true`, the generator registers `agents policy-eval` first on
-every mapped tool event. Claude's bridge passes `--format claude` so the
-response encoding matches what the CLI expects
+every mapped tool event. Claude is the exception: there the bridge is a
+`PreToolUse` hook only, and harness-declared `post_tool_call` handlers still map
+to `PostToolUse` (ADR 0023 decision 9). Claude's bridge passes `--format claude`
+so the response encoding matches what the CLI expects
 (`hookSpecificOutput.permissionDecision`). Cursor keeps the default
 `{ permission }` shape.
 

@@ -136,10 +136,11 @@ export function generateClaudeHooksConfig(
 
   const bridge = policyBridgeHandler(options);
   if (bridge !== undefined) {
-    // First on every mapped tool event (ADR 0006 §3), unscoped.
-    for (const event of ["PreToolUse", "PostToolUse"] as const) {
-      push(event, { hooks: [bridge] });
-    }
+    // First and unscoped, but on PreToolUse only: ADR 0023 decision 9 is the
+    // exception to ADR 0006 §3's "first on every mapped tool event". By
+    // PostToolUse no verdict can stop the tool, and Claude Code records the
+    // PreToolUse-shaped response there as a failed hook.
+    push("PreToolUse", { hooks: [bridge] });
   }
 
   for (const [event, handlers] of Object.entries(
