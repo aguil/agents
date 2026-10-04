@@ -41,6 +41,7 @@ import {
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import {
+  conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,
 } from "./conformance";
@@ -473,13 +474,15 @@ export async function runCodeReviewFromConfig(
           },
     contextBundlePath: writtenContext.jsonPath,
     ...(passGate === undefined ? {} : { passGate }),
-    ...(outputSchemas === undefined
-      ? {}
-      : {
-          validateRoleOutcomes: (input: {
-            readonly outcomes: readonly import("@aguil/agents-core").HarnessOutcome[];
-          }) => validateOutcomesAgainstSchemas(input.outcomes, outputSchemas),
-        }),
+    validateRoleOutcomes: (input: {
+      readonly roleId: string;
+      readonly outcomes: readonly import("@aguil/agents-core").HarnessOutcome[];
+    }) => [
+      ...(outputSchemas === undefined
+        ? []
+        : validateOutcomesAgainstSchemas(input.outcomes, outputSchemas)),
+      ...conformanceOutcomeViolations(input),
+    ],
   });
 
   /**

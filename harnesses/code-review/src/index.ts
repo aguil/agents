@@ -304,6 +304,7 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 export {
+  conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,
 } from "./conformance";

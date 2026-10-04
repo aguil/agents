@@ -1,6 +1,7 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
+  conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,
 } from "@aguil/agents-code-review";
@@ -450,11 +451,16 @@ export async function runHarnessRunCli(
 
   const passGate = makePassGate(loaded.definition.execution, workspacePath);
   const outputSchemas = loaded.outputSchemas;
-  const validateRoleOutcomes =
-    outputSchemas === undefined
-      ? undefined
-      : (input: { readonly outcomes: readonly HarnessOutcome[] }) =>
-          validateOutcomesAgainstSchemas(input.outcomes, outputSchemas);
+  const validateRoleOutcomes = (input: {
+    readonly roleId: string;
+    readonly outcomes: readonly HarnessOutcome[];
+  }) => [
+    ...(outputSchemas === undefined
+      ? []
+      : validateOutcomesAgainstSchemas(input.outcomes, outputSchemas)),
+    // Inert unless the harness declares a `conformance` role (ADR 0025).
+    ...conformanceOutcomeViolations(input),
+  ];
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
@@ -463,7 +469,7 @@ export async function runHarnessRunCli(
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),
     ...(passGate === undefined ? {} : { passGate }),
-    ...(validateRoleOutcomes === undefined ? {} : { validateRoleOutcomes }),
+    validateRoleOutcomes,
   });
 
   const cursorApproval =

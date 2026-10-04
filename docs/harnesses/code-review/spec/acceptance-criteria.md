@@ -92,7 +92,9 @@ holding `criterion`, `status`, and `detail`:
 
 Each `unsatisfied` row is also a `critical` finding and each `unverifiable` row
 a `warning` finding, titled with the row id in brackets (`[AC-2] …`), so they
-reach run status and the triage queue like any other finding.
+reach run status and the triage queue like any other finding. A non-satisfied
+verdict that arrives without its finding fails the role, so the run cannot pass
+under a failing row.
 
 `report.md` gets a **Plan Conformance** section listing every row with its
 status. A row the role never reported is listed as having no result. When the
