@@ -130,15 +130,16 @@ export function conformanceOutcomeViolations(input: {
       return [];
     }
     const prefix = `[${verdict.criterion}]`;
-    // The finding has to count toward status: an unsubstantiated one is set
-    // aside by the actionable filter, and a warning for an unsatisfied row
-    // would understate it.
-    const severity = verdict.status === "unsatisfied" ? "critical" : undefined;
+    // The finding has to count toward status with the weight the verdict
+    // carries: an unsubstantiated one is set aside by the actionable filter,
+    // a warning would understate an unsatisfied row, and a critical would
+    // turn "could not verify" into a claimed failure.
+    const severity = verdict.status === "unsatisfied" ? "critical" : "warning";
     const counted = findings.some(
       (finding) =>
         finding.title.startsWith(prefix) &&
         isSubstantiatedFinding(finding) &&
-        (severity === undefined || finding.severity === severity),
+        finding.severity === severity,
     );
     return counted
       ? []
@@ -147,7 +148,7 @@ export function conformanceOutcomeViolations(input: {
             outcomeId: outcome.id,
             kind: outcome.kind,
             errors: [
-              `criterion ${verdict.criterion} is ${verdict.status} but no ${severity ?? "verified"} finding titled "${prefix} …" with validation evidence was emitted`,
+              `criterion ${verdict.criterion} is ${verdict.status} but no ${severity} finding titled "${prefix} …" with validation evidence was emitted`,
             ],
           },
         ];

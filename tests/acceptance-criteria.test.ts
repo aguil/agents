@@ -739,9 +739,17 @@ test("an unsatisfied verdict without its finding fails the conformance role", as
         }),
         conformanceOutcome("AC-6", "unsatisfied", "differs"),
         findingToHarnessOutcome(conformanceFinding("f6", "[AC-6] Differs")),
+        conformanceOutcome("AC-7", "unverifiable", "runtime only"),
+        // A critical for an unverifiable row would claim a failure.
+        findingToHarnessOutcome(conformanceFinding("f7", "[AC-7] Unclear")),
       ],
     }).map((violation) => violation.outcomeId),
-  ).toEqual(["conformance-AC-2", "conformance-AC-4", "conformance-AC-5"]);
+  ).toEqual([
+    "conformance-AC-2",
+    "conformance-AC-4",
+    "conformance-AC-5",
+    "conformance-AC-7",
+  ]);
   expect(
     conformanceOutcomeViolations({
       roleId: "quality",
