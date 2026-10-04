@@ -32,7 +32,8 @@ evidence is `unverifiable`.
 Every row gets exactly one line, whatever its status, as a JSON object with a
 single top-level key `outcome`:
 
-- `id`: `conformance-` followed by the row's `id`
+- `id`: `conformance-verdict-` followed by the row's `id` (findings must not use
+  this prefix)
 - `kind`: the string `conformance`
 - `sourceRole`: the string `conformance`
 - `title`: the row's `id`, a colon, and a short summary of your verdict

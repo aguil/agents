@@ -816,3 +816,56 @@ test("posted coverage does not call a review complete when conformance failed", 
     }).join("\n"),
   ).toContain("All scheduled reviewers **completed**");
 });
+
+test("a finding sharing a verdict's id does not hide the verdict", async () => {
+  const collidingAdapter: AgentAdapter = {
+    name: "scripted",
+    capabilities: () => ({
+      streaming: false,
+      structuredOutput: true,
+      readOnlyMode: true,
+      mcp: false,
+      cancellation: false,
+    }),
+    async *run(request: AgentRunRequest) {
+      if (request.roleId !== "conformance") {
+        return;
+      }
+      // Unsubstantiated finding first, with the verdict's own id.
+      yield createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "finding",
+        data: {
+          ...conformanceFinding("conformance-AC-2", "[AC-2] Differs"),
+          validation: { status: "verified", details: "Looked." },
+        },
+      });
+      yield createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "outcome",
+        data: conformanceOutcome("AC-2", "unsatisfied", "Returns early."),
+      });
+    },
+  };
+  await withWorkspace(async (workspace) => {
+    const parsed = parseAcceptanceCriteria(JSON.stringify(CRITERIA));
+    const result = await runCodeReviewFromConfig({
+      agentsDir: AGENTS_DIR,
+      workspacePath: workspace,
+      runId: "code-review-id-collision",
+      contextBundlePath: await writeBundle(workspace, {
+        status: "loaded",
+        reason: "2 criteria from plan.json",
+        sources: ["plan.json"],
+        criteria: parsed.ok ? parsed.document.criteria : [],
+      }),
+      adapter: collidingAdapter,
+      scratchpadRoot: join(workspace, "runs"),
+    });
+    // The verdict survives, its finding does not count, so the role fails.
+    expect(result.metadata?.failed_roles).toBe("conformance");
+    expect(result.status).not.toBe("passed");
+  });
+});
