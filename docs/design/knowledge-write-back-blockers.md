@@ -67,10 +67,10 @@ belongs entirely to the adapter, which is why decision 1 above is the
 orchestrator's to take.
 
 So a declared `run_end` handler is accepted, warned about, never generated, and
-never run. `run_start` is inert in exactly the same way. `role_start` is inert
-for a weaker reason: unmapped under the only generator that exists, not
-impossible. `role_stop` is the only lifecycle event that reaches an adapter
-today.
+never run. `run_start` is inert in exactly the same way, on every adapter.
+`role_start` and `role_stop` are different: whether they fire depends on the
+adapter's generator. Claude Code maps both (`SessionStart` and `Stop`), Cursor
+maps only `role_stop`, and an adapter with no generator maps neither.
 
 This trap is wider than knowledge write-back: the loader accepting handlers for
 events that can never fire will mislead anyone declaring a lifecycle hook, not
