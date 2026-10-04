@@ -95,12 +95,11 @@ progress.”
 3. For **each** review finding that actually needs a code or test change,
    implement the fix and **record it as its own commit** (never batch unrelated
    findings into one commit).
-4. Re-run the same verification the project documents after each fix or before
-   pushing.
-5. Before the final pass, complete the
-   [constraint trace](#constraint-trace-against-acceptance-criteria) for **§6**,
-   so any code or test it forces goes through gates and review like any other
-   fix.
+4. Complete the
+   [constraint trace](#constraint-trace-against-acceptance-criteria) for **§6**.
+   Any code or test it forces is a fix like the ones above, with its own commit.
+5. Re-run the same verification the project documents after the fixes and the
+   trace, and before pushing, so trace fixes are gated too.
 6. Repeat until a final **code-review → triage ingest** pass yields
    **`items: []`** on the envelope and your gates stay green, then finalize
    [Reporting work done](#reporting-work-done) **§§1–6** from that pipeline.
@@ -279,14 +278,14 @@ keep the trace. The trace itself needs no particular CLI version.
       that touches the tree gets **its own commit** (see
       [One commit per actionable finding](#one-commit-per-actionable-finding-required));
       keep each diff minimal; extend **§5** after each remediation commit.
-- [ ] **Verify gates:** Re-run the same documented verification after fixes;
-      refresh **§1**; rerun **`agents code-review`** when edits are broad or
-      touch harness contracts.
 - [ ] **Constraint trace:** for every acceptance-criteria row the change
       touches, quote the implementing code and name the test that fails if it is
       violated; fix any row missing either (one commit each) → **§6**. No plan
-      or criteria: say so in **§6**. Do this before the final pipeline so trace
-      fixes are reviewed.
+      or criteria: say so in **§6**. Do this before re-running the gates, so
+      trace fixes are gated and reviewed.
+- [ ] **Verify gates:** Re-run the same documented verification after fixes and
+      trace fixes; refresh **§1**; rerun **`agents code-review`** when edits are
+      broad or touch harness contracts.
 - [ ] **Final pipeline:** rerun **`agents code-review`** then
       **`agents triage --from code-review`** (add **`--result …`** when not
       using workspace default **`result.json`**); record fresh **§2**
