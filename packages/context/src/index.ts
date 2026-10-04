@@ -1014,6 +1014,7 @@ export class PullRequestReferencedDocsProvider implements ContextProvider {
       const fetched = await fetchReferencedUrl(reference.value, {
         timeoutMs: this.timeoutMs,
         maxBytes: this.maxBytes,
+        remoteScope,
       });
       if (fetched === undefined) {
         summaryLines.push(
@@ -1210,6 +1211,7 @@ export class AcceptanceCriteriaProvider implements ContextProvider {
     const text = await fetchReferencedUrl(url, {
       timeoutMs: this.timeoutMs,
       maxBytes: this.maxBytes + 1,
+      remoteScope,
     });
     if (text === undefined) {
       return invalidCriteria([url], `fetch failed: ${url}`);
@@ -2608,9 +2610,18 @@ async function collectLocalReferencedDoc(
   }
 }
 
-async function fetchReferencedUrl(
+/**
+ * Fetch a PR-referenced URL. Redirects are followed, but the final URL must
+ * pass the same host/owner check as the one requested: otherwise an allowed
+ * same-owner URL could redirect anywhere and have that content imported.
+ */
+export async function fetchReferencedUrl(
   url: string,
-  options: { readonly timeoutMs: number; readonly maxBytes: number },
+  options: {
+    readonly timeoutMs: number;
+    readonly maxBytes: number;
+    readonly remoteScope: RemoteScope | undefined;
+  },
 ): Promise<string | undefined> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs);
@@ -2623,6 +2634,11 @@ async function fetchReferencedUrl(
       },
     });
     if (!response.ok) {
+      return undefined;
+    }
+    const finalUrl = response.url.length > 0 ? response.url : url;
+    if (!shouldFetchReferencedUrl(finalUrl, options.remoteScope).allowed) {
+      await response.body?.cancel().catch(() => undefined);
       return undefined;
     }
 

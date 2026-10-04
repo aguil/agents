@@ -17,6 +17,7 @@ import {
   acceptanceCriteriaFromArtifacts,
   acceptanceCriteriaRowCount,
   type ContextBundle,
+  fetchReferencedUrl,
   MAX_ACCEPTANCE_CRITERIA_REFERENCES,
   readBoundedResponseText,
   resolveContextProvider,
@@ -969,4 +970,43 @@ test("only the conformance role's verdicts count", async () => {
       "- ❔ **AC-2**: no result.",
     );
   });
+});
+
+test("a referenced URL that redirects off-owner is not fetched", async () => {
+  const server = Bun.serve({
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      if (path === "/aguil/redirect.json") {
+        return Response.redirect(new URL("/someone-else/x.json", request.url));
+      }
+      if (path === "/aguil/same-owner.json") {
+        return Response.redirect(new URL("/aguil/x.json", request.url));
+      }
+      return new Response('{"ok":true}', {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  try {
+    const host = `localhost:${server.port}`;
+    const options = {
+      timeoutMs: 2_000,
+      maxBytes: 1_000,
+      remoteScope: {
+        remoteName: "origin",
+        host,
+        owner: "aguil",
+        repo: "agents",
+      },
+    };
+    expect(
+      await fetchReferencedUrl(`http://${host}/aguil/redirect.json`, options),
+    ).toBeUndefined();
+    expect(
+      await fetchReferencedUrl(`http://${host}/aguil/same-owner.json`, options),
+    ).toBe('{"ok":true}');
+  } finally {
+    server.stop(true);
+  }
 });
