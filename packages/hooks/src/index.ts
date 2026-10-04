@@ -17,12 +17,8 @@ export type CursorHookEvent =
  * Canonical → Cursor event projection (dotagents-compatible mapping).
  * Events with no Cursor equivalent are reported as skipped, never silently
  * dropped.
- *
- * Exported for the skip-contract test (ADR 0024 §4): every `HookEvent` must
- * appear here as mapped or be explicitly undispatchable — not inferred from
- * whatever a fixture happens to declare.
  */
-export const CURSOR_EVENT_MAPPING: Readonly<
+const CURSOR_EVENT_MAPPING: Readonly<
   Partial<Record<HookEvent, readonly CursorHookEvent[]>>
 > = {
   pre_tool_call: ["beforeShellExecution", "beforeMCPExecution"],
