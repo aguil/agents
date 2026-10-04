@@ -99,7 +99,7 @@ export function parseAcceptanceCriteria(
   }
   if (
     record.source !== undefined &&
-    (typeof record.source !== "string" || record.source.length === 0)
+    (typeof record.source !== "string" || record.source.trim().length === 0)
   ) {
     return { ok: false, error: `"source" must be a non-empty string` };
   }

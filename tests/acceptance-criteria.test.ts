@@ -116,6 +116,7 @@ test("parses criteria rows with defaults", () => {
 test("rejects criteria files that would silently lose a row", () => {
   const cases: readonly [unknown, string][] = [
     [{ ...CRITERIA, version: 2 }, `"version" must be 1`],
+    [{ ...CRITERIA, source: "   " }, `"source" must be a non-empty string`],
     [{ version: 1, criteria: [] }, `"criteria" must be a non-empty list`],
     [
       { version: 1, criteria: [CRITERIA.criteria[0], CRITERIA.criteria[0]] },
