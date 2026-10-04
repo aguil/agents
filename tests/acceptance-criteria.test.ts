@@ -800,14 +800,15 @@ test("a verdict without detail is not counted and fails the role", () => {
 });
 
 test("posted coverage does not call a review complete when conformance failed", () => {
-  for (const problem of [
+  const problems: readonly Readonly<Record<string, string>>[] = [
     { failed_roles: "conformance" },
     { timed_out_roles: "conformance" },
     {
       completed_roles: "security,quality,compliance,conformance",
       conformance_reported: "",
     },
-  ]) {
+  ];
+  for (const problem of problems) {
     const lines = formatReviewCoverageSectionLines({
       triage: "lite",
       completed_roles: "security,quality,compliance",
@@ -978,10 +979,12 @@ test("a referenced URL that redirects off-owner is not fetched", async () => {
     fetch(request) {
       const path = new URL(request.url).pathname;
       if (path === "/aguil/redirect.json") {
-        return Response.redirect(new URL("/someone-else/x.json", request.url));
+        return Response.redirect(
+          new URL("/someone-else/x.json", request.url).href,
+        );
       }
       if (path === "/aguil/same-owner.json") {
-        return Response.redirect(new URL("/aguil/x.json", request.url));
+        return Response.redirect(new URL("/aguil/x.json", request.url).href);
       }
       return new Response('{"ok":true}', {
         headers: { "content-type": "application/json" },
