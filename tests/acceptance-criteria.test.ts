@@ -739,9 +739,17 @@ test("an unsatisfied verdict without its finding fails the conformance role", as
         }),
         conformanceOutcome("AC-6", "unsatisfied", "differs"),
         findingToHarnessOutcome(conformanceFinding("f6", "[AC-6] Differs")),
+        conformanceOutcome("AC-7", "unverifiable", "runtime only"),
+        // A critical for an unverifiable row would claim a failure.
+        findingToHarnessOutcome(conformanceFinding("f7", "[AC-7] Unclear")),
       ],
     }).map((violation) => violation.outcomeId),
-  ).toEqual(["conformance-AC-2", "conformance-AC-4", "conformance-AC-5"]);
+  ).toEqual([
+    "conformance-AC-2",
+    "conformance-AC-4",
+    "conformance-AC-5",
+    "conformance-AC-7",
+  ]);
   expect(
     conformanceOutcomeViolations({
       roleId: "quality",
@@ -904,4 +912,61 @@ test("a clean review with unchecked criteria does not close green", () => {
   for (const text of body({ conformance_reported: "AC-1,AC-2" })) {
     expect(text).toContain("✅ No findings - code looks good!");
   }
+});
+
+test("only the conformance role's verdicts count", async () => {
+  const strayAdapter: AgentAdapter = {
+    name: "scripted",
+    capabilities: () => ({
+      streaming: false,
+      structuredOutput: true,
+      readOnlyMode: true,
+      mcp: false,
+      cancellation: false,
+    }),
+    async *run(request: AgentRunRequest) {
+      if (request.roleId === "quality") {
+        // Another reviewer posing as the conformance role.
+        yield createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "outcome",
+          data: conformanceOutcome("AC-2", "satisfied", "Looks fine."),
+        });
+      }
+      if (request.roleId === "conformance") {
+        yield createAgentEvent({
+          runId: request.runId,
+          roleId: request.roleId,
+          type: "outcome",
+          data: conformanceOutcome("AC-1", "satisfied", "src/hash.ts:4"),
+        });
+      }
+    },
+  };
+  await withWorkspace(async (workspace) => {
+    const parsed = parseAcceptanceCriteria(JSON.stringify(CRITERIA));
+    const result = await runCodeReviewFromConfig({
+      agentsDir: AGENTS_DIR,
+      workspacePath: workspace,
+      runId: "code-review-stray-verdict",
+      contextBundlePath: await writeBundle(workspace, {
+        status: "loaded",
+        reason: "2 criteria from plan.json",
+        sources: ["plan.json"],
+        criteria: parsed.ok ? parsed.document.criteria : [],
+      }),
+      adapter: strayAdapter,
+      scratchpadRoot: join(workspace, "runs"),
+    });
+    expect(
+      (result.outcomes ?? []).find(
+        (outcome) => outcome.id === "conformance-AC-2",
+      )?.sourceRole,
+    ).toBe("quality");
+    expect(result.metadata?.conformance_reported).toBe("AC-1");
+    expect(await readFile(result.reportPath, "utf8")).toContain(
+      "- ❔ **AC-2**: no result.",
+    );
+  });
 });

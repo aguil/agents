@@ -550,7 +550,10 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
         !seenOutcomeIds.has(event.data.id)
       ) {
         seenOutcomeIds.add(event.data.id);
-        genericOutcomes.push(event.data);
+        // The role that ran is the source, whatever the agent wrote: run-level
+        // consumers (conformance verdicts, ADR 0025) trust sourceRole to tell
+        // which reviewer produced an outcome.
+        genericOutcomes.push({ ...event.data, sourceRole: role.id });
       }
       if (event.type === "error") {
         outcome = hasTimedOut(event.data) ? "timed_out" : "failed";
