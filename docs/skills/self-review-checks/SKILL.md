@@ -85,7 +85,7 @@ wrap-ups, checkpoints). Prefer **facts from artifacts** over paraphrase.
    trace.
 
 Intermediate checkpoints (baseline, mid-fix) should still cite **§2–3**
-(**`findings.length`**, **`items.length`**, paths) even if §4–5 is “in
+(**`findings.length`**, **`items.length`**, paths) even if §4–6 is “in
 progress.”
 
 ## Repeat until ready for review
