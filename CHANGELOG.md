@@ -10,6 +10,42 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.5](https://github.com/aguil/agents/compare/v0.8.4...v0.8.5) (2026-10-04)
+
+
+### Added
+
+* **cli:** add --criteria to agents code-review ([a7f4402](https://github.com/aguil/agents/commit/a7f4402b3515c708915b789345a13c38d795e551)), closes [#217](https://github.com/aguil/agents/issues/217)
+* **code-review:** add an optional plan-conformance role ([2d174f2](https://github.com/aguil/agents/commit/2d174f2aecc6d090da1a269f77f2120b04acf49f)), closes [#217](https://github.com/aguil/agents/issues/217)
+* **context:** add the acceptance-criteria row format and provider ([d94e40b](https://github.com/aguil/agents/commit/d94e40b928c50a603b92ee825528bcde007a8210)), closes [#217](https://github.com/aguil/agents/issues/217)
+* **orchestration:** keep non-finding outcomes on legacy-shaped results ([6934cfe](https://github.com/aguil/agents/commit/6934cfe82861c0a36e1d7d5d555ee4cabe7a34a8))
+
+
+### Fixed
+
+* **cli:** apply the conformance check only to harnesses that opt in ([2dfdaf8](https://github.com/aguil/agents/commit/2dfdaf8b3e4b7d9865eb60326e893ecee4937ad1))
+* **cli:** record plan-conformance metadata in harness run ([1270852](https://github.com/aguil/agents/commit/12708523385c3830ff74fc60014d2057aa846a20))
+* **code-review-post:** count a failed conformance role in coverage ([bb61551](https://github.com/aguil/agents/commit/bb6155140c1decea1bd64a61118e7943cf4cdadb))
+* **code-review-post:** report only conformance rows that got a verdict ([64339bb](https://github.com/aguil/agents/commit/64339bb4964f065f07210fea12f38c4fe5801659))
+* **code-review-post:** treat unreported conformance rows as incomplete ([ec82d89](https://github.com/aguil/agents/commit/ec82d8943d5f0d2cba64d87839efac188cd4e6e9))
+* **code-review:** fail the conformance role on a verdict without its finding ([bdc349a](https://github.com/aguil/agents/commit/bdc349a1f013eb44ee417bd9e67b4c88b49a13dc))
+* **code-review:** refuse --criteria on a replayed context bundle ([ecf0b65](https://github.com/aguil/agents/commit/ecf0b65bd77d6e984dc57476b3c18ab21e2fc711))
+* **code-review:** refuse --criteria when the harness would ignore it ([b092cfe](https://github.com/aguil/agents/commit/b092cfe11dc9ce828225a6d1ac564ad7c27f4f32))
+* **code-review:** require a counted finding for each failing verdict ([d386599](https://github.com/aguil/agents/commit/d386599e26127cc03222759bfb7e20af9ea211ae))
+* **code-review:** require a warning finding for an unverifiable row ([c526167](https://github.com/aguil/agents/commit/c52616705368b0254412a1955dc1628cea2fdd18))
+* **context:** bound referenced-URL reads and load criteria concurrently ([0395eb1](https://github.com/aguil/agents/commit/0395eb18617b32910b8b0b0aeb44985c657a9564))
+* **context:** dedupe and cap PR-declared criteria references ([8dd4c55](https://github.com/aguil/agents/commit/8dd4c55488702cdcd1062b116933aa55830914f8))
+* **context:** recheck a referenced URL's owner after redirects ([41d0783](https://github.com/aguil/agents/commit/41d0783610111948b4c0d3ec54a8f3049da5595a))
+* **core:** reject a whitespace-only criteria source ([efe4b2e](https://github.com/aguil/agents/commit/efe4b2e71722702992d8a6e1c68d8388cb3bc7e1))
+* **core:** reject conformance verdicts without detail ([d185d03](https://github.com/aguil/agents/commit/d185d0331c5cf615f0433361ea9484b024593609))
+* **core:** reject duplicate criterion ids in a replayed artifact ([e2bf428](https://github.com/aguil/agents/commit/e2bf4286b215f9cfdf697b68604eb893968a1bca))
+* **core:** reject empty criterion text in a replayed artifact ([34b5bd9](https://github.com/aguil/agents/commit/34b5bd9d3f719a11340d5da442e7064d9b1a3641))
+* **core:** reject unknown keys in acceptance-criteria files ([85b7640](https://github.com/aguil/agents/commit/85b7640f0ef924994ebc9d3c7637ee7ad5f6c603))
+* **core:** validate each criterion when reading the artifact back ([48486a3](https://github.com/aguil/agents/commit/48486a35da850e6859271ee32f55eb249599e5a3))
+* **orchestration:** dedupe role outcomes by kind and id ([a8136e1](https://github.com/aguil/agents/commit/a8136e1e4dbdab4ed1a51c8d99b2b27711c89325))
+* **orchestration:** stamp generic outcomes with the role that ran ([4f56848](https://github.com/aguil/agents/commit/4f5684836a9cd429f77ea020b080a55cd57d009f))
+* **test:** satisfy typecheck in acceptance-criteria tests ([66d0835](https://github.com/aguil/agents/commit/66d0835b0f8536c9ddfdc1a8860f3aa96a4c8e12))
+
 ## [0.8.4](https://github.com/aguil/agents/compare/v0.8.3...v0.8.4) (2026-09-27)
 
 
