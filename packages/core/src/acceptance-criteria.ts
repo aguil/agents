@@ -251,16 +251,16 @@ export function readConformanceVerdict(outcome: {
     return undefined;
   }
   const { criterion, status, detail } = outcome.data;
+  // `detail` carries the code, tests, or difference behind the verdict; a
+  // verdict without it is a bare claim and does not count as a check.
   if (
     typeof criterion !== "string" ||
     typeof status !== "string" ||
-    !(CONFORMANCE_STATUSES as readonly string[]).includes(status)
+    !(CONFORMANCE_STATUSES as readonly string[]).includes(status) ||
+    typeof detail !== "string" ||
+    detail.trim().length === 0
   ) {
     return undefined;
   }
-  return {
-    criterion,
-    status: status as ConformanceStatus,
-    detail: typeof detail === "string" ? detail : "",
-  };
+  return { criterion, status: status as ConformanceStatus, detail };
 }

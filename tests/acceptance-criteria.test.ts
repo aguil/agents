@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   conformanceOutcomeViolations,
+  conformanceReportedMetadata,
   conformanceRunMetadata,
 } from "@aguil/agents-code-review";
 import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
@@ -22,9 +23,11 @@ import {
   type AcceptanceCriteriaArtifactContent,
   createAgentEvent,
   type Finding,
+  findingToHarnessOutcome,
   type HarnessOutcome,
   parseAcceptanceCriteria,
   readAcceptanceCriteriaArtifact,
+  readConformanceVerdict,
 } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
 import { renderMarkdownReport } from "@aguil/agents-reporting";
@@ -715,16 +718,27 @@ test("an unsatisfied verdict without its finding fails the conformance role", as
         conformanceOutcome("AC-1", "satisfied", "ok"),
         conformanceOutcome("AC-2", "unsatisfied", "differs"),
         conformanceOutcome("AC-3", "unverifiable", "runtime only"),
-        {
-          id: "f",
-          kind: "finding",
-          sourceRole: "conformance",
-          title: "[AC-3] Cannot be shown from the diff",
-          data: {},
-        },
+        findingToHarnessOutcome({
+          ...conformanceFinding("f3", "[AC-3] Cannot be shown from the diff"),
+          severity: "warning",
+        }),
+        conformanceOutcome("AC-4", "unsatisfied", "differs"),
+        // Matching title, but a warning for an unsatisfied row.
+        findingToHarnessOutcome({
+          ...conformanceFinding("f4", "[AC-4] Differs"),
+          severity: "warning",
+        }),
+        conformanceOutcome("AC-5", "unsatisfied", "differs"),
+        // Matching title and severity, but no evidence: would not count.
+        findingToHarnessOutcome({
+          ...conformanceFinding("f5", "[AC-5] Differs"),
+          validation: { status: "verified", details: "Looked." },
+        }),
+        conformanceOutcome("AC-6", "unsatisfied", "differs"),
+        findingToHarnessOutcome(conformanceFinding("f6", "[AC-6] Differs")),
       ],
     }).map((violation) => violation.outcomeId),
-  ).toEqual(["conformance-AC-2"]);
+  ).toEqual(["conformance-AC-2", "conformance-AC-4", "conformance-AC-5"]);
   expect(
     conformanceOutcomeViolations({
       roleId: "quality",
@@ -753,4 +767,52 @@ test("an unsatisfied verdict without its finding fails the conformance role", as
       "The conformance role failed",
     );
   });
+});
+
+test("a verdict without detail is not counted and fails the role", () => {
+  expect(
+    readConformanceVerdict(conformanceOutcome("AC-1", "satisfied", "  ")),
+  ).toBeUndefined();
+  expect(
+    conformanceOutcomeViolations({
+      roleId: "conformance",
+      outcomes: [conformanceOutcome("AC-1", "satisfied", "")],
+    }).map((violation) => violation.outcomeId),
+  ).toEqual(["conformance-AC-1"]);
+  expect(
+    conformanceReportedMetadata({
+      metadata: { conformance: "scheduled", conformance_criteria: "AC-1" },
+      outcomes: [conformanceOutcome("AC-1", "satisfied", "")],
+    }),
+  ).toEqual({ conformance_reported: "" });
+});
+
+test("posted coverage does not call a review complete when conformance failed", () => {
+  for (const problem of [
+    { failed_roles: "conformance" },
+    { timed_out_roles: "conformance" },
+  ]) {
+    const lines = formatReviewCoverageSectionLines({
+      triage: "lite",
+      completed_roles: "security,quality,compliance",
+      conformance: "scheduled",
+      conformance_criteria: "AC-1",
+      ...problem,
+    });
+    expect(lines.join("\n")).not.toContain("All scheduled reviewers");
+    expect(
+      lines.some((line) =>
+        line.startsWith("- **Plan Conformance:** not performed"),
+      ),
+    ).toBe(true);
+  }
+  expect(
+    formatReviewCoverageSectionLines({
+      triage: "full",
+      completed_roles: "security,performance,quality,compliance,conformance",
+      conformance: "scheduled",
+      conformance_criteria: "AC-1",
+      conformance_reported: "AC-1",
+    }).join("\n"),
+  ).toContain("All scheduled reviewers **completed**");
 });
