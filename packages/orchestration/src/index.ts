@@ -611,20 +611,24 @@ function resolveRoleOrder(
 }
 
 function roleHarnessOutcomes(outcome: RoleRunOutcome): HarnessOutcome[] {
-  // The outcomes view is deduped by id (first wins): a stream-echoed
-  // duplicate finding must not appear twice after conversion. Deliberately
-  // NOT applied to result.findings itself — code-review reporting owns
-  // finding dedup (canonical fingerprint), and its semantics differ.
+  // The outcomes view is deduped by kind and id (first wins): a
+  // stream-echoed duplicate finding must not appear twice after conversion.
+  // Keying on id alone let a finding silently drop a different-kind outcome
+  // that happened to share its id (a conformance verdict, ADR 0025).
+  // Deliberately NOT applied to result.findings itself — code-review
+  // reporting owns finding dedup (canonical fingerprint), and its semantics
+  // differ.
   const seen = new Set<string>();
   const combined = [
     ...outcome.findings.map(findingToHarnessOutcome),
     ...outcome.genericOutcomes,
   ];
   return combined.filter((entry) => {
-    if (seen.has(entry.id)) {
+    const key = JSON.stringify([entry.kind, entry.id]);
+    if (seen.has(key)) {
       return false;
     }
-    seen.add(entry.id);
+    seen.add(key);
     return true;
   });
 }
