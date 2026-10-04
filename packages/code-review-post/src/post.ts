@@ -1584,11 +1584,20 @@ export function formatReviewCoverageSectionLines(
     );
   }
 
+  // The tier lists above leave conformance out (it is not a tier role), so a
+  // failed or timed-out conformance run has to count here explicitly or the
+  // summary below would call the review complete (ADR 0025).
+  const conformanceIncomplete =
+    parsed.conformance === "scheduled" &&
+    (timedOutRolesRaw.includes(CODE_REVIEW_CONFORMANCE_ROLE_ID) ||
+      failedRolesRaw.includes(CODE_REVIEW_CONFORMANCE_ROLE_ID));
+
   const hasProblem =
     skippedByTriage.length > 0 ||
     timedOut.length > 0 ||
     failed.length > 0 ||
-    missingOutcome.length > 0;
+    missingOutcome.length > 0 ||
+    conformanceIncomplete;
 
   const lines: string[] = ["", "### Review coverage"];
 

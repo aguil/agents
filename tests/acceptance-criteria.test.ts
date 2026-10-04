@@ -786,3 +786,33 @@ test("a verdict without detail is not counted and fails the role", () => {
     }),
   ).toEqual({ conformance_reported: "" });
 });
+
+test("posted coverage does not call a review complete when conformance failed", () => {
+  for (const problem of [
+    { failed_roles: "conformance" },
+    { timed_out_roles: "conformance" },
+  ]) {
+    const lines = formatReviewCoverageSectionLines({
+      triage: "lite",
+      completed_roles: "security,quality,compliance",
+      conformance: "scheduled",
+      conformance_criteria: "AC-1",
+      ...problem,
+    });
+    expect(lines.join("\n")).not.toContain("All scheduled reviewers");
+    expect(
+      lines.some((line) =>
+        line.startsWith("- **Plan Conformance:** not performed"),
+      ),
+    ).toBe(true);
+  }
+  expect(
+    formatReviewCoverageSectionLines({
+      triage: "full",
+      completed_roles: "security,performance,quality,compliance,conformance",
+      conformance: "scheduled",
+      conformance_criteria: "AC-1",
+      conformance_reported: "AC-1",
+    }).join("\n"),
+  ).toContain("All scheduled reviewers **completed**");
+});
