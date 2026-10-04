@@ -311,6 +311,8 @@ test("a malformed replayed artifact counts no rows instead of crashing", () => {
       { id: "AC-1", statement: "x", check: "diff", requiredTests: [] },
       { id: "AC-1", statement: "y", check: "diff", requiredTests: [] },
     ],
+    [{ id: "AC-1", statement: " ", check: "diff", requiredTests: [] }],
+    [{ id: "AC-1", statement: "x", check: "diff", requiredTests: [""] }],
   ]) {
     expect(acceptanceCriteriaRowCount([artifact(criteria)])).toBe(0);
     expect(

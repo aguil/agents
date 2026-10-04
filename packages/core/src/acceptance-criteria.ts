@@ -227,9 +227,12 @@ function isAcceptanceCriterion(value: unknown): value is AcceptanceCriterion {
     typeof row.id === "string" &&
     CRITERION_ID_PATTERN.test(row.id) &&
     typeof row.statement === "string" &&
+    row.statement.trim().length > 0 &&
     (row.check === "diff" || row.check === "runtime") &&
     Array.isArray(row.requiredTests) &&
-    row.requiredTests.every((test) => typeof test === "string")
+    row.requiredTests.every(
+      (test) => typeof test === "string" && test.trim().length > 0,
+    )
   );
 }
 
