@@ -34,6 +34,12 @@ export interface GenerateClaudeHooksOptions {
   readonly hooks: HooksSpec;
   readonly policyBridge?: boolean;
   readonly agentsCli?: string;
+  /**
+   * The run's workspace root. The bridge relativizes absolute file paths
+   * inside it before evaluation (JC-35), because Claude Code sends absolute
+   * paths and filesystem rules are workspace-relative globs.
+   */
+  readonly workspaceRoot?: string;
 }
 
 export interface GeneratedClaudeHooks {
@@ -89,8 +95,16 @@ function policyBridgeHandler(
     return undefined;
   }
   const cli = JSON.stringify(options.agentsCli ?? "agents");
-  // Format is explicit (ADR 0023 decision 6); never inferred from stdin.
-  return { type: "command", command: `${cli} policy-eval --format claude` };
+  // Format is explicit (ADR 0023 decision 6); never inferred from stdin. So
+  // is the workspace root: the payload's `cwd` is not trusted.
+  const workspace =
+    options.workspaceRoot === undefined
+      ? ""
+      : ` --workspace ${JSON.stringify(options.workspaceRoot)}`;
+  return {
+    type: "command",
+    command: `${cli} policy-eval --format claude${workspace}`,
+  };
 }
 
 function toClaudeHandler(handler: HookHandlerSpec): ClaudeHookHandler {

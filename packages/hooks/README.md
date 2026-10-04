@@ -33,7 +33,10 @@ every mapped tool event. Claude is the exception: there the bridge is a
 to `PostToolUse` (ADR 0023 decision 9). Claude's bridge passes `--format claude`
 so the response encoding matches what the CLI expects
 (`hookSpecificOutput.permissionDecision`). Cursor keeps the default
-`{ permission }` shape.
+`{ permission }` shape. Given `workspaceRoot`, Claude's bridge also passes
+`--workspace <root>`. Claude Code sends absolute file paths, so the bridge
+rewrites the ones inside the root as workspace-relative before filesystem rules
+see them. A path outside the root stays absolute and stays denied.
 
 ## Lifecycle honesty (ADR 0024)
 

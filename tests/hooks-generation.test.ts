@@ -193,6 +193,18 @@ test("Claude generator without a policy registers no bridge", async () => {
   );
 });
 
+test("Claude bridge carries the workspace root in its argv (JC-35)", async () => {
+  const { generateClaudeHooksConfig } = await import("@aguil/agents-hooks");
+  const { config } = generateClaudeHooksConfig({
+    hooks: {},
+    policyBridge: true,
+    workspaceRoot: "/work/my repo",
+  });
+  expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
+    '"agents" policy-eval --format claude --workspace "/work/my repo"',
+  );
+});
+
 test("Claude applies_to scopes matchers to tool classes", async () => {
   const { generateClaudeHooksConfig } = await import("@aguil/agents-hooks");
   const shellOnly: HookHandlerSpec = {

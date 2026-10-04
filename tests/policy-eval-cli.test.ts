@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeHookPayload } from "../packages/cli/src/policy-eval-main";
+import {
+  normalizeHookPayload,
+  relativizeContainedPaths,
+} from "../packages/cli/src/policy-eval-main";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixturesAgentsDir = join(
@@ -350,4 +355,86 @@ test("unknown hook event still denies (ADR 0023 decision 7)", async () => {
     hookSpecificOutput: { permissionDecision: string };
   };
   expect(body.hookSpecificOutput.permissionDecision).toBe("deny");
+});
+
+test("--workspace lets filesystem rules classify Claude's absolute paths (JC-35)", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "policy-eval-workspace-"));
+  try {
+    const decide = async (
+      filePath: string,
+      withWorkspace = true,
+    ): Promise<string | undefined> => {
+      const result = await runPolicyEval(
+        [
+          "--policy",
+          "triage-readonly",
+          "--agents-dir",
+          fixturesAgentsDir,
+          "--format",
+          "claude",
+          ...(withWorkspace ? ["--workspace", workspace] : []),
+        ],
+        {
+          hook_event_name: "PreToolUse",
+          tool_name: "Read",
+          tool_input: { file_path: filePath },
+        },
+      );
+      const body = lastJsonLine(result.stdout) as {
+        hookSpecificOutput: { permissionDecision: string };
+      };
+      return body.hookSpecificOutput.permissionDecision;
+    };
+    // Each decision is its own bridge process; run them concurrently.
+    const [
+      contained,
+      dotEnv,
+      aliased,
+      system,
+      escaping,
+      root,
+      withoutWorkspace,
+    ] = await Promise.all([
+      decide(join(workspace, "src", "index.ts")),
+      decide(join(workspace, ".env")),
+      decide(join(workspace, "src", "..", ".env")),
+      decide("/etc/passwd"),
+      decide(join(workspace, "..", "outside.txt")),
+      decide(workspace),
+      decide(join(workspace, "src", "index.ts"), false),
+    ]);
+    // triage-readonly allows "**" and denies ".env": contained paths are now
+    // classified by those rules.
+    expect(contained).toBe("allow");
+    expect(dotEnv).toBe("deny");
+    expect(aliased).toBe("deny");
+    // Outside the root, and the root itself, stay uncontained.
+    expect(system).toBe("deny");
+    expect(escaping).toBe("deny");
+    expect(root).toBe("deny");
+    // Without --workspace every absolute path is still uncontained.
+    expect(withoutWorkspace).toBe("deny");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("relativizeContainedPaths accepts the workspace's realpath alias", async () => {
+  const real = await mkdtemp(join(tmpdir(), "policy-eval-real-"));
+  const link = `${real}-link`;
+  await symlink(real, link);
+  try {
+    const rewritten = relativizeContainedPaths(
+      {
+        hook_event: "pre_tool_call",
+        tool_name: "Glob",
+        tool_input: { path: join(real, "src"), pattern: "*.ts" },
+      },
+      link,
+    );
+    expect(rewritten.tool_input).toEqual({ path: "src", pattern: "*.ts" });
+  } finally {
+    await rm(link, { force: true });
+    await rm(real, { recursive: true, force: true });
+  }
 });

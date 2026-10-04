@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { PolicySpec } from "@aguil/agents-harness-config";
 import { loadPolicy } from "@aguil/agents-harness-config";
 import type {
@@ -16,12 +18,15 @@ interface PolicyEvalArgs {
   readonly agentsDir?: string;
   /** Response encoding (ADR 0023 decision 6). Defaults to cursor. */
   readonly format: PolicyEvalFormat;
+  /** Run's workspace root, from the generated argv; never from stdin. */
+  readonly workspace?: string;
 }
 
 function parsePolicyEvalArgv(argv: readonly string[]): PolicyEvalArgs | string {
   let policyId: string | undefined;
   let agentsDir: string | undefined;
   let format: PolicyEvalFormat = "cursor";
+  let workspace: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--policy") {
@@ -37,6 +42,9 @@ function parsePolicyEvalArgv(argv: readonly string[]): PolicyEvalArgs | string {
         return 'policy-eval: --format must be "cursor" or "claude"';
       }
       format = value;
+    } else if (arg === "--workspace") {
+      workspace = argv[index + 1] ?? workspace;
+      index += 1;
     } else {
       return `policy-eval: unknown argument "${arg}"`;
     }
@@ -45,7 +53,48 @@ function parsePolicyEvalArgv(argv: readonly string[]): PolicyEvalArgs | string {
     ...(policyId === undefined ? {} : { policyId }),
     ...(agentsDir === undefined ? {} : { agentsDir }),
     format,
+    ...(workspace === undefined ? {} : { workspace }),
   };
+}
+
+/**
+ * Rewrite absolute `file_path` / `path` values inside `workspace` as
+ * workspace-relative, so filesystem rules written against relative globs can
+ * classify them (JC-35). Claude Code sends absolute paths for every file tool.
+ * Paths outside the root, and the root itself, stay absolute and so stay
+ * denied under a filesystem-ruled policy. The root comes from the generated
+ * argv, never the payload: hook stdin is not trusted.
+ */
+export function relativizeContainedPaths(
+  input: PolicyHookInput,
+  workspace: string,
+): PolicyHookInput {
+  const roots = new Set([resolve(workspace)]);
+  try {
+    roots.add(realpathSync(workspace));
+  } catch {
+    // A missing root only loses the realpath alias; the lexical root stays.
+  }
+  const toolInput: Record<string, unknown> = { ...input.tool_input };
+  for (const key of ["file_path", "path"]) {
+    const value = toolInput[key];
+    if (typeof value !== "string" || !isAbsolute(value)) {
+      continue;
+    }
+    for (const root of roots) {
+      const rel = relative(root, resolve(value));
+      if (
+        rel !== "" &&
+        rel !== ".." &&
+        !rel.startsWith("../") &&
+        !isAbsolute(rel)
+      ) {
+        toolInput[key] = rel;
+        break;
+      }
+    }
+  }
+  return { ...input, tool_input: toolInput };
 }
 
 /**
@@ -220,7 +269,12 @@ export async function runPolicyEvalCli(
   }
 
   const handler = createPolicyEvalHandler(policy);
-  const output = handler(normalizeHookPayload(payload));
+  const normalized = normalizeHookPayload(payload);
+  const output = handler(
+    parsed.workspace === undefined
+      ? normalized
+      : relativizeContainedPaths(normalized, parsed.workspace),
+  );
   const permission = DECISION_TO_PERMISSION[output.verdict];
   const agentMessage =
     output.verdict === "deny" && output.reason !== undefined

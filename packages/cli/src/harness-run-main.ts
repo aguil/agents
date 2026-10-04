@@ -254,6 +254,7 @@ async function writeCanonicalClaudeSettings(
     hooks: loaded.hooks,
     policyBridge: harnessDeclaresPolicy(loaded),
     agentsCli: args.agentsCli,
+    workspaceRoot: resolve(args.workspace),
   });
   const finalPath = join(args.scratchpadPath, "claude-settings.json");
   const tempPath = `${finalPath}.${crypto.randomUUID()}.tmp`;

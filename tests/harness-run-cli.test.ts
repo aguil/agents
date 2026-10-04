@@ -259,6 +259,83 @@ test("claude adapter enforces policy via run-scoped settings (ADR 0023)", async 
   }
 });
 
+test("claude bridge classifies absolute paths under a filesystem policy (JC-35)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const agentsDir = join(repoRoot, "examples", "incident-triage", ".agents");
+  const loaded = await loadHarness({ agentsDir, harnessId: "incident-triage" });
+  const workspace = await mkdtemp(join(tmpdir(), "harness-claude-paths-"));
+  const scratchpadPath = join(workspace, ".agents-harness", "runs", "r1");
+  await mkdir(scratchpadPath, { recursive: true });
+  // The generated command names one executable; this one runs the repo's CLI.
+  const agentsCli = join(workspace, "agents-shim");
+  await writeFile(
+    agentsCli,
+    `#!/bin/sh\nexec bun run ${JSON.stringify(join(repoRoot, "packages", "cli", "src", "index.ts"))} "$@"\n`,
+    { mode: 0o755 },
+  );
+  try {
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "claude",
+      agentsDir,
+      workspace,
+      scratchpadPath,
+      agentsCli,
+      allowUnenforcedPolicy: false,
+    });
+    if (
+      "error" in enforcement ||
+      enforcement.claudeSettingsPath === undefined
+    ) {
+      throw new Error("expected run-scoped Claude settings");
+    }
+    const settings = JSON.parse(
+      await Bun.file(enforcement.claudeSettingsPath).text(),
+    );
+    const command: string = settings.hooks.PreToolUse[0].hooks[0].command;
+    const roleEnv = enforcement.roleEnv?.("scout") ?? {};
+    // Run the bridge exactly as Claude Code would: the generated command
+    // under a shell, the role's env, and a PreToolUse payload on stdin.
+    const decide = async (tool: string, filePath: string) => {
+      const proc = Bun.spawn({
+        cmd: ["sh", "-c", command],
+        cwd: workspace,
+        env: { ...Bun.env, ...roleEnv },
+        stdin: new TextEncoder().encode(
+          JSON.stringify({
+            hook_event_name: "PreToolUse",
+            tool_name: tool,
+            tool_input: { file_path: filePath },
+          }),
+        ),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const stdout = await new Response(proc.stdout).text();
+      await proc.exited;
+      const lines = stdout.trim().split("\n");
+      return JSON.parse(lines[lines.length - 1] ?? "{}").hookSpecificOutput
+        ?.permissionDecision as string | undefined;
+    };
+    const [bundle, write, checkFile, system] = await Promise.all([
+      decide("Read", join(scratchpadPath, "context.json")),
+      decide("Write", join(workspace, "notes.md")),
+      decide("Edit", join(workspace, "check.ts")),
+      decide("Read", "/etc/passwd"),
+    ]);
+    // The role's inputs, handed to it by absolute path, are readable...
+    expect(bundle).toBe("allow");
+    expect(write).toBe("allow");
+    // ...while the policy's deny globs and the workspace boundary still hold.
+    expect(checkFile).toBe("deny");
+    expect(system).toBe("deny");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("declaring run_end / run_start / role_start warns rather than failing (ADR 0024)", async () => {
   const { setUpHookEnforcement } = await import(
     "../packages/cli/src/harness-run-main"
