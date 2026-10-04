@@ -79,3 +79,45 @@ export function conformanceReportedMetadata(input: {
       .join(","),
   };
 }
+
+/**
+ * A conformance verdict that is not `satisfied` must come with a finding
+ * titled `[<criterion id>] …`, because only findings reach run status and
+ * triage. Without this check, a role that reported an unsatisfied row but
+ * skipped the finding would leave a passing run under a failing report.
+ * The finding is not synthesized (ADR 0025 rules that out); the role's
+ * output is rejected instead, which marks the role failed.
+ */
+export function conformanceOutcomeViolations(input: {
+  readonly roleId: string;
+  readonly outcomes: readonly HarnessOutcome[];
+}): readonly {
+  readonly outcomeId: string;
+  readonly kind: string;
+  readonly errors: readonly string[];
+}[] {
+  if (input.roleId !== CODE_REVIEW_CONFORMANCE_ROLE_ID) {
+    return [];
+  }
+  const findingTitles = input.outcomes
+    .filter((outcome) => outcome.kind === "finding")
+    .map((outcome) => outcome.title);
+  return input.outcomes.flatMap((outcome) => {
+    const verdict = readConformanceVerdict(outcome);
+    if (verdict === undefined || verdict.status === "satisfied") {
+      return [];
+    }
+    const prefix = `[${verdict.criterion}]`;
+    return findingTitles.some((title) => title.startsWith(prefix))
+      ? []
+      : [
+          {
+            outcomeId: outcome.id,
+            kind: outcome.kind,
+            errors: [
+              `criterion ${verdict.criterion} is ${verdict.status} but no finding titled "${prefix} …" was emitted`,
+            ],
+          },
+        ];
+  });
+}

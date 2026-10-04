@@ -2,7 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { conformanceRunMetadata } from "@aguil/agents-code-review";
+import {
+  conformanceOutcomeViolations,
+  conformanceRunMetadata,
+} from "@aguil/agents-code-review";
 import { runCodeReviewFromConfig } from "@aguil/agents-code-review/config-runner";
 import { formatReviewCoverageSectionLines } from "@aguil/agents-code-review-post";
 import {
@@ -116,6 +119,7 @@ test("parses criteria rows with defaults", () => {
 test("rejects criteria files that would silently lose a row", () => {
   const cases: readonly [unknown, string][] = [
     [{ ...CRITERIA, version: 2 }, `"version" must be 1`],
+    [{ ...CRITERIA, source: "   " }, `"source" must be a non-empty string`],
     [{ version: 1, criteria: [] }, `"criteria" must be a non-empty list`],
     [
       { version: 1, criteria: [CRITERIA.criteria[0], CRITERIA.criteria[0]] },
@@ -423,7 +427,9 @@ function conformanceFinding(id: string, title: string): Finding {
   };
 }
 
-function scriptedConformanceAdapter(): AgentAdapter {
+function scriptedConformanceAdapter(
+  options: { readonly emitFinding?: boolean } = {},
+): AgentAdapter {
   return {
     name: "scripted",
     capabilities: () => ({
@@ -448,6 +454,9 @@ function scriptedConformanceAdapter(): AgentAdapter {
           type: "outcome",
           data: outcome,
         });
+      }
+      if (options.emitFinding === false) {
+        return;
       }
       yield createAgentEvent({
         runId: request.runId,
@@ -696,4 +705,52 @@ test("URL criteria bodies are read only up to the byte cap", async () => {
   expect(Buffer.byteLength(text, "utf8")).toBe(4_000);
   // A few chunks of read-ahead at most, not the whole (infinite) body.
   expect(pulls).toBeLessThan(10);
+});
+
+test("an unsatisfied verdict without its finding fails the conformance role", async () => {
+  expect(
+    conformanceOutcomeViolations({
+      roleId: "conformance",
+      outcomes: [
+        conformanceOutcome("AC-1", "satisfied", "ok"),
+        conformanceOutcome("AC-2", "unsatisfied", "differs"),
+        conformanceOutcome("AC-3", "unverifiable", "runtime only"),
+        {
+          id: "f",
+          kind: "finding",
+          sourceRole: "conformance",
+          title: "[AC-3] Cannot be shown from the diff",
+          data: {},
+        },
+      ],
+    }).map((violation) => violation.outcomeId),
+  ).toEqual(["conformance-AC-2"]);
+  expect(
+    conformanceOutcomeViolations({
+      roleId: "quality",
+      outcomes: [conformanceOutcome("AC-2", "unsatisfied", "differs")],
+    }),
+  ).toEqual([]);
+
+  await withWorkspace(async (workspace) => {
+    const parsed = parseAcceptanceCriteria(JSON.stringify(CRITERIA));
+    const result = await runCodeReviewFromConfig({
+      agentsDir: AGENTS_DIR,
+      workspacePath: workspace,
+      runId: "code-review-verdict-without-finding",
+      contextBundlePath: await writeBundle(workspace, {
+        status: "loaded",
+        reason: "2 criteria from plan.json",
+        sources: ["plan.json"],
+        criteria: parsed.ok ? parsed.document.criteria : [],
+      }),
+      adapter: scriptedConformanceAdapter({ emitFinding: false }),
+      scratchpadRoot: join(workspace, "runs"),
+    });
+    expect(result.metadata?.failed_roles).toBe("conformance");
+    expect(result.status).not.toBe("passed");
+    expect(await readFile(result.reportPath, "utf8")).toContain(
+      "The conformance role failed",
+    );
+  });
 });
