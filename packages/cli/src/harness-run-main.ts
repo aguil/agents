@@ -1,5 +1,5 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   conformanceOutcomeViolations,
   conformanceReportedMetadata,
@@ -102,7 +102,8 @@ Optional:
   --models role=model,...  Per-role model overrides by harness role id, e.g.
                            --models security=provider/strong,quality=provider/fast
                            A role's entry beats --model; unmapped roles fall back
-  --agents-cli <cmd>       agents CLI used by generated hooks (default: agents)
+  --agents-cli <cmd>       agents CLI used by generated hooks (default: agents;
+                           under claude, this CLI itself)
   --strict                 Fail the run on schema / enablement violations
   --allow-unenforced-policy
                            Permit adapters that cannot enforce a declared policy
@@ -243,24 +244,92 @@ async function writeCanonicalCursorHooks(
 }
 
 /**
+ * Argv that runs this CLI again: the Bun executable and the entry script
+ * (ADR 0023 decision 10). Bundled, every module's path is the bundle, which is
+ * the entry; from source, the entry is index.ts beside this module.
+ */
+export function selfAgentsCommand(): readonly string[] {
+  const here = import.meta.path;
+  const entry = here.endsWith(".ts") ? join(dirname(here), "index.ts") : here;
+  return [process.execPath, entry];
+}
+
+/**
  * Write run-scoped Claude Code settings into the scratchpad (ADR 0023
- * decision 3). Nothing in the user's workspace tree is touched.
+ * decision 3). Nothing in the user's workspace tree is touched. Returns the
+ * file and the bridge command it registers, if any.
  */
 async function writeCanonicalClaudeSettings(
   loaded: LoadedHarness,
   args: EnforcementArgs,
-): Promise<string> {
+): Promise<{ readonly path: string; readonly bridge?: string }> {
+  const policyBridge = harnessDeclaresPolicy(loaded);
   const generated = generateClaudeHooksConfig({
     hooks: loaded.hooks,
-    policyBridge: harnessDeclaresPolicy(loaded),
-    agentsCli: args.agentsCli,
+    policyBridge,
+    // The bridge must understand the arguments this CLI generates, which a
+    // different `agents` on the hook's PATH may not (ADR 0023 decision 10).
+    agentsCli: args.agentsCli ?? selfAgentsCommand(),
     workspaceRoot: resolve(args.workspace),
   });
   const finalPath = join(args.scratchpadPath, "claude-settings.json");
   const tempPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
   await writeFile(tempPath, renderClaudeSettingsConfig(generated.config));
   await rename(tempPath, finalPath);
-  return finalPath;
+  // The generator registers the bridge first on PreToolUse (decision 9).
+  const bridge = policyBridge
+    ? generated.config.hooks.PreToolUse?.[0]?.hooks[0]?.command
+    : undefined;
+  return { path: finalPath, ...(bridge === undefined ? {} : { bridge }) };
+}
+
+/**
+ * Run the Claude bridge once, as Claude Code would, with no policy identity
+ * (ADR 0023 decision 10). A working bridge fails closed and denies in the
+ * Claude shape. Claude Code runs the tool after any exit but 0 or 2, so a
+ * bridge that errors is a bridge that allows. Returns why the probe failed,
+ * or undefined when it passed.
+ */
+export async function probeClaudePolicyBridge(
+  command: string,
+  workspace: string,
+): Promise<string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.AGENTS_POLICY_ID;
+  const proc = Bun.spawn({
+    cmd: ["sh", "-c", command],
+    cwd: workspace,
+    env,
+    stdin: new TextEncoder().encode(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "true" },
+      }),
+    ),
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 30_000,
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    const detail = Bun.stripANSI(stderr).trim().split("\n")[0];
+    return `exit ${exitCode}${detail === undefined || detail === "" ? "" : `: ${detail}`}`;
+  }
+  const last = stdout.trim().split("\n").at(-1) ?? "";
+  let decision: unknown;
+  try {
+    decision = JSON.parse(last)?.hookSpecificOutput?.permissionDecision;
+  } catch {
+    return `output is not JSON: ${JSON.stringify(last)}`;
+  }
+  return decision === "deny"
+    ? undefined
+    : `answered ${JSON.stringify(decision ?? null)} where a deny was required`;
 }
 
 export interface HookEnforcementSetup {
@@ -341,9 +410,24 @@ export async function setUpHookEnforcement(
   }
 
   if (args.adapter === "claude") {
-    const claudeSettingsPath = await writeCanonicalClaudeSettings(loaded, args);
+    const settings = await writeCanonicalClaudeSettings(loaded, args);
+    if (settings.bridge !== undefined) {
+      const failure = await probeClaudePolicyBridge(
+        settings.bridge,
+        resolve(args.workspace),
+      );
+      if (failure !== undefined) {
+        return {
+          error:
+            `harness run: the Claude policy bridge failed its probe (${failure}), ` +
+            "so the declared policy would not be enforced (ADR 0023 decision 10). " +
+            `Bridge: ${settings.bridge}. Pass --agents-cli naming an agents CLI ` +
+            'that supports "policy-eval --format claude --workspace".',
+        };
+      }
+    }
     return {
-      claudeSettingsPath,
+      claudeSettingsPath: settings.path,
       onRoleStart: async (roleId: string) => {
         await writeCanonicalClaudeSettings(loaded, args);
         console.warn(

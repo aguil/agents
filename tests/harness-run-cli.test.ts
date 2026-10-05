@@ -247,13 +247,59 @@ test("claude adapter enforces policy via run-scoped settings (ADR 0023)", async 
       throw new Error("expected claudeSettingsPath");
     }
     const settings = JSON.parse(await Bun.file(settingsPath).text());
-    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain(
-      "policy-eval --format claude",
+    // With no --agents-cli, the bridge is this CLI itself, which setup has
+    // already probed (ADR 0023 decision 10).
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(
+      `${JSON.stringify(process.execPath)} ${JSON.stringify(join(repoRoot, "packages", "cli", "src", "index.ts"))} ` +
+        `policy-eval --format claude --workspace ${JSON.stringify(workspace)}`,
     );
     // Workspace must not gain a .claude/settings mutation.
     expect(
       await Bun.file(join(workspace, ".claude", "settings.json")).exists(),
     ).toBe(false);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("claude setup refuses a bridge that does not fail closed (ADR 0023 decision 10)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const agentsDir = join(repoRoot, "examples", "incident-triage", ".agents");
+  const loaded = await loadHarness({ agentsDir, harnessId: "incident-triage" });
+  const workspace = await mkdtemp(join(tmpdir(), "harness-claude-probe-"));
+  const scratchpadPath = join(workspace, "scratch");
+  await mkdir(scratchpadPath, { recursive: true });
+  // A release older than --format, and a bridge that answers allow.
+  const shims = {
+    stale: `#!/bin/sh\nprintf '\\033[31mpolicy-eval: unknown argument "--format"\\033[0m\\n' >&2\nexit 1\n`,
+    failOpen: `#!/bin/sh\necho '${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } })}'\n`,
+  };
+  try {
+    const errors = await Promise.all(
+      Object.entries(shims).map(async ([name, script]) => {
+        const agentsCli = join(workspace, name);
+        await writeFile(agentsCli, script, { mode: 0o755 });
+        await mkdir(join(scratchpadPath, name));
+        const enforcement = await setUpHookEnforcement(loaded, {
+          adapter: "claude",
+          agentsDir,
+          workspace,
+          scratchpadPath: join(scratchpadPath, name),
+          agentsCli,
+          allowUnenforcedPolicy: false,
+        });
+        return "error" in enforcement ? enforcement.error : undefined;
+      }),
+    );
+    expect(errors[0]).toContain(
+      'failed its probe (exit 1: policy-eval: unknown argument "--format")',
+    );
+    expect(errors[1]).toContain(
+      'failed its probe (answered "allow" where a deny was required)',
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

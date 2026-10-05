@@ -38,6 +38,13 @@ so the response encoding matches what the CLI expects
 rewrites the ones inside the root as workspace-relative before filesystem rules
 see them. A path outside the root stays absolute and stays denied.
 
+`agentsCli` names the bridge's executable, or an argv prefix such as
+`[bun, entry]`, with each word quoted. `agents harness run` defaults Claude's
+bridge to the running CLI itself rather than the `agents` on the hook's `PATH`,
+and runs the bridge once before any role with no policy identity. A bridge that
+does not answer `deny` there fails the run, because Claude Code runs the tool
+after a hook error (ADR 0023 decision 10).
+
 ## Lifecycle honesty (ADR 0024)
 
 `LIFECYCLE_HOOK_EVENTS` is the checklist of lifecycle events that _may_ be inert

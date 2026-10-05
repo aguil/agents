@@ -205,6 +205,18 @@ test("Claude bridge carries the workspace root in its argv (JC-35)", async () =>
   );
 });
 
+test("Claude bridge quotes each word of an argv-prefix CLI (ADR 0023 decision 10)", async () => {
+  const { generateClaudeHooksConfig } = await import("@aguil/agents-hooks");
+  const { config } = generateClaudeHooksConfig({
+    hooks: {},
+    policyBridge: true,
+    agentsCli: ["/opt/bun bin/bun", "/opt/agents/dist/index.js"],
+  });
+  expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
+    '"/opt/bun bin/bun" "/opt/agents/dist/index.js" policy-eval --format claude',
+  );
+});
+
 test("Claude applies_to scopes matchers to tool classes", async () => {
   const { generateClaudeHooksConfig } = await import("@aguil/agents-hooks");
   const shellOnly: HookHandlerSpec = {

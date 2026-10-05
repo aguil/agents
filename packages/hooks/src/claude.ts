@@ -33,7 +33,11 @@ export interface ClaudeSettingsConfig {
 export interface GenerateClaudeHooksOptions {
   readonly hooks: HooksSpec;
   readonly policyBridge?: boolean;
-  readonly agentsCli?: string;
+  /**
+   * The agents CLI the bridge runs: one executable, or an argv prefix such as
+   * `[bun, entry]`. Each element is quoted as one shell word.
+   */
+  readonly agentsCli?: string | readonly string[];
   /**
    * The run's workspace root. The bridge relativizes absolute file paths
    * inside it before evaluation (JC-35), because Claude Code sends absolute
@@ -94,7 +98,10 @@ function policyBridgeHandler(
   if (options.policyBridge !== true) {
     return undefined;
   }
-  const cli = JSON.stringify(options.agentsCli ?? "agents");
+  const agentsCli = options.agentsCli ?? "agents";
+  const cli = (typeof agentsCli === "string" ? [agentsCli] : agentsCli)
+    .map((word) => JSON.stringify(word))
+    .join(" ");
   // Format is explicit (ADR 0023 decision 6); never inferred from stdin. So
   // is the workspace root: the payload's `cwd` is not trusted.
   const workspace =
