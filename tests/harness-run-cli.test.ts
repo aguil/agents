@@ -250,8 +250,8 @@ test("claude adapter enforces policy via run-scoped settings (ADR 0023)", async 
     // With no --agents-cli, the bridge is this CLI itself, which setup has
     // already probed (ADR 0023 decision 10).
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(
-      `${JSON.stringify(process.execPath)} ${JSON.stringify(join(repoRoot, "packages", "cli", "src", "index.ts"))} ` +
-        `policy-eval --format claude --workspace ${JSON.stringify(workspace)}`,
+      `'${process.execPath}' '${join(repoRoot, "packages", "cli", "src", "index.ts")}' ` +
+        `policy-eval --format claude --workspace '${workspace}'`,
     );
     // Workspace must not gain a .claude/settings mutation.
     expect(

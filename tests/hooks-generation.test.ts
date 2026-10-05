@@ -151,14 +151,14 @@ test("Claude generator projects events, matchers, and policy bridge format", asy
   });
   expect(skippedEvents).toEqual(["run_end"]);
   expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
-    '"agents" policy-eval --format claude',
+    "'agents' policy-eval --format claude",
   );
   // The bridge is a PreToolUse hook only on Claude (ADR 0023 decision 9); the
   // user's post_tool_call handler still maps to PostToolUse.
   const postCommands = (config.hooks.PostToolUse ?? []).flatMap((group) =>
     group.hooks.map((hook) => hook.command),
   );
-  expect(postCommands).not.toContain('"agents" policy-eval --format claude');
+  expect(postCommands).not.toContain("'agents' policy-eval --format claude");
   expect(postCommands).toEqual(["prettier --write {{tool_input.file_path}}"]);
   // User pre_tool_call carries matcher as Claude's matcher field.
   const preUser = config.hooks.PreToolUse?.find(
@@ -201,7 +201,7 @@ test("Claude bridge carries the workspace root in its argv (#219)", async () => 
     workspaceRoot: "/work/my repo",
   });
   expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
-    '"agents" policy-eval --format claude --workspace "/work/my repo"',
+    "'agents' policy-eval --format claude --workspace '/work/my repo'",
   );
 });
 
@@ -213,8 +213,31 @@ test("Claude bridge quotes each word of an argv-prefix CLI (ADR 0023 decision 10
     agentsCli: ["/opt/bun bin/bun", "/opt/agents/dist/index.js"],
   });
   expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
-    '"/opt/bun bin/bun" "/opt/agents/dist/index.js" policy-eval --format claude',
+    "'/opt/bun bin/bun' '/opt/agents/dist/index.js' policy-eval --format claude",
   );
+});
+
+test("Claude bridge words reach the CLI unexpanded by the shell", async () => {
+  const { generateClaudeHooksConfig } = await import("@aguil/agents-hooks");
+  const root = "/work/$HOME/$(echo pwned)/`id`/it's \\ done";
+  const { config } = generateClaudeHooksConfig({
+    hooks: {},
+    policyBridge: true,
+    // printf stands in for the CLI and prints each argument it receives.
+    agentsCli: ["printf", "%s\n"],
+    workspaceRoot: root,
+  });
+  const command = config.hooks.PreToolUse?.[0].hooks[0].command ?? "";
+  const proc = Bun.spawn({ cmd: ["sh", "-c", command], stdout: "pipe" });
+  const stdout = await new Response(proc.stdout).text();
+  expect(await proc.exited).toBe(0);
+  expect(stdout.split("\n").slice(0, -1)).toEqual([
+    "policy-eval",
+    "--format",
+    "claude",
+    "--workspace",
+    root,
+  ]);
 });
 
 test("Claude applies_to scopes matchers to tool classes", async () => {

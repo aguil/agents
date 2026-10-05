@@ -35,7 +35,7 @@ export interface GenerateClaudeHooksOptions {
   readonly policyBridge?: boolean;
   /**
    * The agents CLI the bridge runs: one executable, or an argv prefix such as
-   * `[bun, entry]`. Each element is quoted as one shell word.
+   * `[bun, entry]`. Each element is single-quoted as one shell word.
    */
   readonly agentsCli?: string | readonly string[];
   /**
@@ -92,6 +92,15 @@ function appliesToMatcher(
   return parts.length === 0 ? undefined : parts.join("|");
 }
 
+/**
+ * Quote one word for a POSIX shell. Claude Code runs a hook's command through
+ * a shell, where JSON's double quotes would still expand `$`, `$(...)` and
+ * backticks inside a path; single quotes expand nothing.
+ */
+function shellWord(word: string): string {
+  return `'${word.replaceAll("'", "'\\''")}'`;
+}
+
 function policyBridgeHandler(
   options: GenerateClaudeHooksOptions,
 ): ClaudeHookHandler | undefined {
@@ -100,14 +109,14 @@ function policyBridgeHandler(
   }
   const agentsCli = options.agentsCli ?? "agents";
   const cli = (typeof agentsCli === "string" ? [agentsCli] : agentsCli)
-    .map((word) => JSON.stringify(word))
+    .map(shellWord)
     .join(" ");
   // Format is explicit (ADR 0023 decision 6); never inferred from stdin. So
   // is the workspace root: the payload's `cwd` is not trusted.
   const workspace =
     options.workspaceRoot === undefined
       ? ""
-      : ` --workspace ${JSON.stringify(options.workspaceRoot)}`;
+      : ` --workspace ${shellWord(options.workspaceRoot)}`;
   return {
     type: "command",
     command: `${cli} policy-eval --format claude${workspace}`,
