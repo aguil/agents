@@ -58,12 +58,12 @@ function parsePolicyEvalArgv(argv: readonly string[]): PolicyEvalArgs | string {
 }
 
 /**
- * Rewrite absolute `file_path` / `path` values inside `workspace` as
- * workspace-relative, so filesystem rules written against relative globs can
- * classify them (#219). Claude Code sends absolute paths for every file tool.
- * Paths outside the root, and the root itself, stay absolute and so stay
- * denied under a filesystem-ruled policy. The root comes from the generated
- * argv, never the payload: hook stdin is not trusted.
+ * Rewrite absolute `file_path` / `path` / `notebook_path` values inside
+ * `workspace` as workspace-relative, so filesystem rules written against
+ * relative globs can classify them (#219). Claude Code sends absolute paths
+ * for every file tool. Paths outside the root, and the root itself, stay
+ * absolute and so stay denied under a filesystem-ruled policy. The root comes
+ * from the generated argv, never the payload: hook stdin is not trusted.
  */
 export function relativizeContainedPaths(
   input: PolicyHookInput,
@@ -76,7 +76,7 @@ export function relativizeContainedPaths(
     // A missing root only loses the realpath alias; the lexical root stays.
   }
   const toolInput: Record<string, unknown> = { ...input.tool_input };
-  for (const key of ["file_path", "path"]) {
+  for (const key of ["file_path", "path", "notebook_path"]) {
     const value = toolInput[key];
     if (typeof value !== "string" || !isAbsolute(value)) {
       continue;

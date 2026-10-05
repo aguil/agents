@@ -357,6 +357,46 @@ test("unknown hook event still denies (ADR 0023 decision 7)", async () => {
   expect(body.hookSpecificOutput.permissionDecision).toBe("deny");
 });
 
+test("Claude's NotebookEdit path is classified by filesystem rules", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "policy-eval-notebook-"));
+  try {
+    const decide = async (notebookPath: string) => {
+      const result = await runPolicyEval(
+        [
+          "--policy",
+          "triage-readonly",
+          "--agents-dir",
+          fixturesAgentsDir,
+          "--format",
+          "claude",
+          "--workspace",
+          workspace,
+        ],
+        {
+          hook_event_name: "PreToolUse",
+          tool_name: "NotebookEdit",
+          tool_input: { notebook_path: notebookPath, new_source: "x = 1" },
+        },
+      );
+      const body = lastJsonLine(result.stdout) as {
+        hookSpecificOutput: { permissionDecision: string };
+      };
+      return body.hookSpecificOutput.permissionDecision;
+    };
+    const [notebook, dotEnv, outside] = await Promise.all([
+      decide(join(workspace, "analysis.ipynb")),
+      decide(join(workspace, ".env")),
+      decide("/etc/analysis.ipynb"),
+    ]);
+    // Without notebook_path the evaluator saw no path and allowed all three.
+    expect(notebook).toBe("allow");
+    expect(dotEnv).toBe("deny");
+    expect(outside).toBe("deny");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("--workspace lets filesystem rules classify Claude's absolute paths (#219)", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "policy-eval-workspace-"));
   try {
