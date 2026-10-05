@@ -10,6 +10,13 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.6](https://github.com/aguil/agents/compare/v0.8.5...v0.8.6) (2026-10-05)
+
+
+### Fixed
+
+* **skills:** write the self-review criteria file with the code-review artifacts ([aae7757](https://github.com/aguil/agents/commit/aae7757f6a79c19d112c662b6f18261d9115f231)), closes [#229](https://github.com/aguil/agents/issues/229)
+
 ## [0.8.5](https://github.com/aguil/agents/compare/v0.8.4...v0.8.5) (2026-10-04)
 
 
