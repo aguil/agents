@@ -1,5 +1,12 @@
-import { realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import type { PolicySpec } from "@aguil/agents-harness-config";
 import { loadPolicy } from "@aguil/agents-harness-config";
 import type {
@@ -64,37 +71,67 @@ function parsePolicyEvalArgv(argv: readonly string[]): PolicyEvalArgs | string {
  * for every file tool. Paths outside the root, and the root itself, stay
  * absolute and so stay denied under a filesystem-ruled policy. The root comes
  * from the generated argv, never the payload: hook stdin is not trusted.
+ *
+ * Containment is decided on the path with its symlinks resolved, and the
+ * rewritten path is that resolved one, because the tool follows the link: a
+ * link inside the root to a file outside it stays absolute, and a link to
+ * `.env` is classified as `.env`.
  */
 export function relativizeContainedPaths(
   input: PolicyHookInput,
   workspace: string,
 ): PolicyHookInput {
-  const roots = new Set([resolve(workspace)]);
-  try {
-    roots.add(realpathSync(workspace));
-  } catch {
-    // A missing root only loses the realpath alias; the lexical root stays.
-  }
+  const root = resolveThroughSymlinks(workspace) ?? resolve(workspace);
   const toolInput: Record<string, unknown> = { ...input.tool_input };
   for (const key of ["file_path", "path", "notebook_path"]) {
     const value = toolInput[key];
     if (typeof value !== "string" || !isAbsolute(value)) {
       continue;
     }
-    for (const root of roots) {
-      const rel = relative(root, resolve(value));
-      if (
-        rel !== "" &&
-        rel !== ".." &&
-        !rel.startsWith("../") &&
-        !isAbsolute(rel)
-      ) {
-        toolInput[key] = rel;
-        break;
-      }
+    const target = resolveThroughSymlinks(value);
+    if (target === undefined) {
+      continue;
+    }
+    const rel = relative(root, target);
+    if (
+      rel !== "" &&
+      rel !== ".." &&
+      !rel.startsWith("../") &&
+      !isAbsolute(rel)
+    ) {
+      toolInput[key] = rel;
     }
   }
   return { ...input, tool_input: toolInput };
+}
+
+/**
+ * `path` with every symlink resolved. A path that doesn't exist yet, such as a
+ * file about to be written, resolves through its nearest existing ancestor.
+ * Undefined when an entry exists but can't be resolved, such as a dangling
+ * link: what a write through it reaches is unknown, so it stays uncontained.
+ */
+function resolveThroughSymlinks(path: string): string | undefined {
+  const missing: string[] = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...missing);
+    } catch {
+      try {
+        lstatSync(current);
+        return undefined;
+      } catch {
+        // Nothing here yet; try the parent.
+      }
+      const parent = dirname(current);
+      if (parent === current) {
+        return resolve(path);
+      }
+      missing.unshift(basename(current));
+      current = parent;
+    }
+  }
 }
 
 /**

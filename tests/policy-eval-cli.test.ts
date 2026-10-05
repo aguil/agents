@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -355,6 +355,61 @@ test("unknown hook event still denies (ADR 0023 decision 7)", async () => {
     hookSpecificOutput: { permissionDecision: string };
   };
   expect(body.hookSpecificOutput.permissionDecision).toBe("deny");
+});
+
+test("--workspace classifies a symlinked path by the file it reaches", async () => {
+  const base = await mkdtemp(join(tmpdir(), "policy-eval-symlink-"));
+  const workspace = join(base, "ws");
+  const outside = join(base, "outside");
+  await mkdir(workspace);
+  await mkdir(outside);
+  await writeFile(join(outside, "secret.txt"), "s");
+  await writeFile(join(workspace, ".env"), "TOKEN=x");
+  await symlink(outside, join(workspace, "escape"));
+  await symlink(join(workspace, ".env"), join(workspace, "notes.txt"));
+  await symlink(join(outside, "new.txt"), join(workspace, "dangling"));
+  try {
+    const decide = async (tool: string, filePath: string) => {
+      const result = await runPolicyEval(
+        [
+          "--policy",
+          "triage-readonly",
+          "--agents-dir",
+          fixturesAgentsDir,
+          "--format",
+          "claude",
+          "--workspace",
+          workspace,
+        ],
+        {
+          hook_event_name: "PreToolUse",
+          tool_name: tool,
+          tool_input: { file_path: filePath },
+        },
+      );
+      const body = lastJsonLine(result.stdout) as {
+        hookSpecificOutput: { permissionDecision: string };
+      };
+      return body.hookSpecificOutput.permissionDecision;
+    };
+    const [escaping, aliasOfEnv, dangling, fresh] = await Promise.all([
+      decide("Read", join(workspace, "escape", "secret.txt")),
+      decide("Read", join(workspace, "notes.txt")),
+      decide("Write", join(workspace, "dangling")),
+      decide("Write", join(workspace, "new-dir", "fresh.md")),
+    ]);
+    // A link inside the root to a file outside it is outside.
+    expect(escaping).toBe("deny");
+    // A link to .env is .env, whatever it is called.
+    expect(aliasOfEnv).toBe("deny");
+    // A dangling link could land anywhere.
+    expect(dangling).toBe("deny");
+    // A file that doesn't exist yet, in a directory that doesn't either, is
+    // still inside.
+    expect(fresh).toBe("allow");
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
 });
 
 test("Claude's NotebookEdit path is classified by filesystem rules", async () => {
