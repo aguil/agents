@@ -6,6 +6,7 @@ import {
   type HooksSpec,
 } from "@aguil/agents-harness-config";
 import {
+  ADAPTER_HOOK_CAPABILITIES,
   cursorHookEventDispatchability,
   generateCursorHooksConfig,
   HOOK_ADAPTER_IDS,
@@ -119,6 +120,21 @@ test("every HookEvent has an explicit Cursor dispatchability (ADR 0024 skip cont
 });
 
 test("adapter × HookEvent dispatchability matrix is complete (ADR 0023)", () => {
+  // Every adapter decides every event: a native list, or [] for unmappable.
+  // An omitted key would still yield a row below, reported as undispatchable,
+  // so the decision itself is checked here rather than through the rows.
+  expect(ADAPTER_HOOK_CAPABILITIES.map((caps) => caps.adapter).sort()).toEqual(
+    [...HOOK_ADAPTER_IDS].sort(),
+  );
+  for (const caps of ADAPTER_HOOK_CAPABILITIES) {
+    expect([caps.adapter, Object.keys(caps.nativeEvents).sort()]).toEqual([
+      caps.adapter,
+      [...HOOK_EVENTS].sort(),
+    ]);
+    for (const event of HOOK_EVENTS) {
+      expect(Array.isArray(caps.nativeEvents[event])).toBe(true);
+    }
+  }
   const rows = hookEventAdapterDispatchability();
   expect(rows.length).toBe(HOOK_ADAPTER_IDS.length * HOOK_EVENTS.length);
   // run_start / run_end never map on any adapter (ADR 0024).
