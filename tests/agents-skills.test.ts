@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main as agentsMain } from "../packages/cli/src/index";
 
@@ -121,5 +122,52 @@ test("agents skills doctor points to agents doctor", async () => {
     expect(err).toContain("agents doctor");
   } finally {
     console.error = prevErr;
+  }
+});
+
+/** Collapse Markdown line wrapping so phrases can be matched across lines. */
+function flatten(markdown: string): string {
+  return markdown.replace(/\s+/g, " ");
+}
+
+test("self-review-checks puts the criteria file with the code-review artifacts", async () => {
+  const doc = flatten(await readFile(DOC_SKILL, "utf8"));
+  expect(doc).toContain(
+    "under the workspace's `.agents-code-review/criteria/` directory",
+  );
+  expect(doc).not.toContain("keep it with the plan");
+  expect(doc).toContain(
+    "Suggest that line only for criteria committed in the repository or reachable by a URL on the same host and owner as the tracked remote.",
+  );
+  expect(doc).toContain(
+    "The criteria file's path (the local `.agents-code-review/criteria/` path,",
+  );
+});
+
+test("agents skills install self-review-checks copies the current SKILL.md", async () => {
+  const home = await mkdtemp(join(tmpdir(), "agents-skills-home-"));
+  try {
+    const proc = Bun.spawn(
+      [
+        process.execPath,
+        join(REPO_ROOT, "packages/cli/src/index.ts"),
+        "skills",
+        "install",
+        "self-review-checks",
+      ],
+      {
+        env: { ...process.env, HOME: home, USERPROFILE: home },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    expect(await proc.exited).toBe(0);
+    const installed = await readFile(
+      join(home, ".agents/skills/self-review-checks/SKILL.md"),
+      "utf8",
+    );
+    expect(installed).toBe(await readFile(DOC_SKILL, "utf8"));
+  } finally {
+    await rm(home, { recursive: true, force: true });
   }
 });

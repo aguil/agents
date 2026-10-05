@@ -77,7 +77,9 @@ wrap-ups, checkpoints). Prefer **facts from artifacts** over paraphrase.
    report.
 5. **Commits:** For each **code** remediation, **`finding.id`** (or duplicate
    set) → **revision/bookmark/git SHA** mapping.
-6. **Constraint trace:** The criteria file's path, then one entry per row from
+6. **Constraint trace:** The criteria file's path (the local
+   `.agents-code-review/criteria/` path, unless the criteria are committed or
+   reachable by URL), then one entry per row from
    [Constraint trace](#constraint-trace-against-acceptance-criteria): row `id`,
    the quoted code that implements it (`file:line`), and the test that fails if
    it is violated. When no plan or hand-off with acceptance criteria exists, say
@@ -200,9 +202,13 @@ records acceptance criteria or binding constraints. If none exists, skip the
 trace and say so in **§6**.
 
 **Input:** the rows the change touches, as an acceptance-criteria file in the
-Agents format. If the plan only has a table or prose, write the file first and
-keep it with the plan; the code-review `conformance` role reads the same file,
-so you write the rows once.
+Agents format. If the plan only has a table or prose, write the file first,
+under the workspace's `.agents-code-review/criteria/` directory (for example
+`.agents-code-review/criteria/<pr-or-stack>.json`), next to the other review
+artifacts. Do not add it to the plan's repository: the file is review input, and
+`.agents-code-review/` is never committed. Point `source` at the plan section
+the rows come from, so a reader can trace them. The code-review `conformance`
+role reads the same file through `--criteria`, so you write the rows once.
 
 ```json
 {
@@ -255,13 +261,17 @@ it is not silently dropped.
 
 **Reviewer-side check:** when the trace applies and the operator's review
 invocation does not already supply criteria, suggest adding `--criteria <file>`
-to **`agents code-review`**, or an `Acceptance-Criteria: <path>` line to the PR
-description. The harness then reports each row as satisfied, unsatisfied, or
-unverifiable, and turns the last two into findings that triage picks up like any
-other. It does not replace the trace: the trace runs before review and is yours
-to fix. This step needs an Agents CLI with the conformance role: if
-`agents code-review --help` does not list `--criteria`, skip the suggestion and
-keep the trace. The trace itself needs no particular CLI version.
+to **`agents code-review`**. For a file under `.agents-code-review/criteria/`,
+that flag is the only option: an `Acceptance-Criteria: <path>` line in the PR
+description resolves only files committed inside the reviewed workspace. Suggest
+that line only for criteria committed in the repository or reachable by a URL on
+the same host and owner as the tracked remote. The harness then reports each row
+as satisfied, unsatisfied, or unverifiable, and turns the last two into findings
+that triage picks up like any other. It does not replace the trace: the trace
+runs before review and is yours to fix. This step needs an Agents CLI with the
+conformance role: if `agents code-review --help` does not list `--criteria`,
+skip the suggestion and keep the trace. The trace itself needs no particular CLI
+version.
 
 ## A tight manual checklist
 
