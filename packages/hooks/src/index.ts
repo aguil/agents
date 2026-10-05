@@ -136,7 +136,7 @@ export function cursorHookEventDispatchability(): ReadonlyArray<{
 
 /**
  * Drift matrix: every HookEvent × every adapter row, for the contract test
- * (ADR 0023 JC-7 / ADR 0024 §4).
+ * (ADR 0023 decision 1 / ADR 0024 §4).
  */
 export function hookEventAdapterDispatchability(): ReadonlyArray<{
   readonly adapter: string;

@@ -357,7 +357,7 @@ test("unknown hook event still denies (ADR 0023 decision 7)", async () => {
   expect(body.hookSpecificOutput.permissionDecision).toBe("deny");
 });
 
-test("--workspace lets filesystem rules classify Claude's absolute paths (JC-35)", async () => {
+test("--workspace lets filesystem rules classify Claude's absolute paths (#219)", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "policy-eval-workspace-"));
   try {
     const decide = async (

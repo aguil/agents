@@ -40,7 +40,7 @@ export interface GenerateClaudeHooksOptions {
   readonly agentsCli?: string | readonly string[];
   /**
    * The run's workspace root. The bridge relativizes absolute file paths
-   * inside it before evaluation (JC-35), because Claude Code sends absolute
+   * inside it before evaluation (#219), because Claude Code sends absolute
    * paths and filesystem rules are workspace-relative globs.
    */
   readonly workspaceRoot?: string;

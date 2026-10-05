@@ -305,7 +305,7 @@ test("claude setup refuses a bridge that does not fail closed (ADR 0023 decision
   }
 });
 
-test("claude bridge classifies absolute paths under a filesystem policy (JC-35)", async () => {
+test("claude bridge classifies absolute paths under a filesystem policy (#219)", async () => {
   const { loadHarness } = await import("@aguil/agents-harness-config");
   const { setUpHookEnforcement } = await import(
     "../packages/cli/src/harness-run-main"

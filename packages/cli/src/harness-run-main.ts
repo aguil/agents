@@ -212,7 +212,7 @@ type EnforcementArgs = Pick<
   HarnessRunArgs,
   "adapter" | "agentsDir" | "workspace" | "agentsCli" | "allowUnenforcedPolicy"
 > & {
-  /** Run scratchpad — Claude settings land here (ADR 0023 / JC-3). */
+  /** Run scratchpad — Claude settings land here (ADR 0023 decision 3). */
   readonly scratchpadPath: string;
 };
 
@@ -517,7 +517,7 @@ export async function runHarnessRunCli(
   await mkdir(scratchpadPath, { recursive: true });
 
   // Enforcement needs the scratchpad so Claude settings are run-scoped
-  // (ADR 0023 / JC-3) rather than written into the workspace.
+  // (ADR 0023 decision 3) rather than written into the workspace.
   const enforcement = await setUpHookEnforcement(loaded, {
     ...parsed,
     scratchpadPath,

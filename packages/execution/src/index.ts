@@ -1012,7 +1012,7 @@ export interface ClaudeCodeAdapterOptions {
   readonly argsTemplate?: readonly string[];
   /**
    * Path to a run-scoped Claude Code settings JSON file passed via
-   * `--settings` (ADR 0023 decision 3 / JC-3). When set, the default argv
+   * `--settings` (ADR 0023 decision 3). When set, the default argv
    * template includes `--settings {settings}` unless `argsTemplate` is
    * supplied.
    */

@@ -193,7 +193,7 @@ test("Claude generator without a policy registers no bridge", async () => {
   );
 });
 
-test("Claude bridge carries the workspace root in its argv (JC-35)", async () => {
+test("Claude bridge carries the workspace root in its argv (#219)", async () => {
   const { generateClaudeHooksConfig } = await import("@aguil/agents-hooks");
   const { config } = generateClaudeHooksConfig({
     hooks: {},

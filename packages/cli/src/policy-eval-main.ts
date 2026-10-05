@@ -60,7 +60,7 @@ function parsePolicyEvalArgv(argv: readonly string[]): PolicyEvalArgs | string {
 /**
  * Rewrite absolute `file_path` / `path` values inside `workspace` as
  * workspace-relative, so filesystem rules written against relative globs can
- * classify them (JC-35). Claude Code sends absolute paths for every file tool.
+ * classify them (#219). Claude Code sends absolute paths for every file tool.
  * Paths outside the root, and the root itself, stay absolute and so stay
  * denied under a filesystem-ruled policy. The root comes from the generated
  * argv, never the payload: hook stdin is not trusted.
