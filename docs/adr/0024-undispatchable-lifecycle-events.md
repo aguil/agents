@@ -48,9 +48,12 @@ is thin because only one adapter has a generator, and that a second adapter —
 one whose CLI has a session-end event — would supply `run_end`. It would not,
 for a structural reason rather than a contingent one.
 
-The adapters a harness run can select all extend `SubprocessAgentAdapter`
+The adapters a harness run can select that drive a real agent CLI — `cursor`,
+`claude` and `opencode` — extend `SubprocessAgentAdapter`
 (`packages/execution/src/index.ts`), which spawns one CLI process per `run()`
-call. `NativeBunOrchestrator` (`packages/orchestration/src/index.ts`) invokes
+call. The fourth, `fake`, is `FakeAgentAdapter`, which implements `AgentAdapter`
+directly and emits synthetic events; it has no CLI, so no session-end event to
+offer. `NativeBunOrchestrator` (`packages/orchestration/src/index.ts`) invokes
 the adapter once **per role invocation**, in all three execution modes:
 concurrently over roles in `parallel`, sequentially in `chain`, and once per
 role per round in `validation-loop`. An adapter's own session-end event
