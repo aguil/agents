@@ -41,8 +41,9 @@ const LOADED_HARNESS_DISPOSITIONS = {
   // Same enforcement path as `policy` via `harnessDeclaresPolicy` and
   // `roleEffectivePolicyId` (harness-run-main.ts).
   rolePolicies: { harnessRun: "consumed", codeReview: "rejected" },
-  // `writeCanonicalHooks` / `setUpHookEnforcement` in harness-run-main.ts;
-  // pinned by the ADR 0008 enforcement test in harness-run-cli.test.ts.
+  // `writeCanonicalCursorHooks` / `writeCanonicalClaudeSettings` /
+  // `setUpHookEnforcement` in harness-run-main.ts; pinned by the ADR 0008
+  // enforcement test in harness-run-cli.test.ts.
   hooks: { harnessRun: "consumed", codeReview: "rejected" },
   // `runHarnessRunCli` resolves and collects providers; pinned by
   // "declared context providers collect the bundle for the run" in
