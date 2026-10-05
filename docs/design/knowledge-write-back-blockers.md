@@ -60,7 +60,7 @@ would be skipped identically; the test simply does not exercise them.
 
 **4. The orchestrator does not close the gap.** Its only lifecycle callback is
 `onRoleStart` (declared `packages/orchestration/src/index.ts:188`, invoked
-`:506`), which the CLI uses to regenerate adapter hook configuration. It
+`:510`), which the CLI uses to regenerate adapter hook configuration. It
 dispatches no run-level events and runs no hook commands itself — hook execution
 belongs entirely to the adapter, which is why decision 1 above is the
 orchestrator's to take.
