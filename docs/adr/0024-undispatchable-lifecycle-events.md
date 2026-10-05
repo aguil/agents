@@ -1,4 +1,4 @@
-# ADR 0024: run-level lifecycle events are the orchestrator's to dispatch; declaring an undispatchable event is reported, not accepted
+# ADR 0024: run-level lifecycle events are the orchestrator's to dispatch; declaring an undispatchable event is reported, not silently accepted
 
 **Status:** Accepted
 
