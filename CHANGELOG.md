@@ -10,6 +10,38 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.7](https://github.com/aguil/agents/compare/v0.8.6...v0.8.7) (2026-10-05)
+
+
+### Added
+
+* **cli:** record undeliverable lifecycle hooks in the run result ([5b07c14](https://github.com/aguil/agents/commit/5b07c14125632a4775412cfb600b5a64a004b259))
+* **hooks:** expose the undeliverable lifecycle events behind the warnings ([8398c4a](https://github.com/aguil/agents/commit/8398c4a9e79909a4acb81330108107a5dfb469a0))
+* **hooks:** generate Claude Code hook config (ADR 0023) ([bb9eb23](https://github.com/aguil/agents/commit/bb9eb23c7a6c5684ea8240d0cc529e7637d25095))
+* **hooks:** report role_stop where no generator can deliver it ([4e2566b](https://github.com/aguil/agents/commit/4e2566b1c5bde953743a03f9bf942b5c75417385))
+* **hooks:** warn on undispatchable lifecycle handlers (ADR 0024) ([2ef7d5a](https://github.com/aguil/agents/commit/2ef7d5ac2496965da4c25cd859b6ee118e427ce8))
+
+
+### Fixed
+
+* **cli:** classify Claude's absolute file paths inside the workspace ([e0e0ff8](https://github.com/aguil/agents/commit/e0e0ff84c38ca136e8a1e7714be8df13b2482f4f))
+* **cli:** decide workspace containment on the path a symlink reaches ([a1d5245](https://github.com/aguil/agents/commit/a1d5245cfbc13728f0e5cc1780fd25bcba122a00))
+* **cli:** require the probe's whole answer to be a PreToolUse deny ([5f59c52](https://github.com/aguil/agents/commit/5f59c524838eb37e9bbb63183481c31fc396a67e))
+* **cli:** resolve symlinks before applying .. in the bridge's containment ([c593610](https://github.com/aguil/agents/commit/c5936101709d7b67c39209704210a99e357b277d))
+* **cli:** run Claude's policy bridge as this CLI and probe it first ([b684652](https://github.com/aguil/agents/commit/b6846520832e59dbcb714ad65c272e1d825f1694))
+* **execution:** require the generated file as the value of --settings ([4c36f80](https://github.com/aguil/agents/commit/4c36f804ac33746f03e18b1634aee41b2ec8cf18))
+* **hooks:** register the policy bridge on Claude PreToolUse only ([1739ef7](https://github.com/aguil/agents/commit/1739ef7a97b5f2e1a31a0f3b32a135801070c8a1))
+* **hooks:** rename lifecycle-event constant to match adapter-aware behaviour ([e0eb473](https://github.com/aguil/agents/commit/e0eb47384bf5ea427aaf2a8560629cf96396b03b))
+* **hooks:** single-quote the Claude bridge's words for the shell ([64f75fa](https://github.com/aguil/agents/commit/64f75fa72a0c04ad4774533da626dab6488f22c9))
+* **policy:** classify NotebookEdit by its notebook_path ([6f8ef8a](https://github.com/aguil/agents/commit/6f8ef8add6767e93f2d498e7db64fcde4eee7230))
+
+
+### Changed
+
+* **cli:** cite in-repo references instead of planning-log ids ([9184fb6](https://github.com/aguil/agents/commit/9184fb629f4962cb4c000dca36a92107963601d2))
+* **cli:** drop a no-op branch from normalizeHookPayload ([3d20163](https://github.com/aguil/agents/commit/3d20163cd2b274b04d95fb232367ae0c8c12d5f0))
+* **hooks:** stop exporting CURSOR_EVENT_MAPPING ([60c3385](https://github.com/aguil/agents/commit/60c338562c5fec009ba08adcedb155d1762ca5f6))
+
 ## [0.8.6](https://github.com/aguil/agents/compare/v0.8.5...v0.8.6) (2026-10-05)
 
 
