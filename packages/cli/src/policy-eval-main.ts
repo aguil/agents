@@ -1,11 +1,12 @@
 import { lstatSync, realpathSync } from "node:fs";
 import {
-  basename,
   dirname,
   isAbsolute,
   join,
+  parse,
   relative,
   resolve,
+  sep,
 } from "node:path";
 import type { PolicySpec } from "@aguil/agents-harness-config";
 import { loadPolicy } from "@aguil/agents-harness-config";
@@ -106,32 +107,45 @@ export function relativizeContainedPaths(
 }
 
 /**
- * `path` with every symlink resolved. A path that doesn't exist yet, such as a
- * file about to be written, resolves through its nearest existing ancestor.
- * Undefined when an entry exists but can't be resolved, such as a dangling
- * link: what a write through it reaches is unknown, so it stays uncontained.
+ * `path` with every symlink resolved, walked one component at a time so that
+ * `..` steps out of where a link actually leads rather than where the path
+ * text says. A path that doesn't exist yet, such as a file about to be
+ * written, keeps its missing components as written. Undefined when an entry
+ * exists but can't be resolved, such as a dangling link: what a write through
+ * it reaches is unknown, so it stays uncontained.
  */
 function resolveThroughSymlinks(path: string): string | undefined {
-  const missing: string[] = [];
-  let current = resolve(path);
-  for (;;) {
+  const absolute = isAbsolute(path) ? path : join(process.cwd(), path);
+  let current = parse(absolute).root;
+  let missing = false;
+  for (const part of absolute.slice(current.length).split(sep)) {
+    if (part === "" || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      // `current` is already resolved, so its parent is the physical one.
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, part);
+    if (missing) {
+      current = next;
+      continue;
+    }
     try {
-      return join(realpathSync(current), ...missing);
+      lstatSync(next);
     } catch {
-      try {
-        lstatSync(current);
-        return undefined;
-      } catch {
-        // Nothing here yet; try the parent.
-      }
-      const parent = dirname(current);
-      if (parent === current) {
-        return resolve(path);
-      }
-      missing.unshift(basename(current));
-      current = parent;
+      missing = true;
+      current = next;
+      continue;
+    }
+    try {
+      current = realpathSync(next);
+    } catch {
+      return undefined;
     }
   }
+  return current;
 }
 
 /**

@@ -392,11 +392,13 @@ test("--workspace classifies a symlinked path by the file it reaches", async () 
       };
       return body.hookSpecificOutput.permissionDecision;
     };
-    const [escaping, aliasOfEnv, dangling, fresh] = await Promise.all([
+    const [escaping, aliasOfEnv, dangling, fresh, backOut] = await Promise.all([
       decide("Read", join(workspace, "escape", "secret.txt")),
       decide("Read", join(workspace, "notes.txt")),
       decide("Write", join(workspace, "dangling")),
       decide("Write", join(workspace, "new-dir", "fresh.md")),
+      // Lexically <ws>/outside/secret.txt; physically escape/.. is base.
+      decide("Read", `${workspace}/escape/../outside/secret.txt`),
     ]);
     // A link inside the root to a file outside it is outside.
     expect(escaping).toBe("deny");
@@ -407,6 +409,8 @@ test("--workspace classifies a symlinked path by the file it reaches", async () 
     // A file that doesn't exist yet, in a directory that doesn't either, is
     // still inside.
     expect(fresh).toBe("allow");
+    // `..` after a link steps out of where the link leads.
+    expect(backOut).toBe("deny");
   } finally {
     await rm(base, { recursive: true, force: true });
   }
