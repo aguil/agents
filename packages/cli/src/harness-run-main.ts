@@ -320,16 +320,26 @@ export async function probeClaudePolicyBridge(
     const detail = Bun.stripANSI(stderr).trim().split("\n")[0];
     return `exit ${exitCode}${detail === undefined || detail === "" ? "" : `: ${detail}`}`;
   }
-  const last = stdout.trim().split("\n").at(-1) ?? "";
-  let decision: unknown;
+  // Claude Code reads the whole of stdout as the response and rejects a wrong
+  // event name as a hook error, after which the tool runs. So the whole of
+  // stdout must be one PreToolUse response, not just its last line.
+  const text = stdout.trim();
+  let output: unknown;
   try {
-    decision = JSON.parse(last)?.hookSpecificOutput?.permissionDecision;
+    output = JSON.parse(text)?.hookSpecificOutput;
   } catch {
-    return `output is not JSON: ${JSON.stringify(last)}`;
+    return `output is not one JSON object: ${JSON.stringify(text)}`;
   }
-  return decision === "deny"
+  const { hookEventName, permissionDecision } =
+    typeof output === "object" && output !== null
+      ? (output as Record<string, unknown>)
+      : {};
+  if (hookEventName !== "PreToolUse") {
+    return `answered for ${JSON.stringify(hookEventName ?? null)} where PreToolUse was required`;
+  }
+  return permissionDecision === "deny"
     ? undefined
-    : `answered ${JSON.stringify(decision ?? null)} where a deny was required`;
+    : `answered ${JSON.stringify(permissionDecision ?? null)} where a deny was required`;
 }
 
 export interface HookEnforcementSetup {

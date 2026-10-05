@@ -276,6 +276,9 @@ test("claude setup refuses a bridge that does not fail closed (ADR 0023 decision
   const shims = {
     stale: `#!/bin/sh\nprintf '\\033[31mpolicy-eval: unknown argument "--format"\\033[0m\\n' >&2\nexit 1\n`,
     failOpen: `#!/bin/sh\necho '${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } })}'\n`,
+    // Each denies, but Claude Code would reject the response and run the tool.
+    wrongEvent: `#!/bin/sh\necho '${JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", permissionDecision: "deny" } })}'\n`,
+    banner: `#!/bin/sh\necho 'agents 0.0.0'\necho '${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } })}'\n`,
   };
   try {
     const errors = await Promise.all(
@@ -299,6 +302,12 @@ test("claude setup refuses a bridge that does not fail closed (ADR 0023 decision
     );
     expect(errors[1]).toContain(
       'failed its probe (answered "allow" where a deny was required)',
+    );
+    expect(errors[2]).toContain(
+      'failed its probe (answered for "PostToolUse" where PreToolUse was required)',
+    );
+    expect(errors[3]).toContain(
+      "failed its probe (output is not one JSON object",
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });
