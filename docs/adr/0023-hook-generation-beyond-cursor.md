@@ -12,7 +12,9 @@
   Amended before merge with decision 9, after a measurement on 2026-10-03 at
   Claude Code `2.1.288` found the bridge's response on `PostToolUse` recorded as
   a failed hook. The probe results are recorded in the context above rather than
-  left in a working note.
+  left in a working note. Amended before merge with decision 10, after the
+  installed `agents` releases were found on 2026-10-04 to reject the bridge's
+  own arguments.
 
 **Context:** `packages/hooks` exports one generator,
 `generateCursorHooksConfig`, which projects a harness's canonical `hooks:` block
@@ -230,6 +232,30 @@ message, and is covered by unit tests rather than by this probe.
    post-call verdict ever gain a consumer on Claude Code, it needs an encoding
    for `PostToolUse` of its own (decision 6), not this exception reversed.
 
+10. **On Claude Code the bridge names the CLI that generated it, and is probed
+    before any role runs.** The generated command named `agents`, resolved on
+    the hook's `PATH`, and nothing required that binary to be the one that wrote
+    the settings. On 2026-10-04 both installed releases, `0.8.4` and `0.8.5`,
+    rejected `--format` and exited 1. Claude Code documents any exit other than
+    0 and 2 as a non-blocking error, after which the tool runs. A bridge older
+    than its own arguments is therefore an unenforced run that decision 2's
+    refusal cannot see, because the adapter can deny and the generated file is
+    well-formed.
+
+    So, unless `--agents-cli` names a command, the bridge is the running CLI
+    itself: the Bun executable and the entry script, as absolute paths. The
+    settings file is run-scoped (decision 3), so machine-specific paths cost
+    nothing there. Cursor's in-workspace file keeps `agents`; changing it
+    belongs to the follow-up decision 3 names.
+
+    And before any role runs, `harness run` invokes the generated command once,
+    as Claude Code would, with no policy identity in its environment. A working
+    bridge fails closed there and answers `deny` in decision 6's Claude shape.
+    Any other answer fails the run: a non-zero exit, output that does not parse
+    or an `allow`. The reasoning is decision 4's: the alternative is not a
+    degraded run but an unenforced one. The probe proves the command parses its
+    arguments and fails closed; it does not prove a given policy's verdicts.
+
 **Consequences:**
 
 - Claude Code becomes an adapter on which a declared policy is enforced, and
@@ -237,6 +263,8 @@ message, and is covered by unit tests rather than by this probe.
   only (decision 9); nothing evaluates policy after a Claude Code tool call. The
   `--allow-unenforced-policy` escape hatch stays, and the set of adapters
   needing it shrinks by one.
+- Every policy-declaring Claude Code run spawns the bridge once more, before its
+  first role, for decision 10's probe.
 - Adding an adapter now requires filling a table row that includes a capability
   claim. That is deliberate friction: the claim "this adapter enforces policy"
   is the one most costly to get wrong, and a table entry is harder to add
