@@ -1,5 +1,5 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   conformanceOutcomeViolations,
   conformanceReportedMetadata,
@@ -21,6 +21,7 @@ import {
 } from "@aguil/agents-core";
 import type {
   AgentAdapter,
+  ClaudeCodeAdapterOptions,
   CursorAdapterOptions,
 } from "@aguil/agents-execution";
 import {
@@ -40,8 +41,13 @@ import {
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
 import {
+  adapterCanDeny,
+  adapterHookCapabilities,
+  generateClaudeHooksConfig,
   generateCursorHooksConfig,
+  renderClaudeSettingsConfig,
   renderCursorHooksConfig,
+  undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
 import {
@@ -97,7 +103,8 @@ Optional:
   --models role=model,...  Per-role model overrides by harness role id, e.g.
                            --models security=provider/strong,quality=provider/fast
                            A role's entry beats --model; unmapped roles fall back
-  --agents-cli <cmd>       agents CLI used by generated hooks (default: agents)
+  --agents-cli <cmd>       agents CLI used by generated hooks (default: agents;
+                           under claude, this CLI itself)
   --strict                 Fail the run on schema / enablement violations
   --allow-unenforced-policy
                            Permit adapters that cannot enforce a declared policy
@@ -184,6 +191,7 @@ export function cursorOptionsForHarnessRun(
 function constructAdapter(
   name: AdapterName,
   args: Pick<HarnessRunArgs, "forceToolCalls" | "model" | "models">,
+  claude?: ClaudeCodeAdapterOptions,
 ): AgentAdapter {
   const modelOptions = { model: args.model, models: args.models };
   switch (name) {
@@ -193,7 +201,7 @@ function constructAdapter(
         ...modelOptions,
       });
     case "claude":
-      return new ClaudeCodeAdapter(modelOptions);
+      return new ClaudeCodeAdapter({ ...modelOptions, ...(claude ?? {}) });
     case "opencode":
       return new OpenCodeAdapter(modelOptions);
     case "fake":
@@ -204,7 +212,10 @@ function constructAdapter(
 type EnforcementArgs = Pick<
   HarnessRunArgs,
   "adapter" | "agentsDir" | "workspace" | "agentsCli" | "allowUnenforcedPolicy"
->;
+> & {
+  /** Run scratchpad — Claude settings land here (ADR 0023 decision 3). */
+  readonly scratchpadPath: string;
+};
 
 /**
  * Write the role-invariant `.cursor/hooks.json`. Policy identity is NOT in
@@ -213,7 +224,7 @@ type EnforcementArgs = Pick<
  * (temp + rename) so a hook process or concurrent run reading mid-write
  * never observes partial JSON, which could silently drop enforcement.
  */
-async function writeCanonicalHooks(
+async function writeCanonicalCursorHooks(
   loaded: LoadedHarness,
   args: EnforcementArgs,
 ): Promise<void> {
@@ -234,73 +245,212 @@ async function writeCanonicalHooks(
 }
 
 /**
- * Set up policy enforcement for this run (ADR 0008).
+ * Argv that runs this CLI again: the Bun executable and the entry script
+ * (ADR 0023 decision 10). Bundled, every module's path is the bundle, which is
+ * the entry; from source, the entry is index.ts beside this module.
+ */
+export function selfAgentsCommand(): readonly string[] {
+  const here = import.meta.path;
+  const entry = here.endsWith(".ts") ? join(dirname(here), "index.ts") : here;
+  return [process.execPath, entry];
+}
+
+/**
+ * Write run-scoped Claude Code settings into the scratchpad (ADR 0023
+ * decision 3). Nothing in the user's workspace tree is touched. Returns the
+ * file and the bridge command it registers, if any.
+ */
+async function writeCanonicalClaudeSettings(
+  loaded: LoadedHarness,
+  args: EnforcementArgs,
+): Promise<{ readonly path: string; readonly bridge?: string }> {
+  const policyBridge = harnessDeclaresPolicy(loaded);
+  const generated = generateClaudeHooksConfig({
+    hooks: loaded.hooks,
+    policyBridge,
+    // The bridge must understand the arguments this CLI generates, which a
+    // different `agents` on the hook's PATH may not (ADR 0023 decision 10).
+    agentsCli: args.agentsCli ?? selfAgentsCommand(),
+    workspaceRoot: resolve(args.workspace),
+  });
+  const finalPath = join(args.scratchpadPath, "claude-settings.json");
+  const tempPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
+  await writeFile(tempPath, renderClaudeSettingsConfig(generated.config));
+  await rename(tempPath, finalPath);
+  // The generator registers the bridge first on PreToolUse (decision 9).
+  const bridge = policyBridge
+    ? generated.config.hooks.PreToolUse?.[0]?.hooks[0]?.command
+    : undefined;
+  return { path: finalPath, ...(bridge === undefined ? {} : { bridge }) };
+}
+
+/**
+ * Run the Claude bridge once, as Claude Code would, with no policy identity
+ * (ADR 0023 decision 10). A working bridge fails closed and denies in the
+ * Claude shape. Claude Code runs the tool after any exit but 0 or 2, so a
+ * bridge that errors is a bridge that allows. Returns why the probe failed,
+ * or undefined when it passed.
+ */
+export async function probeClaudePolicyBridge(
+  command: string,
+  workspace: string,
+): Promise<string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.AGENTS_POLICY_ID;
+  const proc = Bun.spawn({
+    cmd: ["sh", "-c", command],
+    cwd: workspace,
+    env,
+    stdin: new TextEncoder().encode(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "true" },
+      }),
+    ),
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 30_000,
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    const detail = Bun.stripANSI(stderr).trim().split("\n")[0];
+    return `exit ${exitCode}${detail === undefined || detail === "" ? "" : `: ${detail}`}`;
+  }
+  // Claude Code reads the whole of stdout as the response and rejects a wrong
+  // event name as a hook error, after which the tool runs. So the whole of
+  // stdout must be one PreToolUse response, not just its last line.
+  const text = stdout.trim();
+  let output: unknown;
+  try {
+    output = JSON.parse(text)?.hookSpecificOutput;
+  } catch {
+    return `output is not one JSON object: ${JSON.stringify(text)}`;
+  }
+  const { hookEventName, permissionDecision } =
+    typeof output === "object" && output !== null
+      ? (output as Record<string, unknown>)
+      : {};
+  if (hookEventName !== "PreToolUse") {
+    return `answered for ${JSON.stringify(hookEventName ?? null)} where PreToolUse was required`;
+  }
+  return permissionDecision === "deny"
+    ? undefined
+    : `answered ${JSON.stringify(permissionDecision ?? null)} where a deny was required`;
+}
+
+export interface HookEnforcementSetup {
+  readonly onRoleStart?: (roleId: string) => Promise<void>;
+  readonly roleEnv?: (roleId: string) => Readonly<Record<string, string>>;
+  /** Present when the Claude adapter should load run-scoped settings. */
+  readonly claudeSettingsPath?: string;
+}
+
+/**
+ * Set up policy enforcement for this run (ADR 0008 / ADR 0023).
  *
- * The hook config file only registers the env-reading policy bridge; the
- * per-role policy id travels in each role's subprocess environment via
- * roleEnv, so enforcement works identically in chain, parallel, and
- * validation-loop modes and cannot cross-contaminate concurrent runs.
- * onRoleStart still regenerates the (constant) file before every role as
- * tamper repair — safe to interleave because all writers produce the same
- * bytes and the write is atomic.
+ * The hook config only registers the env-reading policy bridge; the per-role
+ * policy id travels in each role's subprocess environment via roleEnv.
+ * onRoleStart regenerates the (constant) file before every role as tamper
+ * repair. Enforcement is per-adapter via `adapterCanDeny`, not a hard-coded
+ * cursor comparison.
  */
 export async function setUpHookEnforcement(
   loaded: LoadedHarness,
   args: EnforcementArgs,
-): Promise<
-  | {
-      readonly onRoleStart?: (roleId: string) => Promise<void>;
-      readonly roleEnv?: (roleId: string) => Readonly<Record<string, string>>;
-    }
-  | { readonly error: string }
-> {
+): Promise<HookEnforcementSetup | { readonly error: string }> {
   const hasHooks = Object.keys(loaded.hooks).length > 0;
   const hasAnyPolicy = harnessDeclaresPolicy(loaded);
-  // ADR 0024: tell the author when a declared lifecycle handler cannot fire,
-  // before any adapter-specific enforcement path. Warning, not a hard refuse —
-  // the document is valid; the defect is silence.
-  for (const warning of undispatchableLifecycleHookWarnings(loaded.hooks)) {
+  // ADR 0024: tell the author when a declared lifecycle handler cannot fire
+  // under the active adapter's generator.
+  for (const warning of undispatchableLifecycleHookWarnings(
+    loaded.hooks,
+    args.adapter,
+  )) {
     console.warn(`harness run: ${warning}`);
   }
   if (!hasHooks && !hasAnyPolicy) {
     return {};
   }
-  if (args.adapter !== "cursor") {
-    // Hook config generation is cursor-only in v1, so a declared policy
-    // cannot be enforced on other adapters. Fail closed unless the operator
-    // explicitly accepts an unenforced run.
+
+  const caps = adapterHookCapabilities(args.adapter);
+  const canDeny = adapterCanDeny(args.adapter);
+  if (!canDeny) {
     if (hasAnyPolicy && !args.allowUnenforcedPolicy) {
+      const reason =
+        caps?.cannotDenyReason ??
+        `adapter "${args.adapter}" has no blocking hook mechanism`;
       return {
         error:
           `harness run: harness declares a policy but adapter "${args.adapter}" cannot enforce it ` +
-          "(hook config generation is cursor-only in v1). Re-run with --adapter cursor, " +
+          `(${reason}). Re-run with --adapter cursor or --adapter claude, ` +
           "or pass --allow-unenforced-policy to run WITHOUT policy enforcement.",
       };
     }
     console.warn(
-      `harness run: adapter "${args.adapter}" runs WITHOUT generated hook enforcement (--allow-unenforced-policy)`,
+      `harness run: adapter "${args.adapter}" runs WITHOUT generated hook enforcement` +
+        (args.allowUnenforcedPolicy ? " (--allow-unenforced-policy)" : ""),
     );
     return {};
   }
 
-  await writeCanonicalHooks(loaded, args);
   const agentsDir = resolve(args.agentsDir);
-  return {
-    onRoleStart: async (roleId: string) => {
-      await writeCanonicalHooks(loaded, args);
-      console.warn(
-        `harness run: role "${roleId}" enforced under policy "${roleEffectivePolicyId(loaded, roleId) ?? "(none)"}"`,
+  const roleEnv = hasAnyPolicy
+    ? (roleId: string) => ({
+        AGENTS_POLICY_ID:
+          roleEffectivePolicyId(loaded, roleId) ?? POLICY_NONE_TOKEN,
+        AGENTS_AGENTS_DIR: agentsDir,
+      })
+    : undefined;
+
+  if (args.adapter === "cursor") {
+    await writeCanonicalCursorHooks(loaded, args);
+    return {
+      onRoleStart: async (roleId: string) => {
+        await writeCanonicalCursorHooks(loaded, args);
+        console.warn(
+          `harness run: role "${roleId}" enforced under policy "${roleEffectivePolicyId(loaded, roleId) ?? "(none)"}"`,
+        );
+      },
+      ...(roleEnv === undefined ? {} : { roleEnv }),
+    };
+  }
+
+  if (args.adapter === "claude") {
+    const settings = await writeCanonicalClaudeSettings(loaded, args);
+    if (settings.bridge !== undefined) {
+      const failure = await probeClaudePolicyBridge(
+        settings.bridge,
+        resolve(args.workspace),
       );
-    },
-    ...(hasAnyPolicy
-      ? {
-          roleEnv: (roleId: string) => ({
-            AGENTS_POLICY_ID:
-              roleEffectivePolicyId(loaded, roleId) ?? POLICY_NONE_TOKEN,
-            AGENTS_AGENTS_DIR: agentsDir,
-          }),
-        }
-      : {}),
+      if (failure !== undefined) {
+        return {
+          error:
+            `harness run: the Claude policy bridge failed its probe (${failure}), ` +
+            "so the declared policy would not be enforced (ADR 0023 decision 10). " +
+            `Bridge: ${settings.bridge}. Pass --agents-cli naming an agents CLI ` +
+            'that supports "policy-eval --format claude --workspace".',
+        };
+      }
+    }
+    return {
+      claudeSettingsPath: settings.path,
+      onRoleStart: async (roleId: string) => {
+        await writeCanonicalClaudeSettings(loaded, args);
+        console.warn(
+          `harness run: role "${roleId}" enforced under policy "${roleEffectivePolicyId(loaded, roleId) ?? "(none)"}"`,
+        );
+      },
+      ...(roleEnv === undefined ? {} : { roleEnv }),
+    };
+  }
+
+  return {
+    error: `harness run: adapter "${args.adapter}" is marked canDeny but has no generator (internal matrix error)`,
   };
 }
 
@@ -356,14 +506,6 @@ export async function runHarnessRunCli(
     return 1;
   }
 
-  const enforcement = await setUpHookEnforcement(loaded, parsed);
-  if ("error" in enforcement) {
-    console.error(enforcement.error);
-    return 1;
-  }
-  const onRoleStart = enforcement.onRoleStart;
-  const roleEnv = enforcement.roleEnv;
-
   if (parsed.forceToolCalls) {
     // Same audibility bar as --allow-unenforced-policy: weakening the Cursor
     // approval posture must be stated on stderr, not inherited quietly.
@@ -384,6 +526,20 @@ export async function runHarnessRunCli(
   const runId = createRunId(`harness-${parsed.harnessId}`);
   const scratchpadPath = join(workspacePath, ".agents-harness", "runs", runId);
   await mkdir(scratchpadPath, { recursive: true });
+
+  // Enforcement needs the scratchpad so Claude settings are run-scoped
+  // (ADR 0023 decision 3) rather than written into the workspace.
+  const enforcement = await setUpHookEnforcement(loaded, {
+    ...parsed,
+    scratchpadPath,
+  });
+  if ("error" in enforcement) {
+    console.error(enforcement.error);
+    return 1;
+  }
+  const onRoleStart = enforcement.onRoleStart;
+  const roleEnv = enforcement.roleEnv;
+
   let contextBundlePath: string;
   // A row count has an exact meaning when nothing was collected (no rows),
   // unlike `tier`, so it is always bound (ADR 0025).
@@ -461,7 +617,16 @@ export async function runHarnessRunCli(
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
-    adapter: constructAdapter(parsed.adapter, parsed),
+    adapter: constructAdapter(
+      parsed.adapter,
+      parsed,
+      enforcement.claudeSettingsPath === undefined
+        ? undefined
+        : {
+            settingsPath: enforcement.claudeSettingsPath,
+            requireHookEnforcement: harnessDeclaresPolicy(loaded),
+          },
+    ),
     contextBundlePath,
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),
@@ -475,7 +640,12 @@ export async function runHarnessRunCli(
           cursorOptionsForHarnessRun(parsed.forceToolCalls),
         )
       : undefined;
-
+  // ADR 0024 decision 2: the events the setup warning named are recorded in
+  // the run's result too. Informational only; status never reads it (ADR 0021).
+  const undeliverableHooks = undeliverableLifecycleHookEvents(
+    loaded.hooks,
+    parsed.adapter,
+  );
   // Same conformance bookkeeping as `agents code-review` (ADR 0025): empty
   // unless the harness declares a `conformance` role, so other harnesses'
   // results and reports are unchanged.
@@ -492,6 +662,9 @@ export async function runHarnessRunCli(
           cursor_force: cursorApproval.force ? "true" : "false",
           cursor_sandbox: cursorApproval.sandbox ?? "",
         }),
+    ...(undeliverableHooks.length === 0
+      ? {}
+      : { undeliverable_hooks: undeliverableHooks.join(",") }),
   };
   const ranResult = await orchestrator.run({
     runId,

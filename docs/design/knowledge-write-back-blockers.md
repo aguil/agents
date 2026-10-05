@@ -56,8 +56,9 @@ adapter that has a hook generator:
 **3. A test pins the behavior.** `tests/hooks-generation.test.ts` enumerates
 every canonical `HookEvent` and its Cursor dispatchability (ADR 0024 §4). The
 fixture-local `skippedEvents === ["run_end"]` assertion remains, labeled as a
-fixture artifact, not the contract. `UNDISPATCHABLE_LIFECYCLE_EVENTS` names the
-three inert events explicitly.
+fixture artifact, not the contract. `LIFECYCLE_HOOK_EVENTS` names the lifecycle
+events that may be inert under an adapter; on Cursor, `role_start`, `run_start`
+and `run_end` are.
 
 **4. The orchestrator does not close the gap.** Its only lifecycle callback is
 `onRoleStart` (declared `packages/orchestration/src/index.ts:188`, invoked
@@ -67,10 +68,10 @@ belongs entirely to the adapter, which is why decision 1 above is the
 orchestrator's to take.
 
 So a declared `run_end` handler is accepted, warned about, never generated, and
-never run. `run_start` is inert in exactly the same way. `role_start` is inert
-for a weaker reason: unmapped under the only generator that exists, not
-impossible. `role_stop` is the only lifecycle event that reaches an adapter
-today.
+never run. `run_start` is inert in exactly the same way, on every adapter.
+`role_start` and `role_stop` are different: whether they fire depends on the
+adapter's generator. Claude Code maps both (`SessionStart` and `Stop`), Cursor
+maps only `role_stop`, and an adapter with no generator maps neither.
 
 This trap is wider than knowledge write-back: the loader accepting handlers for
 events that can never fire will mislead anyone declaring a lifecycle hook, not
@@ -100,9 +101,9 @@ work.
    §4 requires this become an enumeration of every canonical event and its
    dispatchability; today's assertion names only `run_end` because that is the
    sole unmapped event its fixture declares.~~ **Done with the ADR 0024 honesty
-   fix** — `cursorHookEventDispatchability()` /
-   `UNDISPATCHABLE_LIFECYCLE_EVENTS` enumerate the surface; declaring an inert
-   lifecycle handler warns at `setUpHookEnforcement`.
+   fix** — `cursorHookEventDispatchability()` / `LIFECYCLE_HOOK_EVENTS`
+   enumerate the surface; declaring an inert lifecycle handler warns at
+   `setUpHookEnforcement`.
 3. **A knowledge read path.** ~~A provider registered in
    `packages/context/src/index.ts`, conforming to the contract in ADR 0010.~~
    **Done (2026-08-02)** — `knowledge` and `knowledge-search` per ADR 0022.

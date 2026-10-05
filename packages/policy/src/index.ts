@@ -161,7 +161,11 @@ function extractCommand(input: PolicyEvalInput): string | undefined {
 }
 
 function extractFilePath(input: PolicyEvalInput): string | undefined {
-  const candidate = input.toolInput?.file_path ?? input.toolInput?.path;
+  // Claude Code's NotebookEdit names its file `notebook_path`.
+  const candidate =
+    input.toolInput?.file_path ??
+    input.toolInput?.path ??
+    input.toolInput?.notebook_path;
   return typeof candidate === "string" && candidate.length > 0
     ? candidate
     : undefined;

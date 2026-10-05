@@ -8,6 +8,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function runHarnessCli(
   args: readonly string[],
+  env?: Readonly<Record<string, string>>,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn({
     cmd: [
@@ -19,6 +20,7 @@ async function runHarnessCli(
       ...args,
     ],
     cwd: repoRoot,
+    ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -210,10 +212,380 @@ test("a policy-declaring harness fails closed on a non-cursor adapter", async ()
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("cannot enforce it");
     expect(result.stderr).toContain("--allow-unenforced-policy");
+    expect(result.stderr).not.toContain("cursor-only");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("claude adapter enforces policy via run-scoped settings (ADR 0023)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const loaded = await loadHarness({
+    agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+    harnessId: "incident-triage",
+  });
+  const workspace = await mkdtemp(join(tmpdir(), "harness-claude-hooks-"));
+  const scratchpadPath = join(workspace, "scratch");
+  await mkdir(scratchpadPath, { recursive: true });
+  try {
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "claude",
+      agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
+      workspace,
+      scratchpadPath,
+      allowUnenforcedPolicy: false,
+    });
+    if ("error" in enforcement) {
+      throw new Error(enforcement.error);
+    }
+    expect(enforcement.claudeSettingsPath).toBe(
+      join(scratchpadPath, "claude-settings.json"),
+    );
+    const settingsPath = enforcement.claudeSettingsPath;
+    if (settingsPath === undefined) {
+      throw new Error("expected claudeSettingsPath");
+    }
+    const settings = JSON.parse(await Bun.file(settingsPath).text());
+    // With no --agents-cli, the bridge is this CLI itself, which setup has
+    // already probed (ADR 0023 decision 10).
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(
+      `'${process.execPath}' '${join(repoRoot, "packages", "cli", "src", "index.ts")}' ` +
+        `policy-eval --format claude --workspace '${workspace}'`,
+    );
+    // Workspace must not gain a .claude/settings mutation.
+    expect(
+      await Bun.file(join(workspace, ".claude", "settings.json")).exists(),
+    ).toBe(false);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("claude setup refuses a bridge that does not fail closed (ADR 0023 decision 10)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const agentsDir = join(repoRoot, "examples", "incident-triage", ".agents");
+  const loaded = await loadHarness({ agentsDir, harnessId: "incident-triage" });
+  const workspace = await mkdtemp(join(tmpdir(), "harness-claude-probe-"));
+  const scratchpadPath = join(workspace, "scratch");
+  await mkdir(scratchpadPath, { recursive: true });
+  // A release older than --format, and a bridge that answers allow.
+  const shims = {
+    stale: `#!/bin/sh\nprintf '\\033[31mpolicy-eval: unknown argument "--format"\\033[0m\\n' >&2\nexit 1\n`,
+    failOpen: `#!/bin/sh\necho '${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } })}'\n`,
+    // Each denies, but Claude Code would reject the response and run the tool.
+    wrongEvent: `#!/bin/sh\necho '${JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", permissionDecision: "deny" } })}'\n`,
+    banner: `#!/bin/sh\necho 'agents 0.0.0'\necho '${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } })}'\n`,
+  };
+  try {
+    const errors = await Promise.all(
+      Object.entries(shims).map(async ([name, script]) => {
+        const agentsCli = join(workspace, name);
+        await writeFile(agentsCli, script, { mode: 0o755 });
+        await mkdir(join(scratchpadPath, name));
+        const enforcement = await setUpHookEnforcement(loaded, {
+          adapter: "claude",
+          agentsDir,
+          workspace,
+          scratchpadPath: join(scratchpadPath, name),
+          agentsCli,
+          allowUnenforcedPolicy: false,
+        });
+        return "error" in enforcement ? enforcement.error : undefined;
+      }),
+    );
+    expect(errors[0]).toContain(
+      'failed its probe (exit 1: policy-eval: unknown argument "--format")',
+    );
+    expect(errors[1]).toContain(
+      'failed its probe (answered "allow" where a deny was required)',
+    );
+    expect(errors[2]).toContain(
+      'failed its probe (answered for "PostToolUse" where PreToolUse was required)',
+    );
+    expect(errors[3]).toContain(
+      "failed its probe (output is not one JSON object",
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("claude bridge classifies absolute paths under a filesystem policy (#219)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const agentsDir = join(repoRoot, "examples", "incident-triage", ".agents");
+  const loaded = await loadHarness({ agentsDir, harnessId: "incident-triage" });
+  const workspace = await mkdtemp(join(tmpdir(), "harness-claude-paths-"));
+  const scratchpadPath = join(workspace, ".agents-harness", "runs", "r1");
+  await mkdir(scratchpadPath, { recursive: true });
+  // The generated command names one executable; this one runs the repo's CLI.
+  const agentsCli = join(workspace, "agents-shim");
+  await writeFile(
+    agentsCli,
+    `#!/bin/sh\nexec bun run ${JSON.stringify(join(repoRoot, "packages", "cli", "src", "index.ts"))} "$@"\n`,
+    { mode: 0o755 },
+  );
+  try {
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "claude",
+      agentsDir,
+      workspace,
+      scratchpadPath,
+      agentsCli,
+      allowUnenforcedPolicy: false,
+    });
+    if (
+      "error" in enforcement ||
+      enforcement.claudeSettingsPath === undefined
+    ) {
+      throw new Error("expected run-scoped Claude settings");
+    }
+    const settings = JSON.parse(
+      await Bun.file(enforcement.claudeSettingsPath).text(),
+    );
+    const command: string = settings.hooks.PreToolUse[0].hooks[0].command;
+    const roleEnv = enforcement.roleEnv?.("scout") ?? {};
+    // Run the bridge exactly as Claude Code would: the generated command
+    // under a shell, the role's env, and a PreToolUse payload on stdin.
+    const decide = async (tool: string, filePath: string) => {
+      const proc = Bun.spawn({
+        cmd: ["sh", "-c", command],
+        cwd: workspace,
+        env: { ...Bun.env, ...roleEnv },
+        stdin: new TextEncoder().encode(
+          JSON.stringify({
+            hook_event_name: "PreToolUse",
+            tool_name: tool,
+            tool_input: { file_path: filePath },
+          }),
+        ),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const stdout = await new Response(proc.stdout).text();
+      await proc.exited;
+      const lines = stdout.trim().split("\n");
+      return JSON.parse(lines[lines.length - 1] ?? "{}").hookSpecificOutput
+        ?.permissionDecision as string | undefined;
+    };
+    const [bundle, write, checkFile, system] = await Promise.all([
+      decide("Read", join(scratchpadPath, "context.json")),
+      decide("Write", join(workspace, "notes.md")),
+      decide("Edit", join(workspace, "check.ts")),
+      decide("Read", "/etc/passwd"),
+    ]);
+    // The role's inputs, handed to it by absolute path, are readable...
+    expect(bundle).toBe("allow");
+    expect(write).toBe("allow");
+    // ...while the policy's deny globs and the workspace boundary still hold.
+    expect(checkFile).toBe("deny");
+    expect(system).toBe("deny");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Stand-in agent CLIs for AC-1. Each reads the hook configuration its real
+ * counterpart would load, offers the same two shell calls to those hooks as
+ * that CLI's pre-call event, and runs a call only when no hook blocks it. The
+ * real CLIs' own behaviour is what the live check after release covers.
+ */
+const STUB_SHELL_CALLS = ["touch permitted.txt", "rm victim.txt"];
+
+const STUB_HOST_COMMON = `
+import { appendFileSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const calls = ${JSON.stringify(STUB_SHELL_CALLS)};
+const runHook = (command, payload) =>
+  spawnSync("sh", ["-c", command], {
+    input: JSON.stringify(payload),
+    encoding: "utf8",
+  });
+const lastJson = (stdout) => {
+  try {
+    return JSON.parse(stdout.trim().split("\\n").at(-1) ?? "");
+  } catch {
+    return undefined;
+  }
+};
+const offer = (blocked) => {
+  for (const command of calls) {
+    const denied = blocked(command);
+    appendFileSync("host.log", \`\${command}: \${denied ? "blocked" : "ran"}\\n\`);
+    if (!denied) spawnSync("sh", ["-c", command]);
+  }
+};
+`;
+
+const STUB_CLAUDE = `${STUB_HOST_COMMON}
+const at = process.argv.indexOf("--settings");
+const settings =
+  at === -1 ? { hooks: {} } : JSON.parse(readFileSync(process.argv[at + 1], "utf8"));
+appendFileSync("host.log", \`settings: \${at === -1 ? "none" : process.argv[at + 1]}\\n\`);
+offer((command) =>
+  (settings.hooks.PreToolUse ?? [])
+    .filter((group) => group.matcher === undefined || new RegExp(\`^(?:\${group.matcher})$\`).test("Bash"))
+    .flatMap((group) => group.hooks)
+    .some((hook) => {
+      const result = runHook(hook.command, {
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      // Claude Code blocks on exit 2 or a deny; any other exit is non-blocking.
+      return (
+        result.status === 2 ||
+        (result.status === 0 &&
+          lastJson(result.stdout)?.hookSpecificOutput?.permissionDecision === "deny")
+      );
+    }),
+);
+`;
+
+const STUB_CURSOR = `${STUB_HOST_COMMON}
+const workspace = process.argv[process.argv.indexOf("--workspace") + 1];
+const config = JSON.parse(readFileSync(\`\${workspace}/.cursor/hooks.json\`, "utf8"));
+offer((command) =>
+  (config.hooks.beforeShellExecution ?? []).some((hook) => {
+    const result = runHook(hook.command, {
+      hook_event_name: "beforeShellExecution",
+      command,
+      cwd: workspace,
+    });
+    const permission = lastJson(result.stdout)?.permission;
+    return permission === "deny" || permission === "ask";
+  }),
+);
+`;
+
+test("one policy blocks the denied call and runs the permitted one on cursor and claude (AC-1)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-ac1-"));
+  try {
+    const agentsDir = join(root, "agents");
+    const binDir = join(root, "bin");
+    const harnessDir = join(agentsDir, "harnesses", "ac1");
+    await mkdir(harnessDir, { recursive: true });
+    await mkdir(join(agentsDir, "policies"), { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    const shebang = `#!${process.execPath}\n`;
+    await writeFile(join(binDir, "claude"), shebang + STUB_CLAUDE, {
+      mode: 0o755,
+    });
+    await writeFile(join(binDir, "agent"), shebang + STUB_CURSOR, {
+      mode: 0o755,
+    });
+    // Cursor's generated hooks name a bare `agents`; this one is the repo's.
+    await writeFile(
+      join(binDir, "agents"),
+      `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(repoRoot, "packages", "cli", "src", "index.ts"))} "$@"\n`,
+      { mode: 0o755 },
+    );
+    await writeFile(
+      join(agentsDir, "policies", "ac1.yaml"),
+      [
+        "id: ac1",
+        "description: allows touch, denies rm",
+        "capabilities:",
+        "  exec:",
+        '    allow: ["touch"]',
+        '    deny: ["rm"]',
+        "",
+      ].join("\n"),
+    );
+    // One harness.yaml, unmodified between the two runs (AC-3).
+    const harnessYaml = [
+      'spec_version: "0.2"',
+      "kind: harness",
+      "harness:",
+      "  id: ac1",
+      "policy: ac1",
+      "roles:",
+      "  solo:",
+      "    description: offers one permitted and one denied shell call",
+      "    prompt: |",
+      "      noop",
+      "",
+    ].join("\n");
+    await writeFile(join(harnessDir, "harness.yaml"), harnessYaml);
+
+    const runOn = async (adapter: "cursor" | "claude") => {
+      const workspace = join(root, adapter);
+      await mkdir(workspace);
+      await writeFile(join(workspace, "victim.txt"), "keep me");
+      // The stubs must win the PATH lookup, or the real CLIs would run.
+      const proc = Bun.spawn({
+        cmd: [
+          "bun",
+          "run",
+          join(repoRoot, "packages", "cli", "src", "index.ts"),
+          "harness",
+          "run",
+          "ac1",
+          "--agents-dir",
+          agentsDir,
+          "--workspace",
+          workspace,
+          "--adapter",
+          adapter,
+        ],
+        cwd: repoRoot,
+        env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      const cli = { stdout, stderr };
+      const log = await Bun.file(join(workspace, "host.log"))
+        .text()
+        .catch(() => "");
+      return {
+        cli,
+        log,
+        permitted: await Bun.file(join(workspace, "permitted.txt")).exists(),
+        victim: await Bun.file(join(workspace, "victim.txt")).exists(),
+      };
+    };
+    const [cursor, claude] = await Promise.all([
+      runOn("cursor"),
+      runOn("claude"),
+    ]);
+
+    for (const run of [cursor, claude]) {
+      // Neither run is refused, and neither needed --allow-unenforced-policy.
+      expect(run.cli.stderr).not.toContain("cannot enforce it");
+      expect(run.cli.stderr).not.toContain("failed its probe");
+      expect(run.cli.stderr).toContain('enforced under policy "ac1"');
+      // The permitted call ran; the denied one was offered and blocked.
+      expect(run.log).toContain("touch permitted.txt: ran");
+      expect(run.log).toContain("rm victim.txt: blocked");
+      expect(run.permitted).toBe(true);
+      expect(run.victim).toBe(true);
+    }
+    // On Claude the policy arrived as run-scoped --settings in the scratchpad.
+    expect(claude.log).toMatch(
+      /settings: .*\/\.agents-harness\/runs\/[^/]+\/claude-settings\.json/,
+    );
+    expect(await Bun.file(join(harnessDir, "harness.yaml")).text()).toBe(
+      harnessYaml,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  // Two CLI runs, each spawning the bridge per offered call.
+}, 60_000);
 
 test("declaring run_end / run_start / role_start warns rather than failing (ADR 0024)", async () => {
   const { setUpHookEnforcement } = await import(
@@ -262,6 +634,7 @@ test("declaring run_end / run_start / role_start warns rather than failing (ADR 
       adapter: "cursor",
       agentsDir,
       workspace,
+      scratchpadPath: workspace,
       allowUnenforcedPolicy: false,
     });
     expect("error" in enforcement).toBe(false);
@@ -282,6 +655,180 @@ test("declaring run_end / run_start / role_start warns rather than failing (ADR 
   }
 });
 
+/**
+ * Run a one-role harness through the CLI with the given `hooks:` / extra YAML
+ * lines, and return the CLI output plus the persisted run result. `cursor` and
+ * `claude` resolve to stub executables that exit 0, so their real generators
+ * run without a real agent CLI.
+ */
+async function runLifecycleHarness(options: {
+  readonly adapter: "cursor" | "claude" | "fake";
+  readonly yaml: readonly string[];
+}): Promise<{
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+  readonly result: {
+    readonly status: string;
+    readonly metadata: Record<string, string>;
+  };
+}> {
+  const root = await mkdtemp(join(tmpdir(), "harness-undeliverable-"));
+  try {
+    const workspace = join(root, "workspace");
+    const agentsDir = join(root, "agents");
+    const binDir = join(root, "bin");
+    const harnessDir = join(agentsDir, "harnesses", "lifecycle-record");
+    await mkdir(workspace, { recursive: true });
+    await mkdir(harnessDir, { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    for (const name of ["agent", "claude"]) {
+      await writeFile(join(binDir, name), "#!/bin/sh\nexit 0\n", {
+        mode: 0o755,
+      });
+    }
+    await writeFile(
+      join(harnessDir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness:",
+        "  id: lifecycle-record",
+        "roles:",
+        "  solo:",
+        "    description: noop role for undeliverable-hook record coverage",
+        "    prompt: |",
+        "      noop",
+        ...options.yaml,
+        "",
+      ].join("\n"),
+    );
+    const cli = await runHarnessCli(
+      [
+        "lifecycle-record",
+        "--agents-dir",
+        agentsDir,
+        "--workspace",
+        workspace,
+        "--adapter",
+        options.adapter,
+      ],
+      { PATH: `${binDir}:${process.env.PATH ?? ""}` },
+    );
+    const artifacts = /^artifacts: (.+)$/m.exec(cli.stdout)?.[1];
+    if (artifacts === undefined) {
+      throw new Error(`no artifacts line:\n${cli.stdout}\n${cli.stderr}`);
+    }
+    const result = await Bun.file(join(artifacts, "result.raw.json")).json();
+    return { ...cli, result };
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+/** Events named by the ADR 0024 setup warnings, in the order printed. */
+function warnedLifecycleEvents(stderr: string): string[] {
+  return [
+    ...stderr.matchAll(/hooks\.(\w+): declared handler cannot fire/g),
+  ].map((match) => match[1] ?? "");
+}
+
+const ALL_LIFECYCLE_HOOKS = [
+  "hooks:",
+  "  role_start:",
+  "    - command: echo role_start",
+  "  role_stop:",
+  "    - command: echo role_stop",
+  "  run_start:",
+  "    - command: echo run_start",
+  "  run_end:",
+  "    - command: echo run_end",
+] as const;
+
+test("a declared run_end is recorded in the run result as undeliverable (ADR 0024)", async () => {
+  const run = await runLifecycleHarness({
+    adapter: "fake",
+    yaml: ["hooks:", "  run_end:", "    - command: echo run_end"],
+  });
+  expect(run.exitCode).toBe(0);
+  expect(run.result.metadata.undeliverable_hooks).toBe("run_end");
+});
+
+test("a declared role_start is recorded only where the adapter cannot map it (ADR 0024)", async () => {
+  const yaml = ["hooks:", "  role_start:", "    - command: echo role_start"];
+  const cursor = await runLifecycleHarness({ adapter: "cursor", yaml });
+  expect(cursor.result.metadata.undeliverable_hooks).toBe("role_start");
+  // Claude maps SessionStart onto role_start, so nothing is undeliverable.
+  const claude = await runLifecycleHarness({ adapter: "claude", yaml });
+  expect(claude.result.metadata).not.toHaveProperty("undeliverable_hooks");
+});
+
+test("a declared role_stop is recorded only where no generator maps it", async () => {
+  const yaml = ["hooks:", "  role_stop:", "    - command: echo role_stop"];
+  // fake has no hook generator, so role_stop cannot fire there.
+  const fake = await runLifecycleHarness({ adapter: "fake", yaml });
+  expect(fake.result.metadata.undeliverable_hooks).toBe("role_stop");
+  expect(warnedLifecycleEvents(fake.stderr)).toEqual(["role_stop"]);
+  // Cursor maps it to `stop`, Claude to `Stop`.
+  for (const adapter of ["cursor", "claude"] as const) {
+    const run = await runLifecycleHarness({ adapter, yaml });
+    expect(run.result.metadata).not.toHaveProperty("undeliverable_hooks");
+  }
+});
+
+test("a harness declaring no lifecycle handlers records none and passes (ADR 0024)", async () => {
+  const run = await runLifecycleHarness({
+    adapter: "fake",
+    yaml: [],
+  });
+  expect(run.exitCode).toBe(0);
+  expect(run.result.status).toBe("passed");
+  expect(run.result.metadata.undeliverable_hooks ?? "").toBe("");
+  expect(warnedLifecycleEvents(run.stderr)).toEqual([]);
+});
+
+test("the undeliverable-hooks record names the same events as the setup warning (ADR 0024)", async () => {
+  for (const adapter of ["cursor", "claude", "fake"] as const) {
+    const run = await runLifecycleHarness({
+      adapter,
+      yaml: ALL_LIFECYCLE_HOOKS,
+    });
+    const recorded = (run.result.metadata.undeliverable_hooks ?? "")
+      .split(",")
+      .filter((event) => event !== "");
+    expect(recorded.length).toBeGreaterThan(0);
+    expect(recorded).toEqual(warnedLifecycleEvents(run.stderr));
+  }
+});
+
+test("recording undeliverable hooks never changes run status (ADR 0021 / ADR 0024)", async () => {
+  // One passing and one gate-failed run, each with and without declarations.
+  const failingGate = [
+    "execution:",
+    "  mode: chain",
+    "  order: [solo]",
+    '  pass_check: ["false"]',
+  ];
+  const statuses: string[] = [];
+  for (const extra of [[], failingGate]) {
+    const plain = await runLifecycleHarness({ adapter: "fake", yaml: extra });
+    statuses.push(plain.result.status);
+    const declared = await runLifecycleHarness({
+      adapter: "fake",
+      yaml: [...extra, ...ALL_LIFECYCLE_HOOKS],
+    });
+    expect(declared.result.metadata.undeliverable_hooks).toBe(
+      "role_start,role_stop,run_start,run_end",
+    );
+    expect(declared.result.status).toBe(plain.result.status);
+    expect(declared.exitCode).toBe(plain.exitCode);
+    expect(/^status: .+$/m.exec(declared.stdout)?.[0]).toBe(
+      /^status: .+$/m.exec(plain.stdout)?.[0],
+    );
+  }
+  expect(statuses).toEqual(["passed", "failed"]);
+});
+
 test("enforcement provides per-role env in every mode; hooks file is role-invariant (ADR 0008)", async () => {
   const { loadHarness } = await import("@aguil/agents-harness-config");
   const { setUpHookEnforcement, POLICY_NONE_TOKEN } = await import(
@@ -297,6 +844,7 @@ test("enforcement provides per-role env in every mode; hooks file is role-invari
       adapter: "cursor",
       agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
       workspace,
+      scratchpadPath: workspace,
       allowUnenforcedPolicy: false,
     });
     if ("error" in enforcement) {
@@ -351,6 +899,7 @@ test("a role tampering with hooks.json cannot weaken the next role's enforcement
       adapter: "cursor",
       agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
       workspace,
+      scratchpadPath: workspace,
       allowUnenforcedPolicy: false,
     });
     if ("error" in enforcement) {
@@ -383,6 +932,7 @@ test("concurrent runs sharing a workspace converge on identical enforcement byte
       adapter: "cursor" as const,
       agentsDir: join(repoRoot, "examples", "incident-triage", ".agents"),
       workspace,
+      scratchpadPath: workspace,
       allowUnenforcedPolicy: false,
     };
     const [a, b] = await Promise.all([
