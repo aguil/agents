@@ -186,6 +186,7 @@ export function normalizeHookPayload(payload: unknown): PolicyHookInput {
   const event =
     eventRaw === "beforeShellExecution" ||
     eventRaw === "beforeMCPExecution" ||
+    eventRaw === "beforeReadFile" ||
     eventRaw === "PreToolUse"
       ? "pre_tool_call"
       : eventRaw === "afterFileEdit" || eventRaw === "PostToolUse"
@@ -201,9 +202,11 @@ export function normalizeHookPayload(payload: unknown): PolicyHookInput {
       ? (record.tool_input as Record<string, unknown>)
       : {};
   // Cursor's beforeShellExecution puts `command` at top level; afterFileEdit
-  // puts `file_path` at top level; MCP payloads nest values under an
-  // `arguments` record (top-level or inside tool_input). Merge all of them
-  // into the canonical tool_input, explicit canonical fields winning.
+  // and beforeReadFile put `file_path` at top level; MCP payloads nest values
+  // under an `arguments` record (top-level or inside tool_input). Merge all of
+  // them into the canonical tool_input, explicit canonical fields winning.
+  // Only these keys are lifted: beforeReadFile's `content`, the file itself,
+  // never reaches the evaluator or any output (#198).
   const argumentsRecord = (source: Record<string, unknown>) =>
     typeof source.arguments === "object" && source.arguments !== null
       ? (source.arguments as Record<string, unknown>)
@@ -232,7 +235,9 @@ export function normalizeHookPayload(payload: unknown): PolicyHookInput {
       ? { tool_name: record.tool_name }
       : eventRaw === "beforeShellExecution"
         ? { tool_name: "Execute" }
-        : {}),
+        : eventRaw === "beforeReadFile"
+          ? { tool_name: "Read" }
+          : {}),
     tool_input: toolInput,
   };
 }
@@ -247,7 +252,15 @@ const DECISION_TO_PERMISSION: Readonly<
   escalate: "ask",
 };
 
-/** Encode a verdict for Cursor's hook response shape. */
+/**
+ * Encode a verdict for Cursor's hook response shape. The denial text goes
+ * under both keys cursor-agent reads (JC-23, measured on 2026.10.01-14929f9):
+ * `user_message`, from which the events the bridge answers
+ * (`beforeShellExecution`, `beforeReadFile`) build the error the agent sees,
+ * and `agent_message`, which only `preToolUse` forwards. It ignores a
+ * camelCase `agentMessage` (JC-22). JC-3's text names a rule, never the
+ * command, so the person may see it too.
+ */
 export function encodeCursorPolicyResponse(input: {
   readonly permission: "allow" | "deny" | "ask";
   readonly agentMessage?: string;
@@ -255,7 +268,8 @@ export function encodeCursorPolicyResponse(input: {
 }): Record<string, unknown> {
   const response: Record<string, unknown> = { permission: input.permission };
   if (input.agentMessage !== undefined) {
-    response.agentMessage = input.agentMessage;
+    response.user_message = input.agentMessage;
+    response.agent_message = input.agentMessage;
   }
   if (input.updated_input !== undefined) {
     response.updated_input = input.updated_input;

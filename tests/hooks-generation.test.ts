@@ -7,7 +7,10 @@ import {
 } from "@aguil/agents-harness-config";
 import {
   ADAPTER_HOOK_CAPABILITIES,
+  CURSOR_READ_HOOK_VERSIONS,
   cursorHookEventDispatchability,
+  cursorReadHookWithheldWarning,
+  cursorSupportsReadHook,
   generateCursorHooksConfig,
   HOOK_ADAPTER_IDS,
   hookEventAdapterDispatchability,
@@ -414,4 +417,72 @@ test("renderCursorHooksConfig emits stable versioned JSON", () => {
   const rendered = renderCursorHooksConfig(config);
   expect(JSON.parse(rendered)).toEqual({ version: 1, hooks: {} });
   expect(rendered.endsWith("\n")).toBe(true);
+});
+
+test("beforeReadFile carries the policy bridge alone, never a user handler (#198, JC-10)", () => {
+  const hooks: HooksSpec = {
+    ...sampleHooks,
+    pre_tool_call: [
+      { command: "/h/hooks/any-tool.sh" },
+      { command: "/h/hooks/shell-only.sh", appliesTo: ["shell"] },
+    ],
+  };
+  const { config } = generateCursorHooksConfig({
+    hooks,
+    policyBridge: true,
+    readHook: true,
+  });
+  expect(config.hooks.beforeReadFile).toEqual([
+    { command: '"agents" policy-eval' },
+  ]);
+  // The same user handlers still reach the shell event.
+  expect(
+    (config.hooks.beforeShellExecution ?? []).map((entry) => entry.command),
+  ).toEqual([
+    '"agents" policy-eval',
+    "/h/hooks/any-tool.sh",
+    "/h/hooks/shell-only.sh",
+  ]);
+});
+
+test("beforeReadFile is registered only when asked for, and only with the bridge (#198)", () => {
+  for (const options of [
+    { policyBridge: true },
+    { policyBridge: true, readHook: false },
+    { policyBridge: false, readHook: true },
+  ]) {
+    const { config } = generateCursorHooksConfig({
+      hooks: sampleHooks,
+      ...options,
+    });
+    expect(config.hooks).not.toHaveProperty("beforeReadFile");
+  }
+});
+
+test("the Cursor bridge is given the workspace, single-quoted (#198, JC-8)", () => {
+  const { config } = generateCursorHooksConfig({
+    hooks: {},
+    policyBridge: true,
+    workspaceRoot: "/w/it's $(here)",
+    readHook: true,
+  });
+  const expected = `"agents" policy-eval --workspace '/w/it'\\''s $(here)'`;
+  expect(config.hooks.beforeShellExecution?.[0]?.command).toBe(expected);
+  expect(config.hooks.beforeReadFile?.[0]?.command).toBe(expected);
+});
+
+test("only measured cursor-agent versions support beforeReadFile (#198, JC-12)", () => {
+  expect(CURSOR_READ_HOOK_VERSIONS).toEqual(["2026.10.01-14929f9"]);
+  expect(cursorSupportsReadHook("2026.10.01-14929f9")).toBe(true);
+  expect(cursorSupportsReadHook("2026.10.01-14929f9\n")).toBe(true);
+  // A later or earlier build is not supported until it is measured.
+  expect(cursorSupportsReadHook("2026.10.02-0000000")).toBe(false);
+  expect(cursorSupportsReadHook("2026.09.30-14929f9")).toBe(false);
+  expect(cursorSupportsReadHook("")).toBe(false);
+  expect(cursorReadHookWithheldWarning("")).toContain(
+    "the installed cursor-agent's version could not be read",
+  );
+  expect(cursorReadHookWithheldWarning("2026.10.02-0000000")).toContain(
+    "cursor-agent 2026.10.02-0000000 is not a version measured to support it",
+  );
 });

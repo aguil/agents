@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createPolicyEvalHandler } from "@aguil/agents-policy";
 import {
   normalizeHookPayload,
   relativizeContainedPaths,
@@ -64,7 +65,7 @@ test("denied command in Cursor payload shape yields permission deny", async () =
   expect(result.exitCode).toBe(0);
   const response = lastJsonLine(result.stdout);
   expect(response.permission).toBe("deny");
-  expect(String(response.agentMessage)).toContain("triage-readonly");
+  expect(String(response.agent_message)).toContain("triage-readonly");
 });
 
 test("a Cursor denial names the rule, not the command (#238)", async () => {
@@ -77,7 +78,9 @@ test("a Cursor denial names the rule, not the command (#238)", async () => {
   );
   expect(lastJsonLine(result.stdout)).toEqual({
     permission: "deny",
-    agentMessage:
+    user_message:
+      "Blocked by policy triage-readonly (exec-denied): deny entry `rm`",
+    agent_message:
       "Blocked by policy triage-readonly (exec-denied): deny entry `rm`",
   });
 });
@@ -127,7 +130,8 @@ test("a denial without a rule keeps the policy and reason (#238)", async () => {
   );
   expect(lastJsonLine(result.stdout)).toEqual({
     permission: "deny",
-    agentMessage: "Blocked by policy triage-readonly (policy-runtime-error)",
+    user_message: "Blocked by policy triage-readonly (policy-runtime-error)",
+    agent_message: "Blocked by policy triage-readonly (policy-runtime-error)",
   });
 });
 
@@ -177,7 +181,7 @@ test("policy identity and agents dir fall back to inherited env", async () => {
   );
   expect(result.exitCode).toBe(0);
   expect(lastJsonLine(result.stdout).permission).toBe("deny");
-  expect(String(lastJsonLine(result.stdout).agentMessage)).toContain(
+  expect(String(lastJsonLine(result.stdout).agent_message)).toContain(
     "triage-readonly",
   );
 });
@@ -600,6 +604,127 @@ test("relativizeContainedPaths accepts the workspace's realpath alias", async ()
     await rm(link, { force: true });
     await rm(real, { recursive: true, force: true });
   }
+});
+
+/** A Cursor `beforeReadFile` payload, shaped as cursor-agent 2026.10.01-14929f9 sends it. */
+function cursorReadPayload(filePath: string, workspace: string) {
+  return {
+    conversation_id: "c",
+    generation_id: "g",
+    model: "m",
+    content: "READ-HOOK-CONTENT-SENTINEL",
+    file_path: filePath,
+    attachments: [],
+    session_id: "s",
+    hook_event_name: "beforeReadFile",
+    cursor_version: "2026.10.01-14929f9",
+    workspace_roots: [workspace],
+  };
+}
+
+test("a Cursor native read of a denied path is refused with permission deny (#198)", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "policy-eval-read-"));
+  try {
+    const args = [
+      "--policy",
+      "triage-readonly",
+      "--agents-dir",
+      fixturesAgentsDir,
+      "--workspace",
+      workspace,
+    ];
+    const denied = await runPolicyEval(
+      args,
+      cursorReadPayload(join(workspace, ".env"), workspace),
+    );
+    expect(denied.exitCode).toBe(0);
+    expect(lastJsonLine(denied.stdout)).toEqual({
+      permission: "deny",
+      user_message:
+        "Blocked by policy triage-readonly (filesystem-denied): deny entry `.env`",
+      agent_message:
+        "Blocked by policy triage-readonly (filesystem-denied): deny entry `.env`",
+    });
+    const nested = await runPolicyEval(
+      args,
+      cursorReadPayload(join(workspace, "a", "secrets", "k.pem"), workspace),
+    );
+    expect(lastJsonLine(nested.stdout).permission).toBe("deny");
+    const allowed = await runPolicyEval(
+      args,
+      cursorReadPayload(join(workspace, "src", "main.ts"), workspace),
+    );
+    expect(lastJsonLine(allowed.stdout)).toEqual({ permission: "allow" });
+    // The file's content never leaves the bridge, on any path.
+    for (const run of [denied, nested, allowed]) {
+      expect(run.stdout + run.stderr).not.toContain(
+        "READ-HOOK-CONTENT-SENTINEL",
+      );
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("without --workspace a native read's absolute path stays uncontained (#198)", async () => {
+  // Why the Cursor bridge is now generated with --workspace (JC-8).
+  const result = await runPolicyEval(
+    ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
+    cursorReadPayload("/tmp/ws/src/main.ts", "/tmp/ws"),
+  );
+  expect(lastJsonLine(result.stdout)).toEqual({
+    permission: "deny",
+    user_message:
+      "Blocked by policy triage-readonly (filesystem-uncontained-path): filesystem rules cover only paths inside the workspace",
+    agent_message:
+      "Blocked by policy triage-readonly (filesystem-uncontained-path): filesystem rules cover only paths inside the workspace",
+  });
+});
+
+test("beforeReadFile normalizes to a pre-tool read without the file's content (#198)", () => {
+  const normalized = normalizeHookPayload(
+    cursorReadPayload("/w/src/a.ts", "/w"),
+  );
+  expect(normalized).toEqual({
+    hook_event: "pre_tool_call",
+    tool_name: "Read",
+    tool_input: { file_path: "/w/src/a.ts" },
+  });
+  // A read is not a write: the filesystem.write confirmation does not fire.
+  const handler = createPolicyEvalHandler({
+    id: "write-confirm",
+    capabilities: { filesystem: { allow: ["**"] } },
+    confirmations: { requiredFor: ["filesystem.write"] },
+  });
+  expect(
+    handler(
+      relativizeContainedPaths(
+        normalizeHookPayload(cursorReadPayload("/w/src/a.ts", "/w")),
+        "/w",
+      ),
+    ),
+  ).toEqual({ verdict: "allow" });
+});
+
+test("a Cursor denial travels under user_message and agent_message, the keys cursor-agent reads (JC-23)", async () => {
+  const { encodeCursorPolicyResponse } = await import(
+    "../packages/cli/src/policy-eval-main"
+  );
+  expect(
+    encodeCursorPolicyResponse({ permission: "deny", agentMessage: "why" }),
+  ).toEqual({ permission: "deny", user_message: "why", agent_message: "why" });
+  const result = await runPolicyEval(
+    ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
+    { hook_event_name: "beforeShellExecution", command: "git push origin x" },
+  );
+  const response = lastJsonLine(result.stdout);
+  const text =
+    "Blocked by policy triage-readonly (exec-denied): deny entry `git push`";
+  // beforeShellExecution and beforeReadFile build the agent's error from
+  // user_message; only preToolUse forwards agent_message.
+  expect(response.user_message).toBe(text);
+  expect(response.agent_message).toBe(text);
+  expect("agentMessage" in response).toBe(false);
 });
 
 test("on Claude, an absolute argument to a denied path inside the workspace denies (#104)", async () => {

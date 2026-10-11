@@ -664,6 +664,10 @@ test("declaring run_end / run_start / role_start warns rather than failing (ADR 
 async function runLifecycleHarness(options: {
   readonly adapter: "cursor" | "claude" | "fake";
   readonly yaml: readonly string[];
+  /** What the stub `agent --version` prints; nothing when omitted. */
+  readonly agentVersion?: string;
+  /** Write this policy as `policies/<id>.yaml` beside the harness. */
+  readonly policy?: { readonly id: string; readonly yaml: readonly string[] };
 }): Promise<{
   readonly stdout: string;
   readonly stderr: string;
@@ -683,9 +687,20 @@ async function runLifecycleHarness(options: {
     await mkdir(harnessDir, { recursive: true });
     await mkdir(binDir, { recursive: true });
     for (const name of ["agent", "claude"]) {
-      await writeFile(join(binDir, name), "#!/bin/sh\nexit 0\n", {
+      const version =
+        name === "agent" && options.agentVersion !== undefined
+          ? `[ "$1" = --version ] && echo '${options.agentVersion}'\n`
+          : "";
+      await writeFile(join(binDir, name), `#!/bin/sh\n${version}exit 0\n`, {
         mode: 0o755,
       });
+    }
+    if (options.policy !== undefined) {
+      await mkdir(join(agentsDir, "policies"), { recursive: true });
+      await writeFile(
+        join(agentsDir, "policies", `${options.policy.id}.yaml`),
+        [...options.policy.yaml, ""].join("\n"),
+      );
     }
     await writeFile(
       join(harnessDir, "harness.yaml"),
@@ -1544,6 +1559,97 @@ test("harness run leaves an unrelated conformance role alone", async () => {
     await rm(workspace, { recursive: true, force: true });
     await rm(agentsDir, { recursive: true, force: true });
   }
+});
+
+const READ_POLICY = {
+  id: "read-guard",
+  yaml: [
+    "id: read-guard",
+    "capabilities:",
+    "  filesystem:",
+    '    deny: [".env"]',
+  ],
+} as const;
+
+test("cursor withholds beforeReadFile on an unmeasured cursor-agent, warning and recording it (#198, JC-9)", async () => {
+  const run = await runLifecycleHarness({
+    adapter: "cursor",
+    yaml: ["policy: read-guard"],
+    agentVersion: "2026.10.02-0000000",
+    policy: READ_POLICY,
+  });
+  expect(run.exitCode).toBe(0);
+  expect(run.stderr).toContain(
+    "harness run: hooks: beforeReadFile withheld — cursor-agent 2026.10.02-0000000 is not a version measured to support it",
+  );
+  expect(run.result.metadata.undeliverable_hooks).toBe("beforeReadFile");
+  // On the measured version nothing is withheld.
+  const measured = await runLifecycleHarness({
+    adapter: "cursor",
+    yaml: ["policy: read-guard"],
+    agentVersion: "2026.10.01-14929f9",
+    policy: READ_POLICY,
+  });
+  expect(measured.stderr).not.toContain("beforeReadFile withheld");
+  expect(measured.result.metadata).not.toHaveProperty("undeliverable_hooks");
+  // With no policy there is no bridge, so no read hook to withhold.
+  const unruled = await runLifecycleHarness({
+    adapter: "cursor",
+    yaml: [],
+    agentVersion: "2026.10.02-0000000",
+  });
+  expect(unruled.stderr).not.toContain("beforeReadFile");
+  expect(unruled.result.metadata).not.toHaveProperty("undeliverable_hooks");
+});
+
+test("cursor registers beforeReadFile for the bridge alone on a measured cursor-agent (#198, JC-10, JC-12)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const agentsDir = join(repoRoot, "examples", "incident-triage", ".agents");
+  const loaded = await loadHarness({ agentsDir, harnessId: "incident-triage" });
+  const setUp = async (version: string) => {
+    const workspace = await mkdtemp(join(tmpdir(), "harness-cursor-read-"));
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      const enforcement = await setUpHookEnforcement(loaded, {
+        adapter: "cursor",
+        agentsDir,
+        workspace,
+        scratchpadPath: workspace,
+        allowUnenforcedPolicy: false,
+        detectCursorVersion: async () => version,
+      });
+      if ("error" in enforcement) {
+        throw new Error(enforcement.error);
+      }
+      const config = await Bun.file(
+        join(workspace, ".cursor", "hooks.json"),
+      ).json();
+      return { workspace, enforcement, config, warnings };
+    } finally {
+      console.warn = originalWarn;
+      await rm(workspace, { recursive: true, force: true });
+    }
+  };
+  const measured = await setUp("2026.10.01-14929f9");
+  const bridge = `"agents" policy-eval --workspace '${measured.workspace}'`;
+  expect(measured.config.hooks.beforeReadFile).toEqual([{ command: bridge }]);
+  expect(measured.config.hooks.beforeShellExecution[0].command).toBe(bridge);
+  expect(measured.enforcement.undeliverableHooks).toBeUndefined();
+  expect(measured.warnings.join("\n")).not.toContain("beforeReadFile");
+
+  const unmeasured = await setUp("");
+  expect(unmeasured.config.hooks).not.toHaveProperty("beforeReadFile");
+  expect(unmeasured.enforcement.undeliverableHooks).toEqual(["beforeReadFile"]);
+  expect(unmeasured.warnings.join("\n")).toContain(
+    "beforeReadFile withheld — the installed cursor-agent's version could not be read",
+  );
 });
 
 test("harness run warns once per policy allowlisting an interpreter (ADR 0026)", async () => {
