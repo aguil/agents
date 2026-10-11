@@ -39,8 +39,42 @@ export {
 export type CursorHookEvent =
   | "beforeShellExecution"
   | "beforeMCPExecution"
+  | "beforeReadFile"
   | "afterFileEdit"
   | "stop";
+
+/**
+ * `cursor-agent` versions measured to fire `beforeReadFile` headless and to
+ * block a read on `{"permission":"deny"}` (#198). Exact versions only, never
+ * "this or later": an event the installed CLI does not know silently stops
+ * every other hook in the workspace, the shell bridge included (#239). A new
+ * version joins this list by re-running that measurement on it.
+ */
+export const CURSOR_READ_HOOK_VERSIONS: readonly string[] = [
+  "2026.10.01-14929f9",
+];
+
+/** Whether `beforeReadFile` may be registered for this `cursor-agent --version`. */
+export function cursorSupportsReadHook(version: string): boolean {
+  return CURSOR_READ_HOOK_VERSIONS.includes(version.trim());
+}
+
+/**
+ * The warning printed when `beforeReadFile` is withheld (#198): native reads
+ * on this CLI go unchecked, as they did before the hook existed.
+ */
+export function cursorReadHookWithheldWarning(version: string): string {
+  const found = version.trim();
+  const why =
+    found === ""
+      ? "the installed cursor-agent's version could not be read"
+      : `cursor-agent ${found} is not a version measured to support it`;
+  return (
+    `hooks: beforeReadFile withheld — ${why} ` +
+    `(supported: ${CURSOR_READ_HOOK_VERSIONS.join(", ")}), so Cursor's ` +
+    "native file reads are not checked against filesystem rules in this run"
+  );
+}
 
 /**
  * Canonical → Cursor event projection (dotagents-compatible mapping).
@@ -225,6 +259,18 @@ export interface GenerateCursorHooksOptions {
   readonly policyBridge?: boolean;
   /** CLI executable used for the builtin bridge (default: "agents"). */
   readonly agentsCli?: string;
+  /**
+   * Workspace root passed to the bridge as `--workspace`, so absolute paths
+   * inside it are classified as workspace-relative, as on Claude (#198).
+   */
+  readonly workspaceRoot?: string;
+  /**
+   * Register the bridge, and only the bridge, on `beforeReadFile`. Set it only
+   * when `cursorSupportsReadHook` holds for the installed CLI. No
+   * user-declared handler attaches to the event: it carries the file's
+   * content, and no `applies_to` class scopes a handler away from reads.
+   */
+  readonly readHook?: boolean;
 }
 
 export interface GeneratedCursorHooks {
@@ -243,7 +289,13 @@ function policyBridgeEntry(
   // so quote the CLI token, which may be an operator-supplied path with spaces
   // or metacharacters. Default format stays Cursor (ADR 0023 decision 6).
   const cli = JSON.stringify(options.agentsCli ?? "agents");
-  return { command: `${cli} policy-eval` };
+  // The root comes from the run, never the payload, and is single-quoted so a
+  // shell expands nothing in it.
+  const workspace =
+    options.workspaceRoot === undefined
+      ? ""
+      : ` --workspace '${options.workspaceRoot.replaceAll("'", "'\\''")}'`;
+  return { command: `${cli} policy-eval${workspace}` };
 }
 
 function toCursorEntry(handler: HookHandlerSpec): CursorHookEntry {
@@ -296,6 +348,11 @@ export function generateCursorHooksConfig(
           push(cursorEvent, bridge);
         }
       }
+    }
+    // Native reads reach the bridge alone. The event is not in the canonical
+    // mapping, so the user-handler loop below never attaches to it.
+    if (options.readHook === true) {
+      push("beforeReadFile", bridge);
     }
   }
 

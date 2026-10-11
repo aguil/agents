@@ -36,7 +36,26 @@ so the response encoding matches what the CLI expects
 `{ permission }` shape. Given `workspaceRoot`, Claude's bridge also passes
 `--workspace <root>`. Claude Code sends absolute file paths, so the bridge
 rewrites the ones inside the root as workspace-relative before filesystem rules
-see them. A path outside the root stays absolute and stays denied.
+see them. A path outside the root stays absolute and stays denied. Cursor's
+bridge is given `workspaceRoot` the same way, since a native read's path is
+absolute too.
+
+## Cursor reads (#198)
+
+Given `readHook: true`, the Cursor generator registers the bridge on
+`beforeReadFile`, so `filesystem.deny` covers Cursor's native read tool. Only
+the bridge attaches: no harness-declared handler runs on the event, because its
+payload carries the file's content and no `applies_to` class scopes a handler
+away from reads. The bridge reads `file_path` and nothing else from it.
+
+The event is registered only on a `cursor-agent` listed in
+`CURSOR_READ_HOOK_VERSIONS`, the versions a measurement has shown firing the
+event and honouring its deny. An event the installed CLI does not know turns off
+every other hook in the workspace (#239), so "this version or later" would fail
+open. On any other version, `agents harness run` withholds the event, prints a
+warning, and records `beforeReadFile` in `undeliverable_hooks`; native reads
+then go unchecked, as they did before. A new version joins the list by repeating
+that measurement on it.
 
 `agentsCli` names the bridge's executable, or an argv prefix such as
 `[bun, entry]`, with each word quoted. `agents harness run` defaults Claude's
@@ -56,4 +75,5 @@ Cursor, where Claude maps `SessionStart`; `role_stop` on adapters with no
 generator, such as `opencode` and `fake`). `run_*` must never be projected onto
 a session-end event. `undeliverableLifecycleHookEvents(hooks, adapter)` returns
 the same events the warnings name; `agents harness run` records them in the run
-result's `metadata` as `undeliverable_hooks`, comma-separated.
+result's `metadata` as `undeliverable_hooks`, comma-separated, followed by any
+native event withheld from the run, such as `beforeReadFile`.

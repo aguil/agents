@@ -43,6 +43,8 @@ import {
 import {
   adapterCanDeny,
   adapterHookCapabilities,
+  cursorReadHookWithheldWarning,
+  cursorSupportsReadHook,
   generateClaudeHooksConfig,
   generateCursorHooksConfig,
   renderClaudeSettingsConfig,
@@ -215,7 +217,45 @@ type EnforcementArgs = Pick<
 > & {
   /** Run scratchpad — Claude settings land here (ADR 0023 decision 3). */
   readonly scratchpadPath: string;
+  /**
+   * The installed `cursor-agent`'s `--version` line, which decides whether
+   * `beforeReadFile` is registered (#198). Defaults to running the CLI the
+   * Cursor adapter spawns; tests pass a fixed version.
+   */
+  readonly detectCursorVersion?: () => Promise<string>;
 };
+
+/**
+ * First line of `agent --version`, the executable the Cursor adapter spawns,
+ * or "" when it cannot be run. "" is no supported version, so the read hook
+ * is withheld rather than guessed.
+ */
+export async function detectCursorAgentVersion(): Promise<string> {
+  try {
+    const proc = Bun.spawn({
+      cmd: ["agent", "--version"],
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      timeout: 30_000,
+    });
+    const [stdout, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+    if (exitCode !== 0) {
+      return "";
+    }
+    return (
+      stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0) ?? ""
+    );
+  } catch {
+    return "";
+  }
+}
 
 /**
  * Write the role-invariant `.cursor/hooks.json`. Policy identity is NOT in
@@ -227,11 +267,16 @@ type EnforcementArgs = Pick<
 async function writeCanonicalCursorHooks(
   loaded: LoadedHarness,
   args: EnforcementArgs,
+  readHook: boolean,
 ): Promise<void> {
   const { config } = generateCursorHooksConfig({
     hooks: loaded.hooks,
     policyBridge: harnessDeclaresPolicy(loaded),
     agentsCli: args.agentsCli,
+    // The bridge classifies absolute paths inside the workspace, as Claude's
+    // does (#198): a native read's `file_path` is always absolute.
+    workspaceRoot: resolve(args.workspace),
+    readHook,
   });
   const cursorDir = join(resolve(args.workspace), ".cursor");
   await mkdir(cursorDir, { recursive: true });
@@ -348,6 +393,12 @@ export interface HookEnforcementSetup {
   readonly roleEnv?: (roleId: string) => Readonly<Record<string, string>>;
   /** Present when the Claude adapter should load run-scoped settings. */
   readonly claudeSettingsPath?: string;
+  /**
+   * Native events withheld from this run, recorded in the result's
+   * `undeliverable_hooks` beside ADR 0024's lifecycle events: today
+   * `beforeReadFile` on a `cursor-agent` not measured to support it (#198).
+   */
+  readonly undeliverableHooks?: readonly string[];
 }
 
 /**
@@ -408,10 +459,28 @@ export async function setUpHookEnforcement(
     : undefined;
 
   if (args.adapter === "cursor") {
-    await writeCanonicalCursorHooks(loaded, args);
+    // Register the read hook only on a CLI measured to support it: an event
+    // the CLI does not know turns off every other hook in the file, the shell
+    // bridge included (#239). Withheld, reads stay unchecked, as before (#198).
+    let readHook = false;
+    if (hasAnyPolicy) {
+      const version = await (
+        args.detectCursorVersion ?? detectCursorAgentVersion
+      )();
+      readHook = cursorSupportsReadHook(version);
+      if (!readHook) {
+        console.warn(
+          `harness run: ${cursorReadHookWithheldWarning(version)} (#198)`,
+        );
+      }
+    }
+    await writeCanonicalCursorHooks(loaded, args, readHook);
     return {
+      ...(hasAnyPolicy && !readHook
+        ? { undeliverableHooks: ["beforeReadFile"] }
+        : {}),
       onRoleStart: async (roleId: string) => {
-        await writeCanonicalCursorHooks(loaded, args);
+        await writeCanonicalCursorHooks(loaded, args, readHook);
         console.warn(
           `harness run: role "${roleId}" enforced under policy "${roleEffectivePolicyId(loaded, roleId) ?? "(none)"}"`,
         );
@@ -642,10 +711,10 @@ export async function runHarnessRunCli(
       : undefined;
   // ADR 0024 decision 2: the events the setup warning named are recorded in
   // the run's result too. Informational only; status never reads it (ADR 0021).
-  const undeliverableHooks = undeliverableLifecycleHookEvents(
-    loaded.hooks,
-    parsed.adapter,
-  );
+  const undeliverableHooks = [
+    ...undeliverableLifecycleHookEvents(loaded.hooks, parsed.adapter),
+    ...(enforcement.undeliverableHooks ?? []),
+  ];
   // Same conformance bookkeeping as `agents code-review` (ADR 0025): empty
   // unless the harness declares a `conformance` role, so other harnesses'
   // results and reports are unchanged.
