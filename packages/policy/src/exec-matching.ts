@@ -60,19 +60,19 @@ interface Frame {
 }
 
 /**
- * Split a command into its simple commands, a substitution's contents and a
- * subshell's forming simple commands of their own. Never fails: when the
- * tokenizer cannot read the command (an unbalanced quote), it is split on
- * whitespace and operator characters instead, which finds more words, not
- * fewer.
- */
-/**
  * How deep quoted substitutions are read by recursion. Each level
  * re-tokenizes its body, so deeper bodies use the rough split, which reads
  * every word in one pass and so finds no fewer.
  */
 const MAX_QUOTED_SUBSTITUTION_DEPTH = 8;
 
+/**
+ * Split a command into its simple commands, a substitution's contents and a
+ * subshell's forming simple commands of their own. Never fails: when the
+ * tokenizer cannot read the command (an unbalanced quote), it is split on
+ * whitespace and operator characters instead, which finds more words, not
+ * fewer.
+ */
 export function simpleCommandsOf(
   raw: string,
   depth = 0,
@@ -488,8 +488,8 @@ function singleWordValue(text: string): string | undefined {
 
 /**
  * Words the shell reads as grammar, not as a program, where a command can
- * start: `{ rm x; }`, `if rm x; then :; fi`, `! rm x`, `time rm x` and
- * `coproc rm x` all run `rm`.
+ * start: `{ rm x; }`, `if rm x; then :; fi`, `! rm x`, `time rm x`,
+ * `coproc rm x` and a body `function f { rm x; }` all run `rm`.
  */
 const RESERVED_WORDS: ReadonlySet<string> = new Set([
   "!",
@@ -506,6 +506,7 @@ const RESERVED_WORDS: ReadonlySet<string> = new Set([
   "until",
   "time",
   "coproc",
+  "function",
 ]);
 
 /**
@@ -516,12 +517,12 @@ function programIndex(words: readonly string[]): number {
   let index = 0;
   while (index < words.length) {
     const word = words[index] as string;
-    // `time` takes options of its own (`time -p rm x`), and a coprocess
-    // may be named ahead of the compound command it runs
-    // (`coproc worker { rm x; }`).
+    // `time` takes options of its own (`time -p rm x`), and a coprocess or
+    // a function is named ahead of the compound command it runs
+    // (`coproc worker { rm x; }`, `function f { rm x; }`).
     const timeOption = words[index - 1] === "time" && word.startsWith("-");
     const coprocName =
-      words[index - 1] === "coproc" &&
+      (words[index - 1] === "coproc" || words[index - 1] === "function") &&
       RESERVED_WORDS.has(words[index + 1] as string);
     if (
       !RESERVED_WORDS.has(word) &&
