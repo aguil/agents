@@ -41,6 +41,12 @@ test("tokenizer splits words and strips quotes and escapes", () => {
   // A backslash-newline continues the line; a trailing backslash is literal.
   expect(words("rg a\\\nb")).toEqual(["rg", "ab"]);
   expect(words("echo a\\")).toEqual(["echo", "a\\"]);
+  // A continuation is removed before anything else is read, outside single
+  // quotes; inside them it is literal, and an escaped backslash is not one.
+  expect(operators('rg "$\\\n(x)"')).toEqual(["$("]);
+  expect(operators("rg $\\\n'a'")).toEqual(["$'"]);
+  expect(words("echo 'a\\\nb'")).toEqual(["echo", "a\\\nb"]);
+  expect(words("echo a\\\\\nb")).toEqual(["echo", "a\\", "b"]);
 });
 
 test("tokenizer marks quoted words", () => {

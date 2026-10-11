@@ -179,6 +179,10 @@ test("comments, ANSI-C quotes and nested expansions cannot hide a command (#237)
     "echo $'a\\'' ; echo PWNED #'",
     "echo #\\\na",
     `echo "\${x#"'"}" ; echo PWNED #'`,
+    // A line continuation splitting an introducer from what follows.
+    'echo "$\\\n(echo x)"',
+    "echo $\\\n'a\\'' ; echo PWNED #'",
+    `echo $\\\n{x#"'"} ; echo PWNED #'`,
   ]) {
     const verdict = evaluatePolicy(echoPolicy, {
       interventionPoint: "pre_tool_call",
