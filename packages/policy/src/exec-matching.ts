@@ -459,8 +459,8 @@ function singleWordValue(text: string): string | undefined {
 
 /**
  * Words the shell reads as grammar, not as a program, where a command can
- * start: `{ rm x; }`, `if rm x; then :; fi`, `! rm x` and `time rm x` all run
- * `rm`.
+ * start: `{ rm x; }`, `if rm x; then :; fi`, `! rm x`, `time rm x` and
+ * `coproc rm x` all run `rm`.
  */
 const RESERVED_WORDS: ReadonlySet<string> = new Set([
   "!",
@@ -476,6 +476,7 @@ const RESERVED_WORDS: ReadonlySet<string> = new Set([
   "while",
   "until",
   "time",
+  "coproc",
 ]);
 
 /**
