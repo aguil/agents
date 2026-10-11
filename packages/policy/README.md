@@ -18,6 +18,11 @@ hooks can tighten but never override a policy deny.
   run. The safe default is force off plus `--sandbox enabled`.
 - **Hook adapter:** `createPolicyEvalHandler` speaks the hook JSON contract so
   the runtime can register it as the first handler per event
+- **Compound commands:** an `exec.allow` entry matches one simple command. A
+  command with a pipe, chain, substitution or redirection outside quotes, or
+  with an unbalanced quote, is unlisted however it starts; the same characters
+  inside quotes are an argument (`tokenizeShellCommand`). Deny entries match by
+  prefix, as before.
 
 Rego/ACS engines are intentionally out of scope here; this package is the
 default `engine: native` path.

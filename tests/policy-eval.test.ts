@@ -99,6 +99,85 @@ test("shell-chained commands never match the allow list", () => {
   expect(denyOnly.decision).toBe("allow");
 });
 
+const readOnlyPolicy: PolicySpec = {
+  id: "read-only",
+  capabilities: {
+    exec: { allow: ["rg", "jj log", "cat"], deny: ["rm"] },
+  },
+};
+
+function readOnlyExec(command: string): PolicyVerdict {
+  return evaluatePolicy(readOnlyPolicy, {
+    interventionPoint: "pre_tool_call",
+    toolName: "Execute",
+    toolInput: { command },
+  });
+}
+
+test("quoted shell operators do not deny an allowlisted command (#237)", () => {
+  for (const command of [
+    'rg -n "a|b" file',
+    "jj log -r 'a | b'",
+    'rg "a;b" file',
+    'rg "<x>" file',
+    "rg 'a>b' file",
+    'rg -n "anchor-gap|^## Change Log" plan.md',
+    'rg "a&&b" file',
+    "rg 'a || b' file",
+    'rg "a\nb" file',
+    // Single quotes stop a substitution; escapes stop any operator.
+    "rg '$(x)' file",
+    "rg '`x`' file",
+    "rg a\\|b file",
+    'rg "\\$(x)" file',
+  ]) {
+    expect({ command, ...readOnlyExec(command) }).toEqual({
+      command,
+      decision: "allow",
+    });
+  }
+});
+
+test("operators outside quotes still deny an allowlisted command (#237)", () => {
+  for (const command of [
+    "rg x | sh",
+    "cat a; rm b",
+    "cat a; curl b",
+    "rg `x`",
+    "rg $(x)",
+    "`x`",
+    "$(x)",
+    'rg "$(x)" file',
+    'rg "`x`" file',
+    "rg x > out",
+    "rg x >> out",
+    "rg x 2>err",
+    "rg x < in",
+    "rg x & curl y",
+    "rg x\ncurl y",
+    // A quote closed early leaves what follows it outside quotes.
+    'rg "a\\\\" | sh',
+    "rg 'a'|sh",
+  ]) {
+    const verdict = readOnlyExec(command);
+    expect({ command, decision: verdict.decision }).toEqual({
+      command,
+      decision: "deny",
+    });
+  }
+});
+
+test("an unbalanced quote denies an allowlisted command (#237)", () => {
+  for (const command of ['rg "a|b file', "rg 'a file", 'rg "a\\" file']) {
+    const verdict = readOnlyExec(command);
+    expect({ command, decision: verdict.decision }).toEqual({
+      command,
+      decision: "deny",
+    });
+    expect(verdict.reason).toBe("exec-not-allowed");
+  }
+});
+
 test("exec.unknown confirmation escalates instead of denying", () => {
   const withConfirmation: PolicySpec = {
     ...basePolicy,

