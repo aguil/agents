@@ -152,3 +152,9 @@ so it is upheld in review.
   author-side self-review trace; an `acceptance-criteria` provider that records
   why rows are absent; an always-bound `acceptance_criteria` CEL count; per-row
   outcomes plus findings for rows that are not satisfied.
+- [0026-exec-rules-match-program-and-subcommand.md](0026-exec-rules-match-program-and-subcommand.md)
+  — ADR 0026: exec deny rules match the resolved program and subcommand,
+  skipping options, assignments and paths; allow rules stay a word prefix; an
+  allowed command's arguments meet `filesystem.deny`; allowlisting an
+  interpreter or command runner warns at load; what text matching cannot see is
+  documented. Partially supersedes ADR 0006 §2 on how exec rules match.
