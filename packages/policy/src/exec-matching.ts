@@ -66,7 +66,8 @@ interface Frame {
  * whitespace and operator characters instead, which finds more words, not
  * fewer.
  */
-export function simpleCommandsOf(command: string): readonly SimpleCommand[] {
+export function simpleCommandsOf(raw: string): readonly SimpleCommand[] {
+  const command = decodeAnsiCQuotes(raw);
   const parsed = tokenizeShellCommand(command);
   const commands = parsed.ok
     ? groupSimpleCommands(parsed.tokens)
@@ -77,6 +78,123 @@ export function simpleCommandsOf(command: string): readonly SimpleCommand[] {
     commands.push(...simpleCommandsOf(body));
   }
   return commands;
+}
+
+/**
+ * Rewrite each `$'…'` outside quotes as the single-quoted string bash makes
+ * of it, escapes decoded, so `$'\162m' x` reads as `rm x`. The tokenizer
+ * reports `$'` rather than parsing it (JC-19), which keeps it from allow;
+ * deny and the argument check need what it says.
+ */
+function decodeAnsiCQuotes(raw: string): string {
+  const command = removeLineContinuations(raw);
+  let result = "";
+  let inDouble = false;
+  let index = 0;
+  while (index < command.length) {
+    const char = command[index] as string;
+    if (char === "\\") {
+      result += command.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+    if (!inDouble && char === "'") {
+      const close = command.indexOf("'", index + 1);
+      const end = close === -1 ? command.length : close + 1;
+      result += command.slice(index, end);
+      index = end;
+      continue;
+    }
+    if (!inDouble && command.startsWith("$'", index)) {
+      const decoded = decodeAnsiCBody(command, index + 2);
+      if (decoded === undefined) {
+        // Unterminated: leave it for the tokenizer to fail on.
+        result += command.slice(index);
+        break;
+      }
+      result += `'${decoded.value.replaceAll("'", "'\\''")}'`;
+      index = decoded.end;
+      continue;
+    }
+    if (char === '"') {
+      inDouble = !inDouble;
+    }
+    result += char;
+    index += 1;
+  }
+  return result;
+}
+
+const ANSI_C_ESCAPES: Readonly<Record<string, string>> = {
+  a: "\x07",
+  b: "\b",
+  e: "\x1b",
+  E: "\x1b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
+  "\\": "\\",
+  "'": "'",
+  '"': '"',
+  "?": "?",
+};
+
+/** The text of a `$'…'` body starting at `start`, and where it ends. */
+function decodeAnsiCBody(
+  command: string,
+  start: number,
+): { readonly value: string; readonly end: number } | undefined {
+  let value = "";
+  let index = start;
+  while (index < command.length) {
+    const char = command[index] as string;
+    if (char === "'") {
+      return { value, end: index + 1 };
+    }
+    if (char !== "\\") {
+      value += char;
+      index += 1;
+      continue;
+    }
+    const next = command[index + 1];
+    if (next === undefined) {
+      return undefined;
+    }
+    const simple = ANSI_C_ESCAPES[next];
+    const numeric =
+      /^[0-7]{1,3}/.exec(command.slice(index + 1)) ??
+      (next === "x"
+        ? /^x([0-9A-Fa-f]{1,2})/.exec(command.slice(index + 1))
+        : null) ??
+      (next === "u"
+        ? /^u([0-9A-Fa-f]{1,4})/.exec(command.slice(index + 1))
+        : null) ??
+      (next === "U"
+        ? /^U([0-9A-Fa-f]{1,8})/.exec(command.slice(index + 1))
+        : null);
+    if (simple !== undefined) {
+      value += simple;
+      index += 2;
+    } else if (numeric !== null) {
+      const code =
+        numeric[1] === undefined
+          ? Number.parseInt(numeric[0], 8)
+          : Number.parseInt(numeric[1], 16);
+      value += code === 0 ? "" : String.fromCodePoint(Math.min(code, 0x10ffff));
+      index += 1 + numeric[0].length;
+    } else if (next === "c" && command[index + 2] !== undefined) {
+      value += String.fromCharCode(
+        (command[index + 2] as string).toUpperCase().charCodeAt(0) ^ 0x40,
+      );
+      index += 3;
+    } else {
+      value += `\\${next}`;
+      index += 2;
+    }
+  }
+  return undefined;
 }
 
 function groupSimpleCommands(tokens: readonly ShellToken[]): SimpleCommand[] {
@@ -292,10 +410,38 @@ export function allowRuleMatches(
   );
 }
 
-/** Where the program sits, past any leading `NAME=value` assignments. */
+/**
+ * Words the shell reads as grammar, not as a program, where a command can
+ * start: `{ rm x; }`, `if rm x; then :; fi`, `! rm x` and `time rm x` all run
+ * `rm`.
+ */
+const RESERVED_WORDS: ReadonlySet<string> = new Set([
+  "!",
+  "{",
+  "}",
+  "if",
+  "then",
+  "elif",
+  "else",
+  "fi",
+  "do",
+  "done",
+  "while",
+  "until",
+  "time",
+]);
+
+/**
+ * Where the program sits, past any leading reserved words and `NAME=value`
+ * assignments.
+ */
 function programIndex(words: readonly string[]): number {
   let index = 0;
-  while (index < words.length && ASSIGNMENT.test(words[index] as string)) {
+  while (
+    index < words.length &&
+    (RESERVED_WORDS.has(words[index] as string) ||
+      ASSIGNMENT.test(words[index] as string))
+  ) {
     index += 1;
   }
   return index;

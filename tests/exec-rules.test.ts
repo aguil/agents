@@ -174,3 +174,37 @@ test("an interpreter's payload denies when the interpreter is unlisted (JC-4)", 
   const allowsBash = execPolicy({ allow: ["bash"], deny: ["rm"] });
   expect(exec(allowsBash, "bash -c 'rm -rf build'").decision).toBe("allow");
 });
+
+test("a deny rule finds the program past the shell's reserved words", () => {
+  const rm = execPolicy({ deny: ["rm"] });
+  for (const command of [
+    "{ rm x; }",
+    "if rm x; then :; fi",
+    "if true; then rm x; fi",
+    "! rm x",
+    "time rm x",
+    "while rm x; do :; done",
+    "for f in a; do rm $f; done",
+  ]) {
+    expect(exec(rm, command).decision).toBe("deny");
+  }
+  expect(exec(rm, "echo if rm").decision).toBe("allow");
+});
+
+test("a deny rule reads a word written with ANSI-C quoting as bash does", () => {
+  const policy = execPolicy({ deny: ["rm", "git push"] });
+  for (const command of [
+    "$'rm' x",
+    "$'\\162m' x",
+    "$'\\x72\\x6d' x",
+    "$'r\\u006d' x",
+    "git $'push'",
+    "git $'pu\\163h' origin",
+    "echo $'a\\'' ; rm x",
+  ]) {
+    expect(exec(policy, command).decision).toBe("deny");
+  }
+  // Inside double quotes `$'` is literal text.
+  expect(exec(policy, `echo "$'rm'"`).decision).toBe("allow");
+  expect(exec(policy, "echo $'rm'").decision).toBe("allow");
+});
