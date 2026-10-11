@@ -252,7 +252,9 @@ function groupSimpleCommands(tokens: readonly ShellToken[]): SimpleCommand[] {
       }
     }
     // `#`, `$'` and `${` mark where bash may read differently; the words
-    // around them are still read, which can only find more to deny.
+    // around them are still read, which can only find more to deny. A
+    // comment's words are kept on purpose: ending the command at `#` would
+    // let any place this reading and bash's part hide a real argument.
   }
   for (const frame of stack.reverse()) {
     finish(frame);

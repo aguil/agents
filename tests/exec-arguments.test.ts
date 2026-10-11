@@ -148,3 +148,9 @@ test("a path inside an option or operand word, or ANSI-C quoting, is checked", (
   }
   expect(exec(readPolicy, "rg -n -e pattern src").decision).toBe("allow");
 });
+
+test("a comment's words are read, so a comment cannot hide a path", () => {
+  const verdict = exec(readPolicy, "cat README.md # not .env");
+  expect(verdict.decision).toBe("deny");
+  expect(verdict.rule).toBe("deny entry `.env`");
+});

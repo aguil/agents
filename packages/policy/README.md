@@ -52,10 +52,12 @@ hooks can tighten but never override a policy deny.
   command the exec rules do not deny, so an unlisted `cat .env` denies rather
   than asking for approval. `filesystem.allow` is not applied, since most
   arguments are not paths, and a pattern that reads as a denied path denies
-  (`rg -n .env src`). An absolute argument inside the workspace is made relative
-  first where the caller passes `relativizeWorkspacePath` (the policy-eval
-  bridge does, from `--workspace`); one outside the workspace, or escaping it,
-  is not checked, unlike a file tool's path, so `ls /tmp` stays allowed.
+  (`rg -n .env src`), as does one in a trailing comment (`cat a # .env`): the
+  words after a `#` are read on, so a comment cannot hide a command or path. An
+  absolute argument inside the workspace is made relative first where the caller
+  passes `relativizeWorkspacePath` (the policy-eval bridge does, from
+  `--workspace`); one outside the workspace, or escaping it, is not checked,
+  unlike a file tool's path, so `ls /tmp` stays allowed.
 - **Denials name the rule:** a verdict's `rule` is the entry that matched or the
   entry that was missing, never the full command, and the policy-eval bridge
   tells the agent `Blocked by policy <id> (<reason>): <rule>`
