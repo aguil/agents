@@ -65,13 +65,15 @@ Two principles follow from that ceiling and shape every decision below.
 **Decision:**
 
 1. **Exec rules match words, not characters.** A command is split by the
-   quote-aware tokenizer into simple commands at the operators it finds outside
-   quotes, a substitution's contents forming simple commands of their own. A
-   rule is split into words the same way. Deny rules are checked against every
-   simple command in the string, so `cat a; rm -rf b` meets `deny: [rm]`. Allow
-   rules are checked as today against the command as a whole: a command with an
-   operator outside quotes never matches an allow rule, so it is unlisted, and
-   an unbalanced quote denies.
+   quote-aware tokenizer into simple commands at the control operators it finds
+   outside quotes (`|`, `||`, `&&`, `;`, `&` and newline), a substitution's
+   contents forming simple commands of their own. A redirection stays with the
+   simple command it redirects. A rule is split into words the same way. Deny
+   rules are checked against every simple command in the string, so
+   `cat a; rm -rf b` meets `deny: [rm]`. Allow rules are checked as today
+   against the command as a whole: a command with an operator outside quotes, a
+   redirection included, never matches an allow rule, so it is unlisted, and an
+   unbalanced quote denies.
 
 2. **Resolving the program.** In each simple command, words of the form
    `NAME=value` ahead of the first other word are environment assignments, and
@@ -122,6 +124,11 @@ Two principles follow from that ceiling and shape every decision below.
    canonicalized as a file tool's path is (`canonicalizeCandidatePath`: `.` and
    `..` collapsed, separators normalized). A match denies the command with the
    `filesystem-denied` reason, naming the glob that matched.
+   - A redirection's target, the word after `<`, `>`, `>>`, `<>` or `>|` or a
+     numbered form such as `2>`, is checked as an argument of the command it
+     redirects, so `cat < .env` is denied under `deny: [.env]` whether or not
+     the policy has an allow list. `<<` and `<<<` take a delimiter or a string,
+     not a path, and are not checked.
    - `filesystem.allow` is not applied to arguments. Most arguments are not
      paths, and an allow list of paths would deny every search pattern.
    - Where the bridge knows the workspace, an absolute argument inside it is
@@ -143,10 +150,13 @@ Two principles follow from that ceiling and shape every decision below.
    failure (ADR 0024 §3): a write-capable policy can need an interpreter, and a
    policy that loads today keeps loading. Two classes of entry warn:
    - **Interpreters:** `sh`, `bash`, `zsh`, `python`, `python3`, `node`, `bun`,
-     `deno`, `perl`, `ruby` and `git`, when the entry has no word after the
-     program that is not an option. `bash`, `python3 -c`, `git` and `git -C`
-     warn: each admits a payload or alias that runs anything. `bun test` and
-     `git log` do not.
+     `deno`, `perl`, `ruby` and `git`, when every word after the program is an
+     option or could be an option's value, read as decision 3 reads a command: a
+     word right after an option with no attached value may be that value.
+     `bash`, `python3 -c`, `git`, `git -C` and `git -C /tmp` warn, since each
+     admits a payload or alias that runs anything, and so do `python3 -W ignore`
+     and `python3 -m pytest`, where the word after the option is taken as its
+     value. `bun test` and `git log` do not.
    - **Command runners:** `env`, `xargs`, `sudo` and `find`, whatever follows,
      since their arguments are a command or, for `find`, an `-exec` action.
 
