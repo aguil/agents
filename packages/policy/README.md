@@ -82,6 +82,11 @@ line, such as an OS sandbox.
   classified by its name, not its target.
 - Arguments outside the workspace, absolute or escaping it, and, where the
   caller does not pass the workspace, every absolute argument.
+- A `$(…)` nested in a `${…}` inside a double-quoted substitution, such as
+  `echo "$(echo ${x:-$(echo })}; rm x)"`: the scan for where the outer
+  substitution ends stops early, so a command after it can pass the deny list on
+  a policy with no allow list (aguil/agents#249). With an allow list, such a
+  command is unlisted.
 - With no `exec.allow` list, anything run behind an interpreter or runner: such
   a policy's deny list reaches only commands that name the program directly or
   through options and paths, so `bash -c 'rm x'`, `env rm x`, `nohup rm x` or
