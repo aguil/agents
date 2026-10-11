@@ -187,6 +187,8 @@ test("a deny rule finds the program past the shell's reserved words", () => {
     "for f in a; do rm $f; done",
     "coproc rm x",
     "time -p rm x",
+    "coproc worker { rm x; }",
+    "coproc worker while rm x; do :; done",
   ]) {
     expect(exec(rm, command).decision).toBe("deny");
   }
@@ -255,4 +257,18 @@ test("a parameter expansion cannot close a quoted substitution early", () => {
   ]) {
     expect(exec(policy, command).decision).toBe("deny");
   }
+});
+
+test("a deny rule's search is linear in a long run of option values", () => {
+  const run = "-C push ".repeat(5000);
+  const started = performance.now();
+  for (const rule of ["git push --force", "git push origin main"]) {
+    const policy = execPolicy({ deny: [rule] });
+    expect(exec(policy, `git ${run}status`).decision).toBe("allow");
+  }
+  expect(
+    exec(execPolicy({ deny: ["git push --force"] }), `git ${run}push --force`)
+      .decision,
+  ).toBe("deny");
+  expect(performance.now() - started).toBeLessThan(500);
 });
