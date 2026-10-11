@@ -10,6 +10,37 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.9](https://github.com/aguil/agents/compare/v0.8.8...v0.8.9) (2026-10-11)
+
+
+### Fixed
+
+* **cli:** evaluate Cursor's beforeReadFile in the policy bridge ([fc71655](https://github.com/aguil/agents/commit/fc7165578006bf88495f8cd2f09d4734785547a9))
+* **cli:** send a Cursor denial under user_message as well ([330da8e](https://github.com/aguil/agents/commit/330da8e15d11c884d32985f239d6153629878fd8)), closes [#198](https://github.com/aguil/agents/issues/198)
+* **cli:** send a Cursor denial's text under agent_message ([ab8106b](https://github.com/aguil/agents/commit/ab8106b9e5e995b273ceb931246c3aace886f8d3)), closes [#198](https://github.com/aguil/agents/issues/198)
+* **hooks:** check Cursor's native reads against filesystem rules ([b924c6b](https://github.com/aguil/agents/commit/b924c6b7ca96efabf3540381240be3edb98bd818))
+* **policy:** check a command's arguments against filesystem.deny ([afdc1e1](https://github.com/aguil/agents/commit/afdc1e198f1831e310c838889fe5ceef9787b816)), closes [#104](https://github.com/aguil/agents/issues/104)
+* **policy:** check paths in operands, attached option values and ANSI-C quoting ([fabb5fe](https://github.com/aguil/agents/commit/fabb5fe952e86435c04a062c28f093607f035f9a)), closes [#104](https://github.com/aguil/agents/issues/104)
+* **policy:** find a denied program past the shell's reserved words ([8a8621e](https://github.com/aguil/agents/commit/8a8621eab74f07ee1e8346b84039992e6cc3bef2)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** match deny rules on each command's program and subcommand ([ad96b74](https://github.com/aguil/agents/commit/ad96b74e5735ced7790010d65e0b508e35d1f0cd)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** read a function's body when finding a denied program ([3837ce5](https://github.com/aguil/agents/commit/3837ce502c94c4ab29f9dec8e83c84508124566c)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** read ANSI-C quoting the way bash does for deny rules ([10ecf49](https://github.com/aguil/agents/commit/10ecf49663ba545ff1b18086c8f8c1dad8e0d92c)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** read coproc as grammar when finding a denied program ([6a74dfc](https://github.com/aguil/agents/commit/6a74dfc43227a8b72b4a9975b017644d34d0fe2e)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** skip a coprocess's name when finding a denied program ([a73c997](https://github.com/aguil/agents/commit/a73c99779e62bb202f944c409caf6f2e9380de05)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** skip comments when finding the end of a quoted substitution ([f0cad4f](https://github.com/aguil/agents/commit/f0cad4f1e07b3cbfb2f79a0860247657af4cf99b)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** skip parameter expansions when finding the end of a quoted substitution ([22e6fec](https://github.com/aguil/agents/commit/22e6fec4e9031296bd4adf3ea1132f2bb4b83e36)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** skip time's own options when finding a denied program ([374fa0d](https://github.com/aguil/agents/commit/374fa0d87fe68d15308f1cff9cc84a21d33fdc88)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** warn on an interpreter entry that sets the environment first ([35c205d](https://github.com/aguil/agents/commit/35c205d61722dd0b30cc507b9f4b9e5336c867ae)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** warn when an allowlisted interpreter or runner voids the deny lists ([8a5510f](https://github.com/aguil/agents/commit/8a5510f33ae2026ccfa9721e1212b819b4be3e93)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** widen allow matching for a quoted program only ([7fdbd32](https://github.com/aguil/agents/commit/7fdbd32f97d8979f8465ef6ca89e61a43a84bf9c)), closes [#196](https://github.com/aguil/agents/issues/196)
+
+
+### Performance
+
+* **policy:** bound how deep quoted substitutions are re-tokenized ([780f2db](https://github.com/aguil/agents/commit/780f2dbc08eb001e1efbab81064daad7046fd590)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** make the deny rule's subcommand search linear ([d511627](https://github.com/aguil/agents/commit/d5116278ca58c84f22d5ec91ffec74b63bf50e25)), closes [#196](https://github.com/aguil/agents/issues/196)
+* **policy:** memoize the deny rule's subcommand search ([34b8537](https://github.com/aguil/agents/commit/34b853722313e96a150bd1192129b583e75dfd69)), closes [#196](https://github.com/aguil/agents/issues/196)
+
 ## [0.8.8](https://github.com/aguil/agents/compare/v0.8.7...v0.8.8) (2026-10-11)
 
 
