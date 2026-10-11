@@ -133,3 +133,18 @@ test("a policy without filesystem.deny is unaffected", () => {
   };
   expect(exec(execOnly, "cat .env").decision).toBe("allow");
 });
+
+test("a path inside an option or operand word, or ANSI-C quoting, is checked", () => {
+  for (const command of [
+    "rg --file=.env x",
+    "rg -f.env x",
+    "dd if=.env of=out",
+    "cat $'.env'",
+    "cat $'\\x2eenv'",
+  ]) {
+    const verdict = exec(readPolicy, command);
+    expect(verdict.decision).toBe("deny");
+    expect(verdict.rule).toBe("deny entry `.env`");
+  }
+  expect(exec(readPolicy, "rg -n -e pattern src").decision).toBe("allow");
+});

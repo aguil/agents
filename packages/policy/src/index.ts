@@ -395,7 +395,8 @@ function evaluateExec(
 /**
  * A command's arguments meet `filesystem.deny` (ADR 0026 decision 5, JC-7).
  * Every word after the program in each simple command, the value of every
- * `--name=value` word, and every redirection's file target are checked
+ * `name=value` word and short option, and every redirection's file target
+ * are checked
  * against the deny globs, canonicalized as a file tool's path is. It runs on
  * every command the exec rules do not deny, unlisted ones included (JC-14):
  * composed with evaluateExec, its deny outranks an escalation. An argument
@@ -414,8 +415,7 @@ function evaluateExecArguments(
   }
   for (const simple of simpleCommandsOf(command)) {
     for (const word of [...argumentsOf(simple), ...simple.redirectionTargets]) {
-      const value = /^--[^=]+=(.+)$/.exec(word)?.[1];
-      for (const candidate of value === undefined ? [word] : [word, value]) {
+      for (const candidate of argumentCandidates(word)) {
         const path = argumentPath(candidate, options);
         const rule =
           path === undefined
@@ -433,6 +433,23 @@ function evaluateExecArguments(
     }
   }
   return ALLOW_VERDICT;
+}
+
+/**
+ * The paths a word may name: the word, the value of a `name=value` word
+ * (`--file=.env`, `dd if=.env`), and the value attached to a short option
+ * (`-f.env`). Reading more of a word can only find more to deny.
+ */
+function argumentCandidates(word: string): readonly string[] {
+  const candidates = [word];
+  const assigned = /^[^=]+=(.+)$/.exec(word)?.[1];
+  if (assigned !== undefined) {
+    candidates.push(assigned);
+  }
+  if (/^-[^-]./.test(word)) {
+    candidates.push(word.slice(2));
+  }
+  return candidates;
 }
 
 /** An argument as a workspace-relative path, or undefined when unchecked. */
