@@ -108,7 +108,49 @@ function opaqueParameterExpansionAt(command: string, index: number): boolean {
   return true;
 }
 
-export function tokenizeShellCommand(command: string): ShellTokenizeResult {
+/**
+ * Remove each backslash-newline the shell removes before it reads the line:
+ * outside single quotes, and not after an escaping backslash. Done first, so
+ * a continuation cannot split `$(`, `$'` or `${` from what follows and hide
+ * it from the checks below. Inside single quotes the pair is literal.
+ */
+function removeLineContinuations(command: string): string {
+  let result = "";
+  let mode: "plain" | "single" | "double" = "plain";
+  let index = 0;
+  while (index < command.length) {
+    const char = command[index];
+    if (mode === "single") {
+      result += char;
+      if (char === "'") {
+        mode = "plain";
+      }
+      index += 1;
+      continue;
+    }
+    if (char === "\\") {
+      const next = command[index + 1];
+      if (next === "\n") {
+        index += 2;
+        continue;
+      }
+      result += next === undefined ? char : char + next;
+      index += 2;
+      continue;
+    }
+    if (mode === "plain" && char === "'") {
+      mode = "single";
+    } else if (char === '"') {
+      mode = mode === "double" ? "plain" : "double";
+    }
+    result += char;
+    index += 1;
+  }
+  return result;
+}
+
+export function tokenizeShellCommand(raw: string): ShellTokenizeResult {
+  const command = removeLineContinuations(raw);
   const tokens: ShellToken[] = [];
   let value = "";
   let quoted = false;
