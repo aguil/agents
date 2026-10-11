@@ -187,6 +187,8 @@ test("a deny rule finds the program past the shell's reserved words", () => {
     "for f in a; do rm $f; done",
     "coproc rm x",
     "time -p rm x",
+    "coproc worker { rm x; }",
+    "coproc worker while rm x; do :; done",
   ]) {
     expect(exec(rm, command).decision).toBe("deny");
   }

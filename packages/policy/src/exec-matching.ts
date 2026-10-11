@@ -514,9 +514,19 @@ function programIndex(words: readonly string[]): number {
   let index = 0;
   while (index < words.length) {
     const word = words[index] as string;
-    // `time` takes options of its own (`time -p rm x`).
+    // `time` takes options of its own (`time -p rm x`), and a coprocess
+    // may be named ahead of the compound command it runs
+    // (`coproc worker { rm x; }`).
     const timeOption = words[index - 1] === "time" && word.startsWith("-");
-    if (!RESERVED_WORDS.has(word) && !ASSIGNMENT.test(word) && !timeOption) {
+    const coprocName =
+      words[index - 1] === "coproc" &&
+      RESERVED_WORDS.has(words[index + 1] as string);
+    if (
+      !RESERVED_WORDS.has(word) &&
+      !ASSIGNMENT.test(word) &&
+      !timeOption &&
+      !coprocName
+    ) {
       break;
     }
     index += 1;
