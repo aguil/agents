@@ -375,39 +375,62 @@ export function ruleWords(rule: string): readonly string[] {
 }
 
 /**
- * The command's words up to its first operator: what an allow rule is
- * matched against. A command with an operator is unlisted whatever these
- * match, so the words after it never matter to allow.
+ * Allow matching (ADR 0026 decision 4, JC-13, JC-17): the word-boundary
+ * prefix of ADR 0006 §2 on the raw command, as before, with one widening:
+ * the program may be quoted or escaped (`'rg' x`), since the shell runs the
+ * same program. Nothing else is read more loosely, so `git  log` and
+ * `git "log"` stay unlisted under `allow: [git log]`, and an assignment or a
+ * different path in front of the program matches nothing.
  */
-export function leadingWords(command: string): readonly string[] {
-  const parsed = tokenizeShellCommand(command);
-  if (!parsed.ok) {
-    return roughSimpleCommands(command)[0]?.words ?? [];
+export function allowRuleMatches(command: string, rule: string): boolean {
+  if (command === rule || command.startsWith(`${rule} `)) {
+    return true;
   }
-  const words: string[] = [];
-  for (const token of parsed.tokens) {
-    if (token.kind === "operator") {
-      break;
-    }
-    words.push(token.value);
+  const commandEnd = firstRawWordEnd(command);
+  const ruleEnd = firstRawWordEnd(rule);
+  const program = singleWordValue(command.slice(0, commandEnd));
+  if (
+    program === undefined ||
+    program !== singleWordValue(rule.slice(0, ruleEnd))
+  ) {
+    return false;
   }
-  return words;
+  const rewritten = rule.slice(0, ruleEnd) + command.slice(commandEnd);
+  return rewritten === rule || rewritten.startsWith(`${rule} `);
 }
 
-/**
- * Allow matching (ADR 0026 decision 4): the command's words begin with the
- * rule's, compared whole. The program is compared as the rule writes it, so
- * an assignment or a different path in front matches nothing.
- */
-export function allowRuleMatches(
-  words: readonly string[],
-  rule: readonly string[],
-): boolean {
-  return (
-    rule.length > 0 &&
-    rule.length <= words.length &&
-    rule.every((word, index) => words[index] === word)
-  );
+/** Where the first word's raw text ends: unquoted blank or operator. */
+function firstRawWordEnd(text: string): number {
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] as string;
+    if (quote === "'") {
+      if (char === "'") {
+        quote = undefined;
+      }
+    } else if (char === "\\") {
+      index += 1;
+    } else if (quote === '"') {
+      if (char === '"') {
+        quote = undefined;
+      }
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (/[\s;|&<>()`$]/.test(char)) {
+      return index;
+    }
+  }
+  return text.length;
+}
+
+/** The value of text the tokenizer reads as exactly one word. */
+function singleWordValue(text: string): string | undefined {
+  const parsed = tokenizeShellCommand(text);
+  if (!parsed.ok || parsed.tokens.length !== 1) {
+    return undefined;
+  }
+  const [token] = parsed.tokens;
+  return token?.kind === "word" ? token.value : undefined;
 }
 
 /**

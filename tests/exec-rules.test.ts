@@ -208,3 +208,15 @@ test("a deny rule reads a word written with ANSI-C quoting as bash does", () => 
   expect(exec(policy, `echo "$'rm'"`).decision).toBe("allow");
   expect(exec(policy, "echo $'rm'").decision).toBe("allow");
 });
+
+test("allow widens only for a quoted program, not for spacing or a quoted subcommand (JC-17)", () => {
+  const log = execPolicy({ allow: ["git log", "rg"] });
+  for (const command of ["git  log", "git\tlog", 'git "log"', "git l'og'"]) {
+    const verdict = exec(log, command);
+    expect(verdict.decision).toBe("deny");
+    expect(verdict.reason).toBe("exec-not-allowed");
+  }
+  for (const command of ["'git' log -1", "g\\it log", "\\rg x", "rg"]) {
+    expect(exec(log, command).decision).toBe("allow");
+  }
+});
