@@ -1,10 +1,14 @@
 # ADR 0006: Harness governance Phase 1 — loader, policy evaluation, hook config
 
-**Status:** Accepted
+**Status:** Partially superseded by ADR 0026
 
 **Status history:**
 
 - 2026-07-17 — Accepted.
+- 2026-10-11 — Partially superseded by ADR 0026: §2's first enforcement bullet,
+  on how exec rules match. ADR 0026 resolves the program and subcommand for deny
+  rules and keeps a word prefix, on the tokenizer's words, for allow rules. The
+  rest of §2 stands.
 
 **Context:** ADR 0005 generalized the core types and orchestration for
 multi-harness support and forecast a governance layer: configuration loaded from
