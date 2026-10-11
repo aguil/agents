@@ -126,10 +126,21 @@ function shellChainingIn(command: string): string | undefined {
   if (operator === undefined) {
     return undefined;
   }
-  return operator.value === "\n"
-    ? "a newline outside quotes"
-    : `\`${operator.fd ?? ""}${operator.value}\` outside quotes`;
+  return (
+    OPERATOR_PHRASES[operator.value] ??
+    `\`${operator.fd ?? ""}${operator.value}\` outside quotes`
+  );
 }
+
+/** Operators whose denial reads better than "`<op>` outside quotes". */
+const OPERATOR_PHRASES: Readonly<Record<string, string>> = {
+  "\n": "a newline outside quotes",
+  "$(": "a `$(…)` substitution",
+  "`": "a backtick substitution",
+  "#": "a `#` comment",
+  "$'": "`$'…'` quoting",
+  "${": `a \`\${…}\` holding quotes or expansions`,
+};
 
 /** The program a command runs, for naming the allow entry it lacks. */
 function commandProgram(command: string): string {

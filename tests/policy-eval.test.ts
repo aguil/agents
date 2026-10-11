@@ -385,6 +385,16 @@ test("a denial names the rule that matched or was missing (#238)", () => {
       "allow entry `rg` does not cover a newline outside quotes",
     ],
     [
+      readOnlyExec('rg "$(x)" file'),
+      "exec-not-allowed",
+      "allow entry `rg` does not cover a `$(…)` substitution",
+    ],
+    [
+      readOnlyExec("rg x #c"),
+      "exec-not-allowed",
+      "allow entry `rg` does not cover a `#` comment",
+    ],
+    [
       readOnlyExec('rg "a|b file'),
       "exec-not-allowed",
       'allow entry `rg` does not cover an unbalanced `"`',
