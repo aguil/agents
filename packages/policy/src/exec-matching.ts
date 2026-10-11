@@ -520,26 +520,40 @@ export function denyRuleMatches(
   ) {
     return false;
   }
-  return restMatches(command.words.slice(start + 1), rest, 0);
+  return restMatches(command.words.slice(start + 1), rest, 0, 0, new Map());
 }
 
+/**
+ * Whether `rule[ruleIndex..]` matches from `args[from]`. Each pair is tried
+ * once, memoized, so option values that repeat a rule word cannot make the
+ * search grow faster than words times rule words times candidates.
+ */
 function restMatches(
   args: readonly string[],
   rule: readonly string[],
+  ruleIndex: number,
   from: number,
+  seen: Map<string, boolean>,
 ): boolean {
-  const [word, ...rest] = rule;
+  const word = rule[ruleIndex];
   if (word === undefined) {
     return true;
   }
-  if (isOption(word)) {
-    return args.some((arg) => optionMatches(arg, word))
-      ? restMatches(args, rest, from)
-      : false;
+  const key = `${ruleIndex}:${from}`;
+  const known = seen.get(key);
+  if (known !== undefined) {
+    return known;
   }
-  return subcommandCandidates(args, from).some(
-    (index) => args[index] === word && restMatches(args, rest, index + 1),
-  );
+  const result = isOption(word)
+    ? args.some((arg) => optionMatches(arg, word)) &&
+      restMatches(args, rule, ruleIndex + 1, from, seen)
+    : subcommandCandidates(args, from).some(
+        (index) =>
+          args[index] === word &&
+          restMatches(args, rule, ruleIndex + 1, index + 1, seen),
+      );
+  seen.set(key, result);
+  return result;
 }
 
 /**

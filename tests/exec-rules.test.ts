@@ -226,3 +226,11 @@ test("a comment cannot close a quoted substitution early", () => {
   expect(exec(policy, 'echo "$(echo safe # )\nrm x)"').decision).toBe("deny");
   expect(exec(policy, 'echo "$(echo a#b) rm"').decision).toBe("allow");
 });
+
+test("a deny rule's search stays fast when option values repeat its words", () => {
+  const policy = execPolicy({ deny: ["git push origin main"] });
+  const command = `git ${"-C push -C origin ".repeat(400)}status`;
+  const started = performance.now();
+  expect(exec(policy, command).decision).toBe("allow");
+  expect(performance.now() - started).toBeLessThan(200);
+});
