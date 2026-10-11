@@ -485,11 +485,13 @@ const RESERVED_WORDS: ReadonlySet<string> = new Set([
  */
 function programIndex(words: readonly string[]): number {
   let index = 0;
-  while (
-    index < words.length &&
-    (RESERVED_WORDS.has(words[index] as string) ||
-      ASSIGNMENT.test(words[index] as string))
-  ) {
+  while (index < words.length) {
+    const word = words[index] as string;
+    // `time` takes options of its own (`time -p rm x`).
+    const timeOption = words[index - 1] === "time" && word.startsWith("-");
+    if (!RESERVED_WORDS.has(word) && !ASSIGNMENT.test(word) && !timeOption) {
+      break;
+    }
     index += 1;
   }
   return index;
