@@ -156,7 +156,10 @@ Two principles follow from that ceiling and shape every decision below.
      `bash`, `python3 -c`, `git`, `git -C` and `git -C /tmp` warn, since each
      admits a payload or alias that runs anything, and so do `python3 -W ignore`
      and `python3 -m pytest`, where the word after the option is taken as its
-     value. `bun test` and `git log` do not.
+     value. `bun test` and `git log` do not. An entry that names a script, such
+     as `bash script.sh`, does not warn: the script is a file in the repository
+     its author can read, and a warning on every interpreter entry would also
+     flag `bun test`. Decision 7 names what a script runs as opaque.
    - **Command runners:** `env`, `xargs`, `sudo` and `find`, whatever follows,
      since their arguments are a command or, for `find`, an `-exec` action.
 
