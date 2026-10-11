@@ -67,6 +67,70 @@ test("denied command in Cursor payload shape yields permission deny", async () =
   expect(String(response.agentMessage)).toContain("triage-readonly");
 });
 
+test("a Cursor denial names the rule, not the command (#238)", async () => {
+  const result = await runPolicyEval(
+    ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
+    {
+      hook_event_name: "beforeShellExecution",
+      command: "rm -rf /tmp/secret-target",
+    },
+  );
+  expect(lastJsonLine(result.stdout)).toEqual({
+    permission: "deny",
+    agentMessage:
+      "Blocked by policy triage-readonly (exec-denied): deny entry `rm`",
+  });
+});
+
+test("a Claude denial names the rule, not the command (#238)", async () => {
+  const args = [
+    "--policy",
+    "triage-readonly",
+    "--agents-dir",
+    fixturesAgentsDir,
+    "--format",
+    "claude",
+  ];
+  const exec = await runPolicyEval(args, {
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "git push origin secret-branch" },
+  });
+  expect(lastJsonLine(exec.stdout)).toEqual({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason:
+        "Blocked by policy triage-readonly (exec-denied): deny entry `git push`",
+    },
+  });
+  const read = await runPolicyEval(args, {
+    hook_event_name: "PreToolUse",
+    tool_name: "Read",
+    tool_input: { file_path: "config/secrets/key.pem" },
+  });
+  expect(
+    (
+      lastJsonLine(read.stdout) as {
+        hookSpecificOutput: { permissionDecisionReason: string };
+      }
+    ).hookSpecificOutput.permissionDecisionReason,
+  ).toBe(
+    "Blocked by policy triage-readonly (filesystem-denied): deny entry `**/secrets/**`",
+  );
+});
+
+test("a denial without a rule keeps the policy and reason (#238)", async () => {
+  const result = await runPolicyEval(
+    ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
+    { hook_event_name: "TotallyUnknownEvent" },
+  );
+  expect(lastJsonLine(result.stdout)).toEqual({
+    permission: "deny",
+    agentMessage: "Blocked by policy triage-readonly (policy-runtime-error)",
+  });
+});
+
 test("allowed command yields permission allow", async () => {
   const result = await runPolicyEval(
     ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],

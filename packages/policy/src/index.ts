@@ -25,6 +25,12 @@ export interface PolicyVerdict {
   readonly reason?: string;
   /** Human/agent-facing explanation. */
   readonly message?: string;
+  /**
+   * The policy rule behind the verdict, phrased for the agent: the entry
+   * that matched, or the entry that was missing (#238). It names the rule,
+   * never the full command. Absent on allow and on evaluator failures.
+   */
+  readonly rule?: string;
   /** Replacement tool input; only meaningful for "transform". */
   readonly transform?: Readonly<Record<string, unknown>>;
 }
@@ -107,10 +113,50 @@ function commandMatchesRule(command: string, rule: string): boolean {
  * operator the shell acts on (a chain, pipe, substitution or redirection)
  * disqualifies the command, and so does a quote the tokenizer cannot close.
  * An operator inside quotes is an argument, not chaining (#237).
+ *
+ * Returns what disqualifies the command, phrased for a denial, or undefined
+ * for a single simple command.
  */
-function commandUsesShellChaining(command: string): boolean {
+function shellChainingIn(command: string): string | undefined {
   const parsed = tokenizeShellCommand(command);
-  return !parsed.ok || parsed.tokens.some((token) => token.kind === "operator");
+  if (!parsed.ok) {
+    return `an unbalanced \`${parsed.quote}\``;
+  }
+  const operator = parsed.tokens.find((token) => token.kind === "operator");
+  if (operator === undefined) {
+    return undefined;
+  }
+  return operator.value === "\n"
+    ? "a newline outside quotes"
+    : `\`${operator.fd ?? ""}${operator.value}\` outside quotes`;
+}
+
+/** The program a command runs, for naming the allow entry it lacks. */
+function commandProgram(command: string): string {
+  const parsed = tokenizeShellCommand(command);
+  const first = parsed.ok ? parsed.tokens[0] : undefined;
+  return first?.kind === "word"
+    ? first.value
+    : (command.split(/\s+/)[0] ?? command);
+}
+
+/**
+ * The rule an unlisted command lacks. Where allow entries name the same
+ * program, they are listed, so the agent sees which forms are allowed.
+ */
+function missingExecAllowRule(
+  allow: readonly string[],
+  command: string,
+): string {
+  const program = commandProgram(command);
+  const related = allow.filter(
+    (rule) => rule === program || rule.startsWith(`${program} `),
+  );
+  return related.length === 0
+    ? `no allow entry for \`${program}\``
+    : `no allow entry for this \`${program}\` command; allowed: ${related
+        .map((rule) => `\`${rule}\``)
+        .join(", ")}`;
 }
 
 function pathMatchesRule(relativePath: string, rule: string): boolean {
@@ -193,23 +239,30 @@ function extractHost(input: PolicyEvalInput): string | undefined {
   }
 }
 
+type RulesResult =
+  | { readonly status: "denied"; readonly rule: string }
+  | { readonly status: "allowed"; readonly rule?: string }
+  | { readonly status: "unlisted" };
+
 function evaluateRules(
   rules: PolicyCapabilityRules | undefined,
   candidate: string,
   matches: (candidate: string, rule: string) => boolean,
-): "denied" | "allowed" | "unlisted" {
+): RulesResult {
   if (rules === undefined) {
-    return "allowed";
+    return { status: "allowed" };
   }
-  if (rules.deny?.some((rule) => matches(candidate, rule))) {
-    return "denied";
+  const denied = rules.deny?.find((rule) => matches(candidate, rule));
+  if (denied !== undefined) {
+    return { status: "denied", rule: denied };
   }
   if (rules.allow === undefined || rules.allow.length === 0) {
-    return "allowed";
+    return { status: "allowed" };
   }
-  return rules.allow.some((rule) => matches(candidate, rule))
-    ? "allowed"
-    : "unlisted";
+  const allowed = rules.allow.find((rule) => matches(candidate, rule));
+  return allowed === undefined
+    ? { status: "unlisted" }
+    : { status: "allowed", rule: allowed };
 }
 
 function evaluateExec(
@@ -220,43 +273,45 @@ function evaluateExec(
   if (command === undefined) {
     return ALLOW_VERDICT;
   }
-  const rawResult = evaluateRules(
-    policy.capabilities?.exec,
-    command,
-    commandMatchesRule,
-  );
-  // Chained/substituted commands never qualify as allow-list matches: the
-  // shell runs the entire string, so a matched prefix proves nothing about
-  // the rest. Deny matches stand; allow matches downgrade to unlisted.
-  const result =
-    rawResult === "allowed" &&
-    policy.capabilities?.exec?.allow !== undefined &&
-    policy.capabilities.exec.allow.length > 0 &&
-    commandUsesShellChaining(command)
-      ? "unlisted"
-      : rawResult;
-  if (result === "denied") {
+  const exec = policy.capabilities?.exec;
+  const result = evaluateRules(exec, command, commandMatchesRule);
+  if (result.status === "denied") {
     return {
       decision: "deny",
       reason: "exec-denied",
       message: `Command is denied by policy ${policy.id}: ${command}`,
+      rule: `deny entry \`${result.rule}\``,
     };
   }
-  if (result === "unlisted") {
-    if (policy.confirmations?.requiredFor.includes("exec.unknown")) {
-      return {
-        decision: "escalate",
-        reason: "exec-unknown-confirmation",
-        message: `Command is not on the allow list of policy ${policy.id} and requires approval: ${command}`,
-      };
+  let missingRule: string | undefined;
+  if (result.status === "unlisted") {
+    missingRule = missingExecAllowRule(exec?.allow ?? [], command);
+  } else if (result.rule !== undefined) {
+    // Chained/substituted commands never qualify as allow-list matches: the
+    // shell runs the entire string, so a matched prefix proves nothing about
+    // the rest. Deny matches stand; allow matches downgrade to unlisted.
+    const chaining = shellChainingIn(command);
+    if (chaining !== undefined) {
+      missingRule = `allow entry \`${result.rule}\` does not cover ${chaining}`;
     }
+  }
+  if (missingRule === undefined) {
+    return ALLOW_VERDICT;
+  }
+  if (policy.confirmations?.requiredFor.includes("exec.unknown")) {
     return {
-      decision: "deny",
-      reason: "exec-not-allowed",
-      message: `Command is not on the allow list of policy ${policy.id}: ${command}`,
+      decision: "escalate",
+      reason: "exec-unknown-confirmation",
+      message: `Command is not on the allow list of policy ${policy.id} and requires approval: ${command}`,
+      rule: missingRule,
     };
   }
-  return ALLOW_VERDICT;
+  return {
+    decision: "deny",
+    reason: "exec-not-allowed",
+    message: `Command is not on the allow list of policy ${policy.id}: ${command}`,
+    rule: missingRule,
+  };
 }
 
 function evaluateFilesystem(
@@ -279,6 +334,7 @@ function evaluateFilesystem(
       decision: "deny",
       reason: "filesystem-uncontained-path",
       message: `Path escapes the workspace or is absolute and cannot be classified by policy ${policy.id}: ${rawPath}`,
+      rule: "filesystem rules cover only paths inside the workspace",
     };
   }
   const result = evaluateRules(
@@ -286,18 +342,20 @@ function evaluateFilesystem(
     path,
     pathMatchesRule,
   );
-  if (result === "denied") {
+  if (result.status === "denied") {
     return {
       decision: "deny",
       reason: "filesystem-denied",
       message: `Path is denied by policy ${policy.id}: ${path}`,
+      rule: `deny entry \`${result.rule}\``,
     };
   }
-  if (result === "unlisted") {
+  if (result.status === "unlisted") {
     return {
       decision: "deny",
       reason: "filesystem-not-allowed",
       message: `Path is not on the allow list of policy ${policy.id}: ${path}`,
+      rule: `no allow entry for \`${path}\``,
     };
   }
   if (
@@ -309,6 +367,7 @@ function evaluateFilesystem(
       decision: "escalate",
       reason: "filesystem-write-confirmation",
       message: `Write to ${path} requires approval under policy ${policy.id}`,
+      rule: "confirmation `filesystem.write`",
     };
   }
   return ALLOW_VERDICT;
@@ -327,18 +386,20 @@ function evaluateNetwork(
     host,
     hostMatchesRule,
   );
-  if (result === "denied") {
+  if (result.status === "denied") {
     return {
       decision: "deny",
       reason: "network-denied",
       message: `Network access to ${host} is denied by policy ${policy.id}`,
+      rule: `deny entry \`${result.rule}\``,
     };
   }
-  if (result === "unlisted") {
+  if (result.status === "unlisted") {
     return {
       decision: "deny",
       reason: "network-not-allowed",
       message: `Host is not on the allow list of policy ${policy.id}: ${host}`,
+      rule: `no allow entry for \`${host}\``,
     };
   }
   return ALLOW_VERDICT;
@@ -360,6 +421,7 @@ function evaluateCost(
       decision: "deny",
       reason: "cost-budget-exceeded",
       message: `Cumulative cost $${spent.toFixed(2)} reached the $${limit.toFixed(2)} budget of policy ${policy.id}`,
+      rule: `cost budget $${limit.toFixed(2)}`,
     };
   }
   if (spent >= limit * COST_WARN_FRACTION) {
@@ -367,6 +429,7 @@ function evaluateCost(
       decision: "warn",
       reason: "cost-budget-warning",
       message: `Cumulative cost $${spent.toFixed(2)} is above ${COST_WARN_FRACTION * 100}% of the $${limit.toFixed(2)} budget of policy ${policy.id}`,
+      rule: `cost budget $${limit.toFixed(2)}`,
     };
   }
   return ALLOW_VERDICT;
@@ -422,6 +485,8 @@ export interface PolicyHookInput {
 export interface PolicyHookOutput {
   readonly verdict: PolicyVerdictDecision;
   readonly reason?: string;
+  /** The verdict's rule (PolicyVerdict.rule), for the bridge's denial text. */
+  readonly rule?: string;
   readonly updated_input?: Readonly<Record<string, unknown>>;
 }
 
@@ -460,6 +525,7 @@ export function createPolicyEvalHandler(
     return {
       verdict: verdict.decision,
       ...(verdict.reason === undefined ? {} : { reason: verdict.reason }),
+      ...(verdict.rule === undefined ? {} : { rule: verdict.rule }),
       ...(verdict.transform === undefined
         ? {}
         : { updated_input: verdict.transform }),

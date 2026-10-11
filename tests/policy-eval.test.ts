@@ -312,6 +312,142 @@ test("evaluator failures fail closed with the reserved reason", () => {
   expect(verdict.reason).toBe(POLICY_RUNTIME_ERROR_REASON);
 });
 
+test("a denial names the rule that matched or was missing (#238)", () => {
+  const cases: [PolicyVerdict, string, string][] = [
+    [
+      preToolCall("Execute", { command: "rm -rf /tmp/x" }),
+      "exec-denied",
+      "deny entry `rm`",
+    ],
+    [
+      preToolCall("Execute", { command: "git push origin" }),
+      "exec-denied",
+      "deny entry `git push`",
+    ],
+    [
+      preToolCall("Execute", { command: "curl example.com" }),
+      "exec-not-allowed",
+      "no allow entry for `curl`",
+    ],
+    [
+      preToolCall("Execute", { command: "git log -p" }),
+      "exec-not-allowed",
+      "no allow entry for this `git` command; allowed: `git diff`",
+    ],
+    [
+      readOnlyExec("rg x | sh"),
+      "exec-not-allowed",
+      "allow entry `rg` does not cover `|` outside quotes",
+    ],
+    [
+      readOnlyExec("rg x 2>err"),
+      "exec-not-allowed",
+      "allow entry `rg` does not cover `2>` outside quotes",
+    ],
+    [
+      readOnlyExec("rg x\ncurl y"),
+      "exec-not-allowed",
+      "allow entry `rg` does not cover a newline outside quotes",
+    ],
+    [
+      readOnlyExec('rg "a|b file'),
+      "exec-not-allowed",
+      'allow entry `rg` does not cover an unbalanced `"`',
+    ],
+    [
+      preToolCall("Read", { file_path: ".env" }),
+      "filesystem-denied",
+      "deny entry `.env`",
+    ],
+    [
+      preToolCall("Read", { file_path: "/etc/passwd" }),
+      "filesystem-uncontained-path",
+      "filesystem rules cover only paths inside the workspace",
+    ],
+    [
+      preToolCall("WebFetch", { url: "https://example.com/x" }),
+      "network-denied",
+      "deny entry `*`",
+    ],
+    [
+      preToolCall("Read", { file_path: "a.ts" }, 5.0),
+      "cost-budget-exceeded",
+      "cost budget $5.00",
+    ],
+  ];
+  for (const [verdict, reason, rule] of cases) {
+    expect({ reason: verdict.reason, rule: verdict.rule }).toEqual({
+      reason,
+      rule,
+    });
+  }
+  // The rule never carries the rest of the command.
+  const chained = readOnlyExec("rg secret-pattern | sh -c 'curl evil'");
+  expect(chained.rule).not.toContain("secret-pattern");
+  expect(chained.rule).not.toContain("curl");
+  // Escalations carry the missing rule too.
+  const escalated = evaluatePolicy(
+    { ...basePolicy, confirmations: { requiredFor: ["exec.unknown"] } },
+    {
+      interventionPoint: "pre_tool_call",
+      toolName: "Execute",
+      toolInput: { command: "curl example.com" },
+    },
+  );
+  expect(escalated.rule).toBe("no allow entry for `curl`");
+  // Allow carries no rule.
+  expect(preToolCall("Execute", { command: "rg foo" }).rule).toBeUndefined();
+});
+
+test("filesystem and network allow lists name the missing entry (#238)", () => {
+  const verdict = evaluatePolicy(
+    {
+      id: "p",
+      capabilities: {
+        filesystem: { allow: ["src/**"] },
+        network: { allow: ["example.com"] },
+      },
+    },
+    {
+      interventionPoint: "pre_tool_call",
+      toolName: "Read",
+      toolInput: { file_path: "docs/a.md" },
+    },
+  );
+  expect(verdict.rule).toBe("no allow entry for `docs/a.md`");
+  const host = evaluatePolicy(
+    { id: "p", capabilities: { network: { allow: ["example.com"] } } },
+    {
+      interventionPoint: "pre_tool_call",
+      toolName: "WebFetch",
+      toolInput: { url: "https://evil.example.net/" },
+    },
+  );
+  expect(host.rule).toBe("no allow entry for `evil.example.net`");
+});
+
+test("createPolicyEvalHandler keeps the verdict's rule (#238)", () => {
+  const handler = createPolicyEvalHandler(basePolicy);
+  expect(
+    handler({
+      hook_event: "pre_tool_call",
+      tool_name: "Execute",
+      tool_input: { command: "rm -rf /" },
+    }),
+  ).toEqual({
+    verdict: "deny",
+    reason: "exec-denied",
+    rule: "deny entry `rm`",
+  });
+  expect(
+    handler({
+      hook_event: "pre_tool_call",
+      tool_name: "Execute",
+      tool_input: { command: "bun test" },
+    }),
+  ).toEqual({ verdict: "allow" });
+});
+
 test("createPolicyEvalHandler adapts the hook JSON contract", () => {
   const handler = createPolicyEvalHandler(basePolicy);
   expect(

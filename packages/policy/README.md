@@ -23,6 +23,9 @@ hooks can tighten but never override a policy deny.
   with an unbalanced quote, is unlisted however it starts; the same characters
   inside quotes are an argument (`tokenizeShellCommand`). Deny entries match by
   prefix, as before.
+- **Denials name the rule:** a verdict's `rule` is the entry that matched or the
+  entry that was missing, never the full command, and the policy-eval bridge
+  tells the agent `Blocked by policy <id> (<reason>): <rule>`
 
 Rego/ACS engines are intentionally out of scope here; this package is the
 default `engine: native` path.
