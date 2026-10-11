@@ -60,19 +60,19 @@ interface Frame {
 }
 
 /**
- * Split a command into its simple commands, a substitution's contents and a
- * subshell's forming simple commands of their own. Never fails: when the
- * tokenizer cannot read the command (an unbalanced quote), it is split on
- * whitespace and operator characters instead, which finds more words, not
- * fewer.
- */
-/**
  * How deep quoted substitutions are read by recursion. Each level
  * re-tokenizes its body, so deeper bodies use the rough split, which reads
  * every word in one pass and so finds no fewer.
  */
 const MAX_QUOTED_SUBSTITUTION_DEPTH = 8;
 
+/**
+ * Split a command into its simple commands, a substitution's contents and a
+ * subshell's forming simple commands of their own. Never fails: when the
+ * tokenizer cannot read the command (an unbalanced quote), it is split on
+ * whitespace and operator characters instead, which finds more words, not
+ * fewer.
+ */
 export function simpleCommandsOf(
   raw: string,
   depth = 0,
