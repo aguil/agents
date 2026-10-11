@@ -2,6 +2,13 @@ import type {
   PolicyCapabilityRules,
   PolicySpec,
 } from "@aguil/agents-harness-config";
+import {
+  allowRuleMatches,
+  denyRuleMatches,
+  leadingWords,
+  ruleWords,
+  simpleCommandsOf,
+} from "./exec-matching";
 import { tokenizeShellCommand } from "./shell-tokenizer";
 
 export type {
@@ -98,9 +105,9 @@ export function composeVerdicts(
 }
 
 /**
- * A command matches a rule when it equals the rule or starts with the rule
- * followed by a space (word boundary): deny "rm" blocks "rm -rf x" but not
- * "rmdir".
+ * The word-boundary prefix of ADR 0006 §2 on the raw string: deny "rm"
+ * blocks "rm -rf x" but not "rmdir". Kept as a second way for a deny rule to
+ * match, beside ADR 0026's reading, so no command denied before is allowed.
  */
 function commandMatchesRule(command: string, rule: string): boolean {
   return command === rule || command.startsWith(`${rule} `);
@@ -276,6 +283,43 @@ function evaluateRules(
     : { status: "allowed", rule: allowed };
 }
 
+/**
+ * Exec rules (ADR 0026 decisions 1 to 4). Deny rules are checked against
+ * every simple command, substitutions included, by program and subcommand;
+ * allow rules against the command's leading words, as a word prefix. A
+ * command with an operator outside quotes still matches an allow rule here,
+ * and evaluateExec then makes it unlisted, naming the operator.
+ */
+function evaluateExecRules(
+  exec: PolicyCapabilityRules | undefined,
+  command: string,
+): RulesResult {
+  if (exec === undefined) {
+    return { status: "allowed" };
+  }
+  const commands = simpleCommandsOf(command);
+  const denied = exec.deny?.find((rule) => {
+    if (commandMatchesRule(command, rule)) {
+      return true;
+    }
+    const words = ruleWords(rule);
+    return commands.some((simple) => denyRuleMatches(simple, words));
+  });
+  if (denied !== undefined) {
+    return { status: "denied", rule: denied };
+  }
+  if (exec.allow === undefined || exec.allow.length === 0) {
+    return { status: "allowed" };
+  }
+  const words = leadingWords(command);
+  const allowed = exec.allow.find((rule) =>
+    allowRuleMatches(words, ruleWords(rule)),
+  );
+  return allowed === undefined
+    ? { status: "unlisted" }
+    : { status: "allowed", rule: allowed };
+}
+
 function evaluateExec(
   policy: PolicySpec,
   input: PolicyEvalInput,
@@ -285,7 +329,7 @@ function evaluateExec(
     return ALLOW_VERDICT;
   }
   const exec = policy.capabilities?.exec;
-  const result = evaluateRules(exec, command, commandMatchesRule);
+  const result = evaluateExecRules(exec, command);
   if (result.status === "denied") {
     return {
       decision: "deny",

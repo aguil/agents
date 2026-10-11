@@ -24,10 +24,18 @@ hooks can tighten but never override a policy deny.
   inside quotes are an argument (`tokenizeShellCommand`). So is a command whose
   reading could differ from bash's: one with a comment (`#` starting an unquoted
   word), `$'…'` quoting, or a `${…}` holding a quote, backslash, `$` or
-  backtick. Deny entries match by prefix, as before.
-- **Denials name the rule:** a verdict's `rule` is the entry that matched or the
-  entry that was missing, never the full command, and the policy-eval bridge
-  tells the agent `Blocked by policy <id> (<reason>): <rule>`
+  backtick.
+- **Deny reads a command generously, allow strictly (ADR 0026):** deny entries
+  are checked against every simple command in the string, a substitution's or a
+  subshell's contents included, so `cat a; rm b` and `echo "$(rm x)"` meet
+  `deny: [rm]`. The program is found past `NAME=value` assignments and compared
+  by its last path component (`/bin/rm x`). A deny entry's subcommand is found
+  behind options (`git -C /tmp push` meets `deny: [git push]`), and its options
+  anywhere, inside a cluster too (`sed -ni` meets `deny: [sed -i]`). No table of
+  options is used, so an option's value can be taken for a subcommand and deny:
+  that over-denial is accepted. Allow entries are a word prefix on the command
+  as written: `git --no-pager log` and `FOO=1 git log` are unlisted under
+  `allow: [git log]`, and a quoted program matches (`'rg' x`).
 
 Rego/ACS engines are intentionally out of scope here; this package is the
 default `engine: native` path.
