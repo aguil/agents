@@ -66,7 +66,20 @@ interface Frame {
  * whitespace and operator characters instead, which finds more words, not
  * fewer.
  */
-export function simpleCommandsOf(raw: string): readonly SimpleCommand[] {
+/**
+ * How deep quoted substitutions are read by recursion. Each level
+ * re-tokenizes its body, so deeper bodies use the rough split, which reads
+ * every word in one pass and so finds no fewer.
+ */
+const MAX_QUOTED_SUBSTITUTION_DEPTH = 8;
+
+export function simpleCommandsOf(
+  raw: string,
+  depth = 0,
+): readonly SimpleCommand[] {
+  if (depth > MAX_QUOTED_SUBSTITUTION_DEPTH) {
+    return roughSimpleCommands(raw);
+  }
   const command = decodeAnsiCQuotes(raw);
   const parsed = tokenizeShellCommand(command);
   const commands = parsed.ok
@@ -75,7 +88,7 @@ export function simpleCommandsOf(raw: string): readonly SimpleCommand[] {
   // A substitution inside double quotes stays in its word as text; read its
   // body from the command itself.
   for (const body of doubleQuotedSubstitutionBodies(command)) {
-    commands.push(...simpleCommandsOf(body));
+    commands.push(...simpleCommandsOf(body, depth + 1));
   }
   return commands;
 }
@@ -330,7 +343,10 @@ function closingBacktick(command: string, start: number): number {
   return command.length;
 }
 
-/** Index of the `)` closing a `(` opened before `start`, or the end. */
+/**
+ * Index of the `)` closing a `(` opened before `start`, or the end. Quotes
+ * and comments are skipped, as bash skips them reading a `$(…)` body.
+ */
 function closingParenthesis(command: string, start: number): number {
   let depth = 1;
   for (let index = start; index < command.length; index += 1) {
@@ -342,6 +358,14 @@ function closingParenthesis(command: string, start: number): number {
       index = close === -1 ? command.length : close;
     } else if (char === '"') {
       index = closingDoubleQuote(command, index + 1);
+    } else if (
+      char === "#" &&
+      (index === start || /[\s;|&()]/.test(command[index - 1] as string))
+    ) {
+      // A comment runs to the end of the line, and a `)` inside it does
+      // not close the substitution.
+      const newline = command.indexOf("\n", index);
+      index = newline === -1 ? command.length : newline - 1;
     } else if (char === "(") {
       depth += 1;
     } else if (char === ")") {
@@ -377,39 +401,62 @@ export function ruleWords(rule: string): readonly string[] {
 }
 
 /**
- * The command's words up to its first operator: what an allow rule is
- * matched against. A command with an operator is unlisted whatever these
- * match, so the words after it never matter to allow.
+ * Allow matching (ADR 0026 decision 4, JC-13, JC-17): the word-boundary
+ * prefix of ADR 0006 §2 on the raw command, as before, with one widening:
+ * the program may be quoted or escaped (`'rg' x`), since the shell runs the
+ * same program. Nothing else is read more loosely, so `git  log` and
+ * `git "log"` stay unlisted under `allow: [git log]`, and an assignment or a
+ * different path in front of the program matches nothing.
  */
-export function leadingWords(command: string): readonly string[] {
-  const parsed = tokenizeShellCommand(command);
-  if (!parsed.ok) {
-    return roughSimpleCommands(command)[0]?.words ?? [];
+export function allowRuleMatches(command: string, rule: string): boolean {
+  if (command === rule || command.startsWith(`${rule} `)) {
+    return true;
   }
-  const words: string[] = [];
-  for (const token of parsed.tokens) {
-    if (token.kind === "operator") {
-      break;
-    }
-    words.push(token.value);
+  const commandEnd = firstRawWordEnd(command);
+  const ruleEnd = firstRawWordEnd(rule);
+  const program = singleWordValue(command.slice(0, commandEnd));
+  if (
+    program === undefined ||
+    program !== singleWordValue(rule.slice(0, ruleEnd))
+  ) {
+    return false;
   }
-  return words;
+  const rewritten = rule.slice(0, ruleEnd) + command.slice(commandEnd);
+  return rewritten === rule || rewritten.startsWith(`${rule} `);
 }
 
-/**
- * Allow matching (ADR 0026 decision 4): the command's words begin with the
- * rule's, compared whole. The program is compared as the rule writes it, so
- * an assignment or a different path in front matches nothing.
- */
-export function allowRuleMatches(
-  words: readonly string[],
-  rule: readonly string[],
-): boolean {
-  return (
-    rule.length > 0 &&
-    rule.length <= words.length &&
-    rule.every((word, index) => words[index] === word)
-  );
+/** Where the first word's raw text ends: unquoted blank or operator. */
+function firstRawWordEnd(text: string): number {
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] as string;
+    if (quote === "'") {
+      if (char === "'") {
+        quote = undefined;
+      }
+    } else if (char === "\\") {
+      index += 1;
+    } else if (quote === '"') {
+      if (char === '"') {
+        quote = undefined;
+      }
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (/[\s;|&<>()`$]/.test(char)) {
+      return index;
+    }
+  }
+  return text.length;
+}
+
+/** The value of text the tokenizer reads as exactly one word. */
+function singleWordValue(text: string): string | undefined {
+  const parsed = tokenizeShellCommand(text);
+  if (!parsed.ok || parsed.tokens.length !== 1) {
+    return undefined;
+  }
+  const [token] = parsed.tokens;
+  return token?.kind === "word" ? token.value : undefined;
 }
 
 /**
@@ -488,26 +535,40 @@ export function denyRuleMatches(
   ) {
     return false;
   }
-  return restMatches(command.words.slice(start + 1), rest, 0);
+  return restMatches(command.words.slice(start + 1), rest, 0, 0, new Map());
 }
 
+/**
+ * Whether `rule[ruleIndex..]` matches from `args[from]`. Each pair is tried
+ * once, memoized, so option values that repeat a rule word cannot make the
+ * search grow faster than words times rule words times candidates.
+ */
 function restMatches(
   args: readonly string[],
   rule: readonly string[],
+  ruleIndex: number,
   from: number,
+  seen: Map<string, boolean>,
 ): boolean {
-  const [word, ...rest] = rule;
+  const word = rule[ruleIndex];
   if (word === undefined) {
     return true;
   }
-  if (isOption(word)) {
-    return args.some((arg) => optionMatches(arg, word))
-      ? restMatches(args, rest, from)
-      : false;
+  const key = `${ruleIndex}:${from}`;
+  const known = seen.get(key);
+  if (known !== undefined) {
+    return known;
   }
-  return subcommandCandidates(args, from).some(
-    (index) => args[index] === word && restMatches(args, rest, index + 1),
-  );
+  const result = isOption(word)
+    ? args.some((arg) => optionMatches(arg, word)) &&
+      restMatches(args, rule, ruleIndex + 1, from, seen)
+    : subcommandCandidates(args, from).some(
+        (index) =>
+          args[index] === word &&
+          restMatches(args, rule, ruleIndex + 1, index + 1, seen),
+      );
+  seen.set(key, result);
+  return result;
 }
 
 /**

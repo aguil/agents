@@ -33,6 +33,8 @@ test("each interpreter warns when nothing after it names what runs", () => {
     "node -e",
     "bun -e",
     "/bin/bash",
+    "FOO=1 bash",
+    "A=1 B=2 python3 -c",
   ]) {
     expect(allowEntryRunsAnything(entry)).toBe(true);
   }

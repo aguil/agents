@@ -84,5 +84,6 @@ line, such as an OS sandbox.
   caller does not pass the workspace, every absolute argument.
 - With no `exec.allow` list, anything run behind an interpreter or runner: such
   a policy's deny list reaches only commands that name the program directly or
-  through options and paths, so `env rm x`, `nohup rm x` or `xargs rm` pass
-  `deny: [rm]` there. With an allow list, each is unlisted.
+  through options and paths, so `bash -c 'rm x'`, `env rm x`, `nohup rm x` or
+  `xargs rm` pass `deny: [rm]` there, and no warning says so. With an allow
+  list, each is unlisted.

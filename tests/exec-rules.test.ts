@@ -208,3 +208,39 @@ test("a deny rule reads a word written with ANSI-C quoting as bash does", () => 
   expect(exec(policy, `echo "$'rm'"`).decision).toBe("allow");
   expect(exec(policy, "echo $'rm'").decision).toBe("allow");
 });
+
+test("allow widens only for a quoted program, not for spacing or a quoted subcommand (JC-17)", () => {
+  const log = execPolicy({ allow: ["git log", "rg"] });
+  for (const command of ["git  log", "git\tlog", 'git "log"', "git l'og'"]) {
+    const verdict = exec(log, command);
+    expect(verdict.decision).toBe("deny");
+    expect(verdict.reason).toBe("exec-not-allowed");
+  }
+  for (const command of ["'git' log -1", "g\\it log", "\\rg x", "rg"]) {
+    expect(exec(log, command).decision).toBe("allow");
+  }
+});
+
+test("a comment cannot close a quoted substitution early", () => {
+  const policy = execPolicy({ deny: ["rm"] });
+  expect(exec(policy, 'echo "$(echo safe # )\nrm x)"').decision).toBe("deny");
+  expect(exec(policy, 'echo "$(echo a#b) rm"').decision).toBe("allow");
+});
+
+test("a deny rule's search stays fast when option values repeat its words", () => {
+  const policy = execPolicy({ deny: ["git push origin main"] });
+  const command = `git ${"-C push -C origin ".repeat(400)}status`;
+  const started = performance.now();
+  expect(exec(policy, command).decision).toBe("allow");
+  expect(performance.now() - started).toBeLessThan(200);
+});
+
+test("deeply nested quoted substitutions are read in bounded time, still denying", () => {
+  const policy = execPolicy({ deny: ["rm"] });
+  const nest = (inner: string, depth: number): string =>
+    depth === 0 ? inner : `echo "$(${nest(inner, depth - 1)})"`;
+  const started = performance.now();
+  expect(exec(policy, nest("rm x", 1200)).decision).toBe("deny");
+  expect(exec(policy, nest("ls x", 1200)).decision).toBe("allow");
+  expect(performance.now() - started).toBeLessThan(500);
+});

@@ -42,7 +42,13 @@ const COMMAND_RUNNERS: ReadonlySet<string> = new Set([
  * not (JC-18); `bash`, `python3 -c` and `git -C /tmp` do.
  */
 export function allowEntryRunsAnything(entry: string): boolean {
-  const [program, ...rest] = ruleWords(entry);
+  // An entry may set the environment first (`FOO=1 bash`): the program is
+  // the first word after the assignments, as exec matching reads it.
+  const words = ruleWords(entry);
+  const start = words.findIndex(
+    (word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word),
+  );
+  const [program, ...rest] = start === -1 ? [] : words.slice(start);
   if (program === undefined) {
     return false;
   }

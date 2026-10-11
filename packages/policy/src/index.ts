@@ -6,7 +6,6 @@ import {
   allowRuleMatches,
   argumentsOf,
   denyRuleMatches,
-  leadingWords,
   ruleWords,
   simpleCommandsOf,
 } from "./exec-matching";
@@ -334,10 +333,7 @@ function evaluateExecRules(
   if (exec.allow === undefined || exec.allow.length === 0) {
     return { status: "allowed" };
   }
-  const words = leadingWords(command);
-  const allowed = exec.allow.find((rule) =>
-    allowRuleMatches(words, ruleWords(rule)),
-  );
+  const allowed = exec.allow.find((rule) => allowRuleMatches(command, rule));
   return allowed === undefined
     ? { status: "unlisted" }
     : { status: "allowed", rule: allowed };
