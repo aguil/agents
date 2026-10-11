@@ -145,3 +145,18 @@ test("tokenizer fails on an unbalanced quote", () => {
   // An escaped opening quote is a literal character.
   expect(tokenizeShellCommand(`rg \\"a`).ok).toBe(true);
 });
+
+test("tokenizer marks operators reported from inside double quotes", () => {
+  expect(tokens(`rg "$(x)" $(y)`)).toEqual([
+    { kind: "word", value: "rg", quoted: false },
+    { kind: "operator", value: "$(", quoted: true },
+    { kind: "word", value: "$(x)", quoted: true },
+    { kind: "operator", value: "$(" },
+    { kind: "word", value: "y", quoted: false },
+    { kind: "operator", value: ")" },
+  ]);
+  expect(tokens('echo "`x`"').filter((t) => t.kind === "operator")).toEqual([
+    { kind: "operator", value: "`", quoted: true },
+    { kind: "operator", value: "`", quoted: true },
+  ]);
+});

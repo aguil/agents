@@ -601,3 +601,47 @@ test("relativizeContainedPaths accepts the workspace's realpath alias", async ()
     await rm(real, { recursive: true, force: true });
   }
 });
+
+test("on Claude, an absolute argument to a denied path inside the workspace denies (#104)", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "policy-eval-argument-"));
+  await writeFile(join(workspace, ".env"), "TOKEN=x");
+  try {
+    const decide = async (command: string) => {
+      const result = await runPolicyEval(
+        [
+          "--policy",
+          "triage-readonly",
+          "--agents-dir",
+          fixturesAgentsDir,
+          "--format",
+          "claude",
+          "--workspace",
+          workspace,
+        ],
+        {
+          hook_event_name: "PreToolUse",
+          tool_name: "Bash",
+          tool_input: { command },
+        },
+      );
+      return lastJsonLine(result.stdout);
+    };
+    expect(await decide(`rg TOKEN ${join(workspace, ".env")}`)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "Blocked by policy triage-readonly (filesystem-denied): deny entry `.env`",
+      },
+    });
+    // Outside the workspace the argument is not checked (JC-15).
+    expect(await decide("rg TOKEN /etc/hostname")).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+      },
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

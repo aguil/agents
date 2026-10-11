@@ -2,8 +2,16 @@ import type {
   PolicyCapabilityRules,
   PolicySpec,
 } from "@aguil/agents-harness-config";
+import {
+  allowRuleMatches,
+  argumentsOf,
+  denyRuleMatches,
+  ruleWords,
+  simpleCommandsOf,
+} from "./exec-matching";
 import { tokenizeShellCommand } from "./shell-tokenizer";
 
+export { allowEntryRunsAnything, policyLoadWarnings } from "./allow-warnings";
 export type {
   ShellOperatorToken,
   ShellToken,
@@ -58,6 +66,23 @@ export type PolicyInterventionPoint =
   | "run_start"
   | "run_end";
 
+/**
+ * What the caller knows that the evaluator cannot find out itself (JC-20).
+ * The evaluator has no file-system access, so the caller resolves paths.
+ */
+export interface PolicyEvalOptions {
+  /**
+   * The workspace-relative form of an absolute path inside the run's
+   * workspace, symbolic links resolved as for a file tool's path; undefined
+   * for a path outside it. The policy-eval bridge supplies it from
+   * `--workspace`. Without it, an absolute argument is not checked against
+   * `filesystem.deny` (JC-15).
+   */
+  readonly relativizeWorkspacePath?: (
+    absolutePath: string,
+  ) => string | undefined;
+}
+
 export interface PolicyEvalInput {
   readonly interventionPoint: PolicyInterventionPoint;
   readonly toolName?: string;
@@ -98,9 +123,9 @@ export function composeVerdicts(
 }
 
 /**
- * A command matches a rule when it equals the rule or starts with the rule
- * followed by a space (word boundary): deny "rm" blocks "rm -rf x" but not
- * "rmdir".
+ * The word-boundary prefix of ADR 0006 §2 on the raw string: deny "rm"
+ * blocks "rm -rf x" but not "rmdir". Kept as a second way for a deny rule to
+ * match, beside ADR 0026's reading, so no command denied before is allowed.
  */
 function commandMatchesRule(command: string, rule: string): boolean {
   return command === rule || command.startsWith(`${rule} `);
@@ -185,7 +210,7 @@ function pathMatchesRule(relativePath: string, rule: string): boolean {
  * must treat them as denied under any filesystem-ruled policy.
  */
 function canonicalizeCandidatePath(path: string): string | undefined {
-  if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) {
+  if (isAbsoluteCandidatePath(path)) {
     return undefined;
   }
   const segments: string[] = [];
@@ -203,6 +228,10 @@ function canonicalizeCandidatePath(path: string): string | undefined {
     }
   }
   return segments.join("/");
+}
+
+function isAbsoluteCandidatePath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
 }
 
 function hostMatchesRule(host: string, rule: string): boolean {
@@ -276,6 +305,40 @@ function evaluateRules(
     : { status: "allowed", rule: allowed };
 }
 
+/**
+ * Exec rules (ADR 0026 decisions 1 to 4). Deny rules are checked against
+ * every simple command, substitutions included, by program and subcommand;
+ * allow rules against the command's leading words, as a word prefix. A
+ * command with an operator outside quotes still matches an allow rule here,
+ * and evaluateExec then makes it unlisted, naming the operator.
+ */
+function evaluateExecRules(
+  exec: PolicyCapabilityRules | undefined,
+  command: string,
+): RulesResult {
+  if (exec === undefined) {
+    return { status: "allowed" };
+  }
+  const commands = simpleCommandsOf(command);
+  const denied = exec.deny?.find((rule) => {
+    if (commandMatchesRule(command, rule)) {
+      return true;
+    }
+    const words = ruleWords(rule);
+    return commands.some((simple) => denyRuleMatches(simple, words));
+  });
+  if (denied !== undefined) {
+    return { status: "denied", rule: denied };
+  }
+  if (exec.allow === undefined || exec.allow.length === 0) {
+    return { status: "allowed" };
+  }
+  const allowed = exec.allow.find((rule) => allowRuleMatches(command, rule));
+  return allowed === undefined
+    ? { status: "unlisted" }
+    : { status: "allowed", rule: allowed };
+}
+
 function evaluateExec(
   policy: PolicySpec,
   input: PolicyEvalInput,
@@ -285,7 +348,7 @@ function evaluateExec(
     return ALLOW_VERDICT;
   }
   const exec = policy.capabilities?.exec;
-  const result = evaluateRules(exec, command, commandMatchesRule);
+  const result = evaluateExecRules(exec, command);
   if (result.status === "denied") {
     return {
       decision: "deny",
@@ -323,6 +386,79 @@ function evaluateExec(
     message: `Command is not on the allow list of policy ${policy.id}: ${command}`,
     rule: missingRule,
   };
+}
+
+/**
+ * A command's arguments meet `filesystem.deny` (ADR 0026 decision 5, JC-7).
+ * Every word after the program in each simple command, the value of every
+ * `name=value` word and short option, and every redirection's file target
+ * are checked
+ * against the deny globs, canonicalized as a file tool's path is. It runs on
+ * every command the exec rules do not deny, unlisted ones included (JC-14):
+ * composed with evaluateExec, its deny outranks an escalation. An argument
+ * absolute outside the workspace, or escaping it, is not checked (JC-15).
+ * `filesystem.allow` is not applied: most arguments are not paths.
+ */
+function evaluateExecArguments(
+  policy: PolicySpec,
+  input: PolicyEvalInput,
+  options: PolicyEvalOptions,
+): PolicyVerdict {
+  const deny = policy.capabilities?.filesystem?.deny;
+  const command = extractCommand(input);
+  if (command === undefined || deny === undefined || deny.length === 0) {
+    return ALLOW_VERDICT;
+  }
+  for (const simple of simpleCommandsOf(command)) {
+    for (const word of [...argumentsOf(simple), ...simple.redirectionTargets]) {
+      for (const candidate of argumentCandidates(word)) {
+        const path = argumentPath(candidate, options);
+        const rule =
+          path === undefined
+            ? undefined
+            : deny.find((glob) => pathMatchesRule(path, glob));
+        if (rule !== undefined) {
+          return {
+            decision: "deny",
+            reason: "filesystem-denied",
+            message: `Command names a path denied by policy ${policy.id}: ${path}`,
+            rule: `deny entry \`${rule}\``,
+          };
+        }
+      }
+    }
+  }
+  return ALLOW_VERDICT;
+}
+
+/**
+ * The paths a word may name: the word, the value of a `name=value` word
+ * (`--file=.env`, `dd if=.env`), and the value attached to a short option
+ * (`-f.env`). Reading more of a word can only find more to deny.
+ */
+function argumentCandidates(word: string): readonly string[] {
+  const candidates = [word];
+  const assigned = /^[^=]+=(.+)$/.exec(word)?.[1];
+  if (assigned !== undefined) {
+    candidates.push(assigned);
+  }
+  if (/^-[^-]./.test(word)) {
+    candidates.push(word.slice(2));
+  }
+  return candidates;
+}
+
+/** An argument as a workspace-relative path, or undefined when unchecked. */
+function argumentPath(
+  word: string,
+  options: PolicyEvalOptions,
+): string | undefined {
+  const relative = isAbsoluteCandidatePath(word)
+    ? options.relativizeWorkspacePath?.(word)
+    : word;
+  const path =
+    relative === undefined ? undefined : canonicalizeCandidatePath(relative);
+  return path === "" ? undefined : path;
 }
 
 function evaluateFilesystem(
@@ -454,6 +590,7 @@ function evaluateCost(
 export function evaluatePolicy(
   policy: PolicySpec,
   input: PolicyEvalInput,
+  options: PolicyEvalOptions = {},
 ): PolicyVerdict {
   try {
     if (
@@ -464,8 +601,14 @@ export function evaluatePolicy(
       // cost, which is checked everywhere.
       return evaluateCost(policy, input);
     }
+    // A deny entry is the command's own rule, so it is named first;
+    // otherwise a denied path says more than a missing allow entry.
+    const execVerdict = evaluateExec(policy, input);
+    const argumentVerdict = evaluateExecArguments(policy, input, options);
     return composeVerdicts([
-      evaluateExec(policy, input),
+      ...(execVerdict.reason === "exec-denied"
+        ? [execVerdict, argumentVerdict]
+        : [argumentVerdict, execVerdict]),
       evaluateFilesystem(policy, input),
       evaluateNetwork(policy, input),
       evaluateCost(policy, input),
@@ -519,6 +662,7 @@ const HOOK_EVENT_TO_INTERVENTION: Readonly<
  */
 export function createPolicyEvalHandler(
   policy: PolicySpec,
+  options: PolicyEvalOptions = {},
 ): (input: PolicyHookInput) => PolicyHookOutput {
   return (input) => {
     const interventionPoint = HOOK_EVENT_TO_INTERVENTION[input.hook_event];
@@ -528,11 +672,15 @@ export function createPolicyEvalHandler(
         reason: POLICY_RUNTIME_ERROR_REASON,
       };
     }
-    const verdict = evaluatePolicy(policy, {
-      interventionPoint,
-      toolName: input.tool_name,
-      toolInput: input.tool_input,
-    });
+    const verdict = evaluatePolicy(
+      policy,
+      {
+        interventionPoint,
+        toolName: input.tool_name,
+        toolInput: input.tool_input,
+      },
+      options,
+    );
     return {
       verdict: verdict.decision,
       ...(verdict.reason === undefined ? {} : { reason: verdict.reason }),
