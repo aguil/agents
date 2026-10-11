@@ -328,7 +328,10 @@ function closingBacktick(command: string, start: number): number {
   return command.length;
 }
 
-/** Index of the `)` closing a `(` opened before `start`, or the end. */
+/**
+ * Index of the `)` closing a `(` opened before `start`, or the end. Quotes
+ * and comments are skipped, as bash skips them reading a `$(…)` body.
+ */
 function closingParenthesis(command: string, start: number): number {
   let depth = 1;
   for (let index = start; index < command.length; index += 1) {
@@ -340,6 +343,14 @@ function closingParenthesis(command: string, start: number): number {
       index = close === -1 ? command.length : close;
     } else if (char === '"') {
       index = closingDoubleQuote(command, index + 1);
+    } else if (
+      char === "#" &&
+      (index === start || /[\s;|&()]/.test(command[index - 1] as string))
+    ) {
+      // A comment runs to the end of the line, and a `)` inside it does
+      // not close the substitution.
+      const newline = command.indexOf("\n", index);
+      index = newline === -1 ? command.length : newline - 1;
     } else if (char === "(") {
       depth += 1;
     } else if (char === ")") {

@@ -220,3 +220,9 @@ test("allow widens only for a quoted program, not for spacing or a quoted subcom
     expect(exec(log, command).decision).toBe("allow");
   }
 });
+
+test("a comment cannot close a quoted substitution early", () => {
+  const policy = execPolicy({ deny: ["rm"] });
+  expect(exec(policy, 'echo "$(echo safe # )\nrm x)"').decision).toBe("deny");
+  expect(exec(policy, 'echo "$(echo a#b) rm"').decision).toBe("allow");
+});
