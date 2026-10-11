@@ -573,63 +573,57 @@ export function denyRuleMatches(
   ) {
     return false;
   }
-  return restMatches(command.words.slice(start + 1), rest, 0, 0, new Map());
+  return restMatches(command.words.slice(start + 1), rest);
 }
 
 /**
- * Whether `rule[ruleIndex..]` matches from `args[from]`. Each pair is tried
- * once, memoized, so option values that repeat a rule word cannot make the
- * search grow faster than words times rule words times candidates.
+ * Whether the rule's words after the program resolve among `args`. An
+ * option rule word is matched anywhere. A subcommand rule word is matched
+ * among the candidates of every scan that can be under way: a scan starts
+ * after the program and after each word an earlier rule word matched, skips
+ * options, and stops after a non-option word unless that word may be the
+ * value of the option before it. All scans are walked together in one pass
+ * per rule word, so the cost is rule words times arguments however many
+ * candidates a run of `-C x` makes.
  */
 function restMatches(
   args: readonly string[],
   rule: readonly string[],
-  ruleIndex: number,
-  from: number,
-  seen: Map<string, boolean>,
 ): boolean {
-  const word = rule[ruleIndex];
-  if (word === undefined) {
-    return true;
-  }
-  const key = `${ruleIndex}:${from}`;
-  const known = seen.get(key);
-  if (known !== undefined) {
-    return known;
-  }
-  const result = isOption(word)
-    ? args.some((arg) => optionMatches(arg, word)) &&
-      restMatches(args, rule, ruleIndex + 1, from, seen)
-    : subcommandCandidates(args, from).some(
-        (index) =>
-          args[index] === word &&
-          restMatches(args, rule, ruleIndex + 1, index + 1, seen),
-      );
-  seen.set(key, result);
-  return result;
-}
-
-/**
- * Indexes of the words that may be the subcommand, scanning from `from`:
- * options are skipped, and a non-option word ends the scan unless it may be
- * the value of the option before it.
- */
-function subcommandCandidates(args: readonly string[], from: number): number[] {
-  const candidates: number[] = [];
-  let previousTakesValue = false;
-  for (let index = from; index < args.length; index += 1) {
-    const arg = args[index] as string;
-    if (isOption(arg)) {
-      previousTakesValue = isOptionWithoutAttachedValue(arg);
+  let starts = new Set<number>([0]);
+  for (const word of rule) {
+    if (isOption(word)) {
+      if (!args.some((arg) => optionMatches(arg, word))) {
+        return false;
+      }
       continue;
     }
-    candidates.push(index);
-    if (!previousTakesValue) {
-      break;
+    const next = new Set<number>();
+    let scanning = false;
+    for (let index = 0; index < args.length; index += 1) {
+      if (starts.has(index)) {
+        scanning = true;
+      }
+      const arg = args[index] as string;
+      if (!scanning || isOption(arg)) {
+        continue;
+      }
+      if (arg === word) {
+        next.add(index + 1);
+      }
+      // A non-option word ends the scan unless the option before it has no
+      // attached value, so this word may be that value.
+      const previous = args[index - 1];
+      if (previous === undefined || !isOptionWithoutAttachedValue(previous)) {
+        scanning = false;
+      }
     }
-    previousTakesValue = false;
+    if (next.size === 0) {
+      return false;
+    }
+    starts = next;
   }
-  return candidates;
+  return true;
 }
 
 /**
