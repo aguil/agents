@@ -246,3 +246,13 @@ test("deeply nested quoted substitutions are read in bounded time, still denying
   expect(exec(policy, nest("ls x", 1200)).decision).toBe("allow");
   expect(performance.now() - started).toBeLessThan(500);
 });
+
+test("a parameter expansion cannot close a quoted substitution early", () => {
+  const policy = execPolicy({ deny: ["rm"] }, true);
+  for (const command of [
+    `echo "$(echo \${x:-)}; rm x)"`,
+    `echo "$(echo \${x:-"}"}; rm x)"`,
+  ]) {
+    expect(exec(policy, command).decision).toBe("deny");
+  }
+});

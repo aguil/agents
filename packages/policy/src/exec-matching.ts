@@ -342,8 +342,8 @@ function closingBacktick(command: string, start: number): number {
 }
 
 /**
- * Index of the `)` closing a `(` opened before `start`, or the end. Quotes
- * and comments are skipped, as bash skips them reading a `$(…)` body.
+ * Index of the `)` closing a `(` opened before `start`, or the end. Quotes,
+ * comments and `${…}` are skipped, as bash skips them reading a `$(…)` body.
  */
 function closingParenthesis(command: string, start: number): number {
   let depth = 1;
@@ -356,6 +356,9 @@ function closingParenthesis(command: string, start: number): number {
       index = close === -1 ? command.length : close;
     } else if (char === '"') {
       index = closingDoubleQuote(command, index + 1);
+    } else if (command.startsWith("${", index)) {
+      // A `)` inside `${x:-)}` belongs to the expansion.
+      index = closingBrace(command, index + 2);
     } else if (
       char === "#" &&
       (index === start || /[\s;|&()]/.test(command[index - 1] as string))
@@ -367,6 +370,30 @@ function closingParenthesis(command: string, start: number): number {
     } else if (char === "(") {
       depth += 1;
     } else if (char === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return command.length;
+}
+
+/** Index of the `}` closing a `${` opened before `start`, or the end. */
+function closingBrace(command: string, start: number): number {
+  let depth = 1;
+  for (let index = start; index < command.length; index += 1) {
+    const char = command[index];
+    if (char === "\\") {
+      index += 1;
+    } else if (char === "'") {
+      const close = command.indexOf("'", index + 1);
+      index = close === -1 ? command.length : close;
+    } else if (char === '"') {
+      index = closingDoubleQuote(command, index + 1);
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
       depth -= 1;
       if (depth === 0) {
         return index;
