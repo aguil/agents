@@ -31,7 +31,7 @@ import {
   OpenCodeAdapter,
   resolveCursorApprovalFlags,
 } from "@aguil/agents-execution";
-import type { LoadedHarness } from "@aguil/agents-harness-config";
+import type { LoadedHarness, PolicySpec } from "@aguil/agents-harness-config";
 import {
   applyFindingPipelines,
   filterEnabledRoles,
@@ -54,7 +54,7 @@ import {
   harnessStatusIsFindingsBlind,
   NativeBunOrchestrator,
 } from "@aguil/agents-orchestration";
-import { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
+import { POLICY_NONE_TOKEN, policyLoadWarnings } from "@aguil/agents-policy";
 import {
   resolveReportRenderer,
   statusAfterFindingPipelines,
@@ -343,6 +343,18 @@ export async function probeClaudePolicyBridge(
     : `answered ${JSON.stringify(permissionDecision ?? null)} where a deny was required`;
 }
 
+/** Load warnings for each distinct policy the harness or its roles name. */
+function harnessPolicyLoadWarnings(loaded: LoadedHarness): readonly string[] {
+  const policies = new Map<string, PolicySpec>();
+  for (const policy of [
+    ...(loaded.policy === undefined ? [] : [loaded.policy]),
+    ...Object.values(loaded.rolePolicies),
+  ]) {
+    policies.set(policy.id, policy);
+  }
+  return [...policies.values()].flatMap(policyLoadWarnings);
+}
+
 export interface HookEnforcementSetup {
   readonly onRoleStart?: (roleId: string) => Promise<void>;
   readonly roleEnv?: (roleId: string) => Readonly<Record<string, string>>;
@@ -371,6 +383,11 @@ export async function setUpHookEnforcement(
     loaded.hooks,
     args.adapter,
   )) {
+    console.warn(`harness run: ${warning}`);
+  }
+  // ADR 0026 decision 6: an allowlisted interpreter or runner voids the
+  // deny lists; say so once per policy the run loads.
+  for (const warning of harnessPolicyLoadWarnings(loaded)) {
     console.warn(`harness run: ${warning}`);
   }
   if (!hasHooks && !hasAnyPolicy) {

@@ -11,6 +11,7 @@ import {
 } from "./exec-matching";
 import { tokenizeShellCommand } from "./shell-tokenizer";
 
+export { allowEntryRunsAnything, policyLoadWarnings } from "./allow-warnings";
 export type {
   ShellOperatorToken,
   ShellToken,

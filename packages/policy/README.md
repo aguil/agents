@@ -36,6 +36,17 @@ hooks can tighten but never override a policy deny.
   that over-denial is accepted. Allow entries are a word prefix on the command
   as written: `git --no-pager log` and `FOO=1 git log` are unlisted under
   `allow: [git log]`, and a quoted program matches (`'rg' x`).
+- **Interpreters and runners warn at load:** an `exec.allow` entry naming `sh`,
+  `bash`, `zsh`, `python`, `python3`, `node`, `bun`, `deno`, `perl`, `ruby` or
+  `git` with nothing after it but options and their values (`bash`,
+  `python3 -c`, `git -C /tmp`), or naming `env`, `xargs`, `sudo` or `find`, can
+  run anything, so the deny lists do not hold behind it. `policyLoadWarnings`
+  names each one, and `agents harness run` and `agents hooks test` print it; the
+  policy still loads. `bash script.sh` and `bun test` name what runs and do not
+  warn.
+- **Denials name the rule:** a verdict's `rule` is the entry that matched or the
+  entry that was missing, never the full command, and the policy-eval bridge
+  tells the agent `Blocked by policy <id> (<reason>): <rule>`
 
 Rego/ACS engines are intentionally out of scope here; this package is the
 default `engine: native` path.

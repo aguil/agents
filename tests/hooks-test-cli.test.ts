@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -138,4 +140,46 @@ test("--input file path reaches the afterFileEdit evaluator", async () => {
 
   expect(result.exitCode).toBe(2);
   expect(result.stdout).toContain("filesystem-denied");
+});
+
+test("a policy allowlisting an interpreter loads with a warning, never an error (ADR 0026)", async () => {
+  // The shape of claim-verify-probes in the notes store, which allowlists
+  // `sh` on purpose (JC-4).
+  const agentsDir = await mkdtemp(join(tmpdir(), "hooks-test-warn-"));
+  try {
+    await mkdir(join(agentsDir, "policies"));
+    await writeFile(
+      join(agentsDir, "policies", "probes.yaml"),
+      [
+        "id: probes",
+        "capabilities:",
+        "  exec:",
+        '    allow: ["rg", "sh", "env"]',
+        '    deny: ["rm -r"]',
+        "  filesystem:",
+        '    deny: [".env"]',
+        "",
+      ].join("\n"),
+    );
+    const result = await runHooksTest([
+      "--policy",
+      "probes",
+      "--agents-dir",
+      agentsDir,
+      "--event",
+      "beforeShellExecution",
+      "--input",
+      '{"command":"rg x"}',
+      "--format",
+      "json",
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ verdict: "allow" });
+    expect(result.stderr.trim().split("\n")).toEqual([
+      "hooks test: policy probes: exec.allow entry `sh` can run any command behind it, so these deny rules do not hold for it: exec.deny `rm -r`; filesystem.deny `.env` for reads (ADR 0026)",
+      "hooks test: policy probes: exec.allow entry `env` can run any command behind it, so these deny rules do not hold for it: exec.deny `rm -r`; filesystem.deny `.env` for reads (ADR 0026)",
+    ]);
+  } finally {
+    await rm(agentsDir, { recursive: true, force: true });
+  }
 });

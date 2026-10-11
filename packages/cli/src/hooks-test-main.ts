@@ -10,6 +10,7 @@ import {
   createPolicyEvalHandler,
   evaluatePolicy,
   POLICY_NONE_TOKEN,
+  policyLoadWarnings,
 } from "@aguil/agents-policy";
 import { normalizeHookPayload } from "./policy-eval-main";
 
@@ -200,6 +201,11 @@ export async function runHooksTestCli(
       `hooks test: could not load policy "${parsed.policyId}": ${error instanceof Error ? error.message : String(error)}`,
     );
     return 1;
+  }
+  // ADR 0026 decision 6: warn, never fail, on an entry that voids the deny
+  // lists. On stderr, so `--format json` output stays one object.
+  for (const warning of policyLoadWarnings(policy)) {
+    console.error(`hooks test: ${warning}`);
   }
 
   const output = createPolicyEvalHandler(policy)(normalized);
