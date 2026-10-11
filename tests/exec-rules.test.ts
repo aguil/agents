@@ -189,6 +189,9 @@ test("a deny rule finds the program past the shell's reserved words", () => {
     "time -p rm x",
     "coproc worker { rm x; }",
     "coproc worker while rm x; do :; done",
+    "function cleanup { rm -rf build; }; cleanup",
+    "function cleanup () { rm -rf build; }",
+    "cleanup() { rm -rf build; }; cleanup",
   ]) {
     expect(exec(rm, command).decision).toBe("deny");
   }
