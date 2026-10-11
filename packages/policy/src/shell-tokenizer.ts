@@ -37,6 +37,11 @@ export interface ShellOperatorToken {
   readonly value: string;
   /** File descriptor written ahead of a redirection, as in `2>`. */
   readonly fd?: string;
+  /**
+   * True when reported from inside double quotes. Its text then stays in the
+   * enclosing word, and no closing `)` follows it as a token of its own.
+   */
+  readonly quoted?: true;
 }
 
 export type ShellToken = ShellWord | ShellOperatorToken;
@@ -114,7 +119,7 @@ function opaqueParameterExpansionAt(command: string, index: number): boolean {
  * a continuation cannot split `$(`, `$'` or `${` from what follows and hide
  * it from the checks below. Inside single quotes the pair is literal.
  */
-function removeLineContinuations(command: string): string {
+export function removeLineContinuations(command: string): string {
   let result = "";
   let mode: "plain" | "single" | "double" = "plain";
   let index = 0;
@@ -220,12 +225,16 @@ export function tokenizeShellCommand(raw: string): ShellTokenizeResult {
           }
         }
         if (opaqueParameterExpansionAt(command, cursor)) {
-          tokens.push({ kind: "operator", value: "${" });
+          tokens.push({ kind: "operator", value: "${", quoted: true });
         }
         if (inner === "`" || command.startsWith("$(", cursor)) {
           // The shell runs a substitution inside double quotes. Report it,
           // and keep its text in the word: nothing here looks inside it.
-          tokens.push({ kind: "operator", value: inner === "`" ? "`" : "$(" });
+          tokens.push({
+            kind: "operator",
+            value: inner === "`" ? "`" : "$(",
+            quoted: true,
+          });
         }
         value += inner;
         cursor += 1;

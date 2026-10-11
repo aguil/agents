@@ -91,14 +91,23 @@ test("network egress is denied wholesale", async () => {
   expect(verdict.decision).toBe("deny");
 });
 
-test("KNOWN GAP (#104): allowlisted shell reads are not correlated with filesystem denies", async () => {
-  // `cat .env` is judged by exec rules alone — the evaluator does not
-  // extract argv paths, so shell reads of filesystem-denied paths pass.
-  // The incumbent prompt-hint model enforces nothing here either, so
-  // Tier 4 equal-or-stronger holds; this probe pins the behavior so the
-  // gap stays explicit until #104 decides the fix.
-  expect((await probe({ command: "cat .env" })).decision).toBe("allow");
-  expect((await probe({ command: "rg secret .env" })).decision).toBe("allow");
+test("allowlisted shell reads of filesystem-denied paths are denied (#104)", async () => {
+  // ADR 0026 decision 5: a command's arguments meet filesystem.deny, so an
+  // allowlisted `cat` or `rg` cannot read what a file tool may not. Each
+  // denial names the glob that matched.
+  for (const [command, glob] of [
+    ["cat .env", ".env"],
+    ["rg secret .env", ".env"],
+    ["cat ./src/../.env.local", ".env.*"],
+    ["rg -n token config/secrets/key.txt", "**/secrets/**"],
+    ["cat < .env", ".env"],
+    ["rg --file=.env x", ".env"],
+  ] as const) {
+    const verdict = await probe({ command });
+    expect(verdict.decision).toBe("deny");
+    expect(verdict.reason).toBe("filesystem-denied");
+    expect(verdict.rule).toBe(`deny entry \`${glob}\``);
+  }
 });
 
 test("unlisted exec escalates when confirmations.requiredFor includes exec.unknown", async () => {

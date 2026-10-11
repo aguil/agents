@@ -1651,3 +1651,72 @@ test("cursor registers beforeReadFile for the bridge alone on a measured cursor-
     "beforeReadFile withheld — the installed cursor-agent's version could not be read",
   );
 });
+
+test("harness run warns once per policy allowlisting an interpreter (ADR 0026)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const root = await mkdtemp(join(tmpdir(), "harness-policy-warn-"));
+  const agentsDir = join(root, ".agents");
+  try {
+    await mkdir(join(agentsDir, "policies"), { recursive: true });
+    await mkdir(join(agentsDir, "harnesses", "warned"), { recursive: true });
+    await writeFile(
+      join(agentsDir, "policies", "probes.yaml"),
+      [
+        "id: probes",
+        "capabilities:",
+        "  exec:",
+        '    allow: ["rg", "sh"]',
+        '    deny: ["git push"]',
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(agentsDir, "harnesses", "warned", "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness:",
+        "  id: warned",
+        "policy: probes",
+        "roles:",
+        "  first:",
+        "    description: first role",
+        "    prompt: noop",
+        "  second:",
+        "    description: second role, same policy",
+        "    prompt: noop",
+        "",
+      ].join("\n"),
+    );
+    const loaded = await loadHarness({ agentsDir, harnessId: "warned" });
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.join(" "));
+    };
+    let enforcement: Awaited<ReturnType<typeof setUpHookEnforcement>>;
+    try {
+      enforcement = await setUpHookEnforcement(loaded, {
+        adapter: "fake",
+        agentsDir,
+        workspace: root,
+        scratchpadPath: join(root, "scratch"),
+        allowUnenforcedPolicy: true,
+      });
+    } finally {
+      console.warn = warn;
+    }
+    // A warning, not a load failure (ADR 0024 §3).
+    expect("error" in enforcement).toBe(false);
+    expect(
+      warnings.filter((line) => line.includes("exec.allow entry")),
+    ).toEqual([
+      "harness run: policy probes: exec.allow entry `sh` can run any command behind it, so these deny rules do not hold for it: exec.deny `git push` (ADR 0026)",
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

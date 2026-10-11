@@ -82,28 +82,47 @@ export function relativizeContainedPaths(
   input: PolicyHookInput,
   workspace: string,
 ): PolicyHookInput {
-  const root = resolveThroughSymlinks(workspace) ?? resolve(workspace);
+  const relativize = workspacePathResolver(workspace);
   const toolInput: Record<string, unknown> = { ...input.tool_input };
   for (const key of ["file_path", "path", "notebook_path"]) {
     const value = toolInput[key];
     if (typeof value !== "string" || !isAbsolute(value)) {
       continue;
     }
-    const target = resolveThroughSymlinks(value);
-    if (target === undefined) {
-      continue;
-    }
-    const rel = relative(root, target);
-    if (
-      rel !== "" &&
-      rel !== ".." &&
-      !rel.startsWith("../") &&
-      !isAbsolute(rel)
-    ) {
+    const rel = relativize(value);
+    if (rel !== undefined) {
       toolInput[key] = rel;
     }
   }
   return { ...input, tool_input: toolInput };
+}
+
+/**
+ * The workspace-relative form of an absolute path inside `workspace`, with
+ * symlinks resolved as `relativizeContainedPaths` describes; undefined for
+ * the root itself and for anything outside it. The evaluator uses it for a
+ * command's absolute arguments (ADR 0026 decision 5, JC-20).
+ */
+export function workspacePathResolver(
+  workspace: string,
+): (absolutePath: string) => string | undefined {
+  const root = resolveThroughSymlinks(workspace) ?? resolve(workspace);
+  return (absolutePath) => {
+    if (!isAbsolute(absolutePath)) {
+      return undefined;
+    }
+    const target = resolveThroughSymlinks(absolutePath);
+    if (target === undefined) {
+      return undefined;
+    }
+    const rel = relative(root, target);
+    return rel !== "" &&
+      rel !== ".." &&
+      !rel.startsWith("../") &&
+      !isAbsolute(rel)
+      ? rel
+      : undefined;
+  };
 }
 
 /**
@@ -346,7 +365,12 @@ export async function runPolicyEvalCli(
     return 0;
   }
 
-  const handler = createPolicyEvalHandler(policy);
+  const handler = createPolicyEvalHandler(
+    policy,
+    parsed.workspace === undefined
+      ? {}
+      : { relativizeWorkspacePath: workspacePathResolver(parsed.workspace) },
+  );
   const normalized = normalizeHookPayload(payload);
   const output = handler(
     parsed.workspace === undefined
