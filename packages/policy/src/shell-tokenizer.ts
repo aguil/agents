@@ -9,6 +9,13 @@
  * is to tell an operator the shell acts on from the same character inside a
  * quoted argument, so callers can decide whether a command is one simple
  * command.
+ *
+ * Where this reading and bash's could part ways, the construct is reported
+ * as an operator, so the command is never taken for one simple command:
+ * an unquoted `#` starting a word (a comment, which can swallow a quote),
+ * `$'…'` (ANSI-C quoting, where `\'` does not close the quote), and a
+ * `${…}` whose body holds a quote, backslash, `$` or backtick (bash nests
+ * quotes inside it, even within double quotes).
  */
 
 /** A word the shell would pass, with its quotes and escapes removed. */
@@ -22,6 +29,8 @@ export interface ShellWord {
 /**
  * An operator found outside quotes. `$(` and a backtick are reported where
  * the shell would run them: outside single quotes, double quotes included.
+ * So is a `${…}` this tokenizer cannot read the way bash does, as `${`.
+ * `#` starting an unquoted word and `$'` are reported as themselves.
  */
 export interface ShellOperatorToken {
   readonly kind: "operator";
@@ -72,6 +81,33 @@ function operatorAt(command: string, index: number): string | undefined {
   return OPERATORS.find((operator) => command.startsWith(operator, index));
 }
 
+/**
+ * True when `index` starts a `${…}` whose body, up to the first `}`, holds a
+ * character that bash would read as quoting or another expansion. With none,
+ * that `}` is where bash ends it too; with one, the reading can drift.
+ */
+function opaqueParameterExpansionAt(command: string, index: number): boolean {
+  if (!command.startsWith("${", index)) {
+    return false;
+  }
+  for (let cursor = index + 2; cursor < command.length; cursor += 1) {
+    const char = command[cursor];
+    if (char === "}") {
+      return false;
+    }
+    if (
+      char === "'" ||
+      char === '"' ||
+      char === "\\" ||
+      char === "$" ||
+      char === "`"
+    ) {
+      return true;
+    }
+  }
+  return true;
+}
+
 export function tokenizeShellCommand(command: string): ShellTokenizeResult {
   const tokens: ShellToken[] = [];
   let value = "";
@@ -90,6 +126,25 @@ export function tokenizeShellCommand(command: string): ShellTokenizeResult {
   let index = 0;
   while (index < command.length) {
     const char = command[index];
+
+    if (char === "#" && !inWord) {
+      // A comment runs to the end of the line and can hide a quote. Nothing
+      // after it is read; it is reported so the command is never simple.
+      tokens.push({ kind: "operator", value: "#" });
+      value += char;
+      inWord = true;
+      index += 1;
+      continue;
+    }
+
+    if (command.startsWith("$'", index)) {
+      // ANSI-C quoting lets `\'` escape the quote. Not parsed; reported.
+      tokens.push({ kind: "operator", value: "$'" });
+    }
+
+    if (opaqueParameterExpansionAt(command, index)) {
+      tokens.push({ kind: "operator", value: "${" });
+    }
 
     if (char === "'") {
       const close = command.indexOf("'", index + 1);
@@ -121,6 +176,9 @@ export function tokenizeShellCommand(command: string): ShellTokenizeResult {
             cursor += 2;
             continue;
           }
+        }
+        if (opaqueParameterExpansionAt(command, cursor)) {
+          tokens.push({ kind: "operator", value: "${" });
         }
         if (inner === "`" || command.startsWith("$(", cursor)) {
           // The shell runs a substitution inside double quotes. Report it,
