@@ -10,6 +10,17 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.8](https://github.com/aguil/agents/compare/v0.8.7...v0.8.8) (2026-10-11)
+
+
+### Fixed
+
+* **policy:** fail closed on comments, $'…' and nested ${…} quoting ([2aec7e1](https://github.com/aguil/agents/commit/2aec7e12eb1461f43f04353ac100908397b062b5)), closes [#237](https://github.com/aguil/agents/issues/237)
+* **policy:** name the rule that denied a tool call ([0459579](https://github.com/aguil/agents/commit/0459579143bb6fb14ba637d59d51f7e218723347)), closes [#238](https://github.com/aguil/agents/issues/238)
+* **policy:** phrase substitution and comment denials by what they are ([b1048e0](https://github.com/aguil/agents/commit/b1048e0b3018fdb4e0c5cf64de058deec317dce7)), closes [#238](https://github.com/aguil/agents/issues/238)
+* **policy:** read shell operators only outside quotes ([03c64ae](https://github.com/aguil/agents/commit/03c64ae2c10043d458c93b094e5793193bb49cc3)), closes [#237](https://github.com/aguil/agents/issues/237)
+* **policy:** remove line continuations before reading a command ([5d61fa1](https://github.com/aguil/agents/commit/5d61fa126630daeb6b5f7c45197f330a9c800bf1)), closes [#237](https://github.com/aguil/agents/issues/237)
+
 ## [0.8.7](https://github.com/aguil/agents/compare/v0.8.6...v0.8.7) (2026-10-05)
 
 
