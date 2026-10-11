@@ -44,6 +44,38 @@ hooks can tighten but never override a policy deny.
   names each one, and `agents harness run` and `agents hooks test` print it; the
   policy still loads. `bash script.sh` and `bun test` name what runs and do not
   warn.
+- **A command's arguments meet `filesystem.deny` (ADR 0026):** every word after
+  the program, the value of a `--name=value` word, and the file a redirection
+  names are checked against the deny globs, canonicalized as a file tool's path
+  is, so `cat .env`, `rg --file=.env x` and `cat < .env` deny under
+  `deny: [.env]`, naming the glob. It runs on every command the exec rules do
+  not deny, so an unlisted `cat .env` denies rather than asking for approval.
+  `filesystem.allow` is not applied, since most arguments are not paths, and a
+  pattern that reads as a denied path denies (`rg -n .env src`). An absolute
+  argument inside the workspace is made relative first where the caller passes
+  `relativizeWorkspacePath` (the policy-eval bridge does, from `--workspace`);
+  one outside the workspace, or escaping it, is not checked, unlike a file
+  tool's path, so `ls /tmp` stays allowed.
+
+### What matching cannot see
+
+Exec and argument matching read a command's text, so these stay out of reach
+(ADR 0026 decision 7). Holding against them needs enforcement below the command
+line, such as an OS sandbox.
+
+- A payload behind `-c`, `-e` or an equivalent, and what a script file runs:
+  `bash -c 'rm x'` under `allow: [bash]` is allowed, which is why such an entry
+  warns at load.
+- Paths and programs built at run time: globs (`cat .en*`), variables
+  (`cat $F`), and the output of a substitution (`cat $(echo .env)`).
+- A path inside another syntax, such as `git show HEAD:.env` or a URL.
+- A path reached through a symbolic link named by a relative path: it is
+  classified by its name, not its target.
+- Arguments outside the workspace, absolute or escaping it, and, where the
+  caller does not pass the workspace, every absolute argument.
+- With no `exec.allow` list, anything run behind an interpreter or runner: such
+  a policy's deny list reaches only commands that name the program directly or
+  through options and paths.
 - **Denials name the rule:** a verdict's `rule` is the entry that matched or the
   entry that was missing, never the full command, and the policy-eval bridge
   tells the agent `Blocked by policy <id> (<reason>): <rule>`
