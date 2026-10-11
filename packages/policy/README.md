@@ -50,3 +50,20 @@ hooks can tighten but never override a policy deny.
 
 Rego/ACS engines are intentionally out of scope here; this package is the
 default `engine: native` path.
+
+### What matching cannot see
+
+Exec matching reads a command's text, so these stay out of reach (ADR 0026
+decision 7). Holding against them needs enforcement below the command line, such
+as an OS sandbox.
+
+- A payload behind `-c`, `-e` or an equivalent, and what a script file runs:
+  `bash -c 'rm x'` under `allow: [bash]` is allowed, which is why such an entry
+  warns at load.
+- Programs built at run time: by a variable, a glob or brace expansion, or the
+  output of a substitution (`$(echo rm) x`).
+- With no `exec.allow` list, anything run behind an interpreter or runner: such
+  a policy's deny list reaches only commands that name the program directly or
+  through options and paths, so `bash -c 'rm x'`, `env rm x`, `nohup rm x` or
+  `xargs rm` pass `deny: [rm]` there, and no warning says so. With an allow
+  list, each is unlisted.
