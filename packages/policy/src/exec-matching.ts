@@ -292,10 +292,38 @@ export function allowRuleMatches(
   );
 }
 
-/** Where the program sits, past any leading `NAME=value` assignments. */
+/**
+ * Words the shell reads as grammar, not as a program, where a command can
+ * start: `{ rm x; }`, `if rm x; then :; fi`, `! rm x` and `time rm x` all run
+ * `rm`.
+ */
+const RESERVED_WORDS: ReadonlySet<string> = new Set([
+  "!",
+  "{",
+  "}",
+  "if",
+  "then",
+  "elif",
+  "else",
+  "fi",
+  "do",
+  "done",
+  "while",
+  "until",
+  "time",
+]);
+
+/**
+ * Where the program sits, past any leading reserved words and `NAME=value`
+ * assignments.
+ */
 function programIndex(words: readonly string[]): number {
   let index = 0;
-  while (index < words.length && ASSIGNMENT.test(words[index] as string)) {
+  while (
+    index < words.length &&
+    (RESERVED_WORDS.has(words[index] as string) ||
+      ASSIGNMENT.test(words[index] as string))
+  ) {
     index += 1;
   }
   return index;

@@ -174,3 +174,19 @@ test("an interpreter's payload denies when the interpreter is unlisted (JC-4)", 
   const allowsBash = execPolicy({ allow: ["bash"], deny: ["rm"] });
   expect(exec(allowsBash, "bash -c 'rm -rf build'").decision).toBe("allow");
 });
+
+test("a deny rule finds the program past the shell's reserved words", () => {
+  const rm = execPolicy({ deny: ["rm"] });
+  for (const command of [
+    "{ rm x; }",
+    "if rm x; then :; fi",
+    "if true; then rm x; fi",
+    "! rm x",
+    "time rm x",
+    "while rm x; do :; done",
+    "for f in a; do rm $f; done",
+  ]) {
+    expect(exec(rm, command).decision).toBe("deny");
+  }
+  expect(exec(rm, "echo if rm").decision).toBe("allow");
+});
