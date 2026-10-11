@@ -233,7 +233,12 @@ const DECISION_TO_PERMISSION: Readonly<
   escalate: "ask",
 };
 
-/** Encode a verdict for Cursor's hook response shape. */
+/**
+ * Encode a verdict for Cursor's hook response shape. The denial text goes
+ * under `agent_message`, the key cursor-agent validates and passes to the
+ * agent (measured on 2026.10.01-14929f9, and in cursor.com/docs/hooks); it
+ * ignores a camelCase `agentMessage` (JC-22).
+ */
 export function encodeCursorPolicyResponse(input: {
   readonly permission: "allow" | "deny" | "ask";
   readonly agentMessage?: string;
@@ -241,7 +246,7 @@ export function encodeCursorPolicyResponse(input: {
 }): Record<string, unknown> {
   const response: Record<string, unknown> = { permission: input.permission };
   if (input.agentMessage !== undefined) {
-    response.agentMessage = input.agentMessage;
+    response.agent_message = input.agentMessage;
   }
   if (input.updated_input !== undefined) {
     response.updated_input = input.updated_input;
