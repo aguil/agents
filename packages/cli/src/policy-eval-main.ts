@@ -235,9 +235,12 @@ const DECISION_TO_PERMISSION: Readonly<
 
 /**
  * Encode a verdict for Cursor's hook response shape. The denial text goes
- * under `agent_message`, the key cursor-agent validates and passes to the
- * agent (measured on 2026.10.01-14929f9, and in cursor.com/docs/hooks); it
- * ignores a camelCase `agentMessage` (JC-22).
+ * under both keys cursor-agent reads (JC-23, measured on 2026.10.01-14929f9):
+ * `user_message`, from which the events the bridge answers
+ * (`beforeShellExecution`, `beforeReadFile`) build the error the agent sees,
+ * and `agent_message`, which only `preToolUse` forwards. It ignores a
+ * camelCase `agentMessage` (JC-22). JC-3's text names a rule, never the
+ * command, so the person may see it too.
  */
 export function encodeCursorPolicyResponse(input: {
   readonly permission: "allow" | "deny" | "ask";
@@ -246,6 +249,7 @@ export function encodeCursorPolicyResponse(input: {
 }): Record<string, unknown> {
   const response: Record<string, unknown> = { permission: input.permission };
   if (input.agentMessage !== undefined) {
+    response.user_message = input.agentMessage;
     response.agent_message = input.agentMessage;
   }
   if (input.updated_input !== undefined) {

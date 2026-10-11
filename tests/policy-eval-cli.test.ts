@@ -78,6 +78,8 @@ test("a Cursor denial names the rule, not the command (#238)", async () => {
   );
   expect(lastJsonLine(result.stdout)).toEqual({
     permission: "deny",
+    user_message:
+      "Blocked by policy triage-readonly (exec-denied): deny entry `rm`",
     agent_message:
       "Blocked by policy triage-readonly (exec-denied): deny entry `rm`",
   });
@@ -128,6 +130,7 @@ test("a denial without a rule keeps the policy and reason (#238)", async () => {
   );
   expect(lastJsonLine(result.stdout)).toEqual({
     permission: "deny",
+    user_message: "Blocked by policy triage-readonly (policy-runtime-error)",
     agent_message: "Blocked by policy triage-readonly (policy-runtime-error)",
   });
 });
@@ -637,6 +640,8 @@ test("a Cursor native read of a denied path is refused with permission deny (#19
     expect(denied.exitCode).toBe(0);
     expect(lastJsonLine(denied.stdout)).toEqual({
       permission: "deny",
+      user_message:
+        "Blocked by policy triage-readonly (filesystem-denied): deny entry `.env`",
       agent_message:
         "Blocked by policy triage-readonly (filesystem-denied): deny entry `.env`",
     });
@@ -669,6 +674,8 @@ test("without --workspace a native read's absolute path stays uncontained (#198)
   );
   expect(lastJsonLine(result.stdout)).toEqual({
     permission: "deny",
+    user_message:
+      "Blocked by policy triage-readonly (filesystem-uncontained-path): filesystem rules cover only paths inside the workspace",
     agent_message:
       "Blocked by policy triage-readonly (filesystem-uncontained-path): filesystem rules cover only paths inside the workspace",
   });
@@ -699,20 +706,23 @@ test("beforeReadFile normalizes to a pre-tool read without the file's content (#
   ).toEqual({ verdict: "allow" });
 });
 
-test("a Cursor denial travels under agent_message, the key cursor-agent reads (JC-22)", async () => {
+test("a Cursor denial travels under user_message and agent_message, the keys cursor-agent reads (JC-23)", async () => {
   const { encodeCursorPolicyResponse } = await import(
     "../packages/cli/src/policy-eval-main"
   );
   expect(
     encodeCursorPolicyResponse({ permission: "deny", agentMessage: "why" }),
-  ).toEqual({ permission: "deny", agent_message: "why" });
+  ).toEqual({ permission: "deny", user_message: "why", agent_message: "why" });
   const result = await runPolicyEval(
     ["--policy", "triage-readonly", "--agents-dir", fixturesAgentsDir],
     { hook_event_name: "beforeShellExecution", command: "git push origin x" },
   );
   const response = lastJsonLine(result.stdout);
-  expect(response.agent_message).toBe(
-    "Blocked by policy triage-readonly (exec-denied): deny entry `git push`",
-  );
+  const text =
+    "Blocked by policy triage-readonly (exec-denied): deny entry `git push`";
+  // beforeShellExecution and beforeReadFile build the agent's error from
+  // user_message; only preToolUse forwards agent_message.
+  expect(response.user_message).toBe(text);
+  expect(response.agent_message).toBe(text);
   expect("agentMessage" in response).toBe(false);
 });
