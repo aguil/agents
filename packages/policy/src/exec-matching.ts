@@ -66,7 +66,20 @@ interface Frame {
  * whitespace and operator characters instead, which finds more words, not
  * fewer.
  */
-export function simpleCommandsOf(raw: string): readonly SimpleCommand[] {
+/**
+ * How deep quoted substitutions are read by recursion. Each level
+ * re-tokenizes its body, so deeper bodies use the rough split, which reads
+ * every word in one pass and so finds no fewer.
+ */
+const MAX_QUOTED_SUBSTITUTION_DEPTH = 8;
+
+export function simpleCommandsOf(
+  raw: string,
+  depth = 0,
+): readonly SimpleCommand[] {
+  if (depth > MAX_QUOTED_SUBSTITUTION_DEPTH) {
+    return roughSimpleCommands(raw);
+  }
   const command = decodeAnsiCQuotes(raw);
   const parsed = tokenizeShellCommand(command);
   const commands = parsed.ok
@@ -75,7 +88,7 @@ export function simpleCommandsOf(raw: string): readonly SimpleCommand[] {
   // A substitution inside double quotes stays in its word as text; read its
   // body from the command itself.
   for (const body of doubleQuotedSubstitutionBodies(command)) {
-    commands.push(...simpleCommandsOf(body));
+    commands.push(...simpleCommandsOf(body, depth + 1));
   }
   return commands;
 }

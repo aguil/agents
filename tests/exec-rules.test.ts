@@ -234,3 +234,13 @@ test("a deny rule's search stays fast when option values repeat its words", () =
   expect(exec(policy, command).decision).toBe("allow");
   expect(performance.now() - started).toBeLessThan(200);
 });
+
+test("deeply nested quoted substitutions are read in bounded time, still denying", () => {
+  const policy = execPolicy({ deny: ["rm"] });
+  const nest = (inner: string, depth: number): string =>
+    depth === 0 ? inner : `echo "$(${nest(inner, depth - 1)})"`;
+  const started = performance.now();
+  expect(exec(policy, nest("rm x", 1200)).decision).toBe("deny");
+  expect(exec(policy, nest("ls x", 1200)).decision).toBe("allow");
+  expect(performance.now() - started).toBeLessThan(500);
+});
