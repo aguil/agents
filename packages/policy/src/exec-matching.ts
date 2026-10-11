@@ -344,8 +344,8 @@ function closingBacktick(command: string, start: number): number {
 }
 
 /**
- * Index of the `)` closing a `(` opened before `start`, or the end. Quotes
- * and comments are skipped, as bash skips them reading a `$(…)` body.
+ * Index of the `)` closing a `(` opened before `start`, or the end. Quotes,
+ * comments and `${…}` are skipped, as bash skips them reading a `$(…)` body.
  */
 function closingParenthesis(command: string, start: number): number {
   let depth = 1;
@@ -358,6 +358,9 @@ function closingParenthesis(command: string, start: number): number {
       index = close === -1 ? command.length : close;
     } else if (char === '"') {
       index = closingDoubleQuote(command, index + 1);
+    } else if (command.startsWith("${", index)) {
+      // A `)` inside `${x:-)}` belongs to the expansion.
+      index = closingBrace(command, index + 2);
     } else if (
       char === "#" &&
       (index === start || /[\s;|&()]/.test(command[index - 1] as string))
@@ -369,6 +372,30 @@ function closingParenthesis(command: string, start: number): number {
     } else if (char === "(") {
       depth += 1;
     } else if (char === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return command.length;
+}
+
+/** Index of the `}` closing a `${` opened before `start`, or the end. */
+function closingBrace(command: string, start: number): number {
+  let depth = 1;
+  for (let index = start; index < command.length; index += 1) {
+    const char = command[index];
+    if (char === "\\") {
+      index += 1;
+    } else if (char === "'") {
+      const close = command.indexOf("'", index + 1);
+      index = close === -1 ? command.length : close;
+    } else if (char === '"') {
+      index = closingDoubleQuote(command, index + 1);
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
       depth -= 1;
       if (depth === 0) {
         return index;
@@ -461,8 +488,8 @@ function singleWordValue(text: string): string | undefined {
 
 /**
  * Words the shell reads as grammar, not as a program, where a command can
- * start: `{ rm x; }`, `if rm x; then :; fi`, `! rm x` and `time rm x` all run
- * `rm`.
+ * start: `{ rm x; }`, `if rm x; then :; fi`, `! rm x`, `time rm x` and
+ * `coproc rm x` all run `rm`.
  */
 const RESERVED_WORDS: ReadonlySet<string> = new Set([
   "!",
@@ -478,6 +505,7 @@ const RESERVED_WORDS: ReadonlySet<string> = new Set([
   "while",
   "until",
   "time",
+  "coproc",
 ]);
 
 /**
@@ -486,11 +514,13 @@ const RESERVED_WORDS: ReadonlySet<string> = new Set([
  */
 function programIndex(words: readonly string[]): number {
   let index = 0;
-  while (
-    index < words.length &&
-    (RESERVED_WORDS.has(words[index] as string) ||
-      ASSIGNMENT.test(words[index] as string))
-  ) {
+  while (index < words.length) {
+    const word = words[index] as string;
+    // `time` takes options of its own (`time -p rm x`).
+    const timeOption = words[index - 1] === "time" && word.startsWith("-");
+    if (!RESERVED_WORDS.has(word) && !ASSIGNMENT.test(word) && !timeOption) {
+      break;
+    }
     index += 1;
   }
   return index;

@@ -185,6 +185,8 @@ test("a deny rule finds the program past the shell's reserved words", () => {
     "time rm x",
     "while rm x; do :; done",
     "for f in a; do rm $f; done",
+    "coproc rm x",
+    "time -p rm x",
   ]) {
     expect(exec(rm, command).decision).toBe("deny");
   }
@@ -243,4 +245,14 @@ test("deeply nested quoted substitutions are read in bounded time, still denying
   expect(exec(policy, nest("rm x", 1200)).decision).toBe("deny");
   expect(exec(policy, nest("ls x", 1200)).decision).toBe("allow");
   expect(performance.now() - started).toBeLessThan(500);
+});
+
+test("a parameter expansion cannot close a quoted substitution early", () => {
+  const policy = execPolicy({ deny: ["rm"] }, true);
+  for (const command of [
+    `echo "$(echo \${x:-)}; rm x)"`,
+    `echo "$(echo \${x:-"}"}; rm x)"`,
+  ]) {
+    expect(exec(policy, command).decision).toBe("deny");
+  }
 });
