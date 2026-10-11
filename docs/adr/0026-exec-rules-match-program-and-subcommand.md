@@ -1,10 +1,13 @@
 # ADR 0026: exec rules match the resolved program and subcommand, and a command's arguments meet `filesystem.deny`
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-10-10 — Proposed.
+- 2026-10-11 — Accepted: by the operator, merged in #240. Decisions only; the
+  implementation follows against #196 and #104, after #237's tokenizer. From
+  here this ADR is immutable except for these status fields.
 
 **Context:** ADR 0006 §2 set how an exec rule matches a command: "equality or
 `rule + " "` prefix, nothing fuzzier", so deny `rm` blocks `rm -rf` but not

@@ -59,7 +59,8 @@ so it is upheld in review.
 - [0006-harness-governance-phase-1.md](0006-harness-governance-phase-1.md) — ADR
   0006: harness governance Phase 1 — `.agents/` loader (`harness.yaml` spec
   v0.1), native policy evaluation (ACS 5-verdict, fail-closed), Cursor hook
-  config generation with policy-eval bridge first.
+  config generation with policy-eval bridge first. Partially superseded by ADR
+  0026 on how exec rules match.
 - [0007-harness-governance-phase-2.md](0007-harness-governance-phase-2.md) — ADR
   0007: harness governance Phase 2 — spec extensions from the proof harness
   (per-role `policy:`, `{"outcome":...}` envelopes, unconditional per-role hook
