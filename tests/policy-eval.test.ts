@@ -167,6 +167,41 @@ test("operators outside quotes still deny an allowlisted command (#237)", () => 
   }
 });
 
+test("comments, ANSI-C quotes and nested expansions cannot hide a command (#237)", () => {
+  // Each runs a second command in bash while reading as one simple command
+  // to a tokenizer that skips comments, $'…' or quotes nested in ${…}.
+  const echoPolicy: PolicySpec = {
+    id: "echo-only",
+    capabilities: { exec: { allow: ["echo"] } },
+  };
+  for (const command of [
+    "echo x #'\necho PWNED #'",
+    "echo $'a\\'' ; echo PWNED #'",
+    "echo #\\\na",
+    `echo "\${x#"'"}" ; echo PWNED #'`,
+  ]) {
+    const verdict = evaluatePolicy(echoPolicy, {
+      interventionPoint: "pre_tool_call",
+      toolName: "Execute",
+      toolInput: { command },
+    });
+    expect({ command, reason: verdict.reason }).toEqual({
+      command,
+      reason: "exec-not-allowed",
+    });
+  }
+  // The literal forms stay allowed.
+  for (const command of ["echo a#b", "echo '#'", `echo "\${HOME}"`]) {
+    expect(
+      evaluatePolicy(echoPolicy, {
+        interventionPoint: "pre_tool_call",
+        toolName: "Execute",
+        toolInput: { command },
+      }).decision,
+    ).toBe("allow");
+  }
+});
+
 test("an unbalanced quote denies an allowlisted command (#237)", () => {
   for (const command of ['rg "a|b file', "rg 'a file", 'rg "a\\" file']) {
     const verdict = readOnlyExec(command);

@@ -21,8 +21,10 @@ hooks can tighten but never override a policy deny.
 - **Compound commands:** an `exec.allow` entry matches one simple command. A
   command with a pipe, chain, substitution or redirection outside quotes, or
   with an unbalanced quote, is unlisted however it starts; the same characters
-  inside quotes are an argument (`tokenizeShellCommand`). Deny entries match by
-  prefix, as before.
+  inside quotes are an argument (`tokenizeShellCommand`). So is a command whose
+  reading could differ from bash's: one with a comment (`#` starting an unquoted
+  word), `$'…'` quoting, or a `${…}` holding a quote, backslash, `$` or
+  backtick. Deny entries match by prefix, as before.
 
 Rego/ACS engines are intentionally out of scope here; this package is the
 default `engine: native` path.

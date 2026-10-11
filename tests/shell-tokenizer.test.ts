@@ -75,8 +75,19 @@ test("tokenizer reports operators outside quotes only", () => {
   expect(operators("a 2>&1 &> b &>> c")).toEqual([">&", "&>", "&>>"]);
   // An escaped operator is a literal character.
   expect(operators("rg a\\;b x")).toEqual([]);
-  // `#` is not read as a comment: what follows still counts.
-  expect(operators("rg x #; rm y")).toEqual([";"]);
+  // An unquoted `#` starting a word opens a comment and is reported;
+  // inside a word or quotes it is a literal character.
+  expect(operators("rg x #c")).toEqual(["#"]);
+  expect(operators("rg x;#c")).toEqual([";", "#"]);
+  expect(operators(`rg a#b '#' "#" \\#`)).toEqual([]);
+  // ANSI-C quoting is reported, not parsed.
+  expect(operators("echo $'a'")).toEqual(["$'"]);
+  expect(operators(`echo "$'a'" '$'"'"`)).toEqual([]);
+  // A `${…}` is reported only when bash could read it differently.
+  expect(operators(`echo \${HOME} "\${x:-y}" '\${x#"}'`)).toEqual([]);
+  expect(operators(`echo "\${x#"a"}"`)).toEqual(["${"]);
+  expect(operators(`echo \${x#'}'}`)).toEqual(["${"]);
+  expect(operators("echo ${x")).toEqual(["${"]);
 });
 
 test("tokenizer names the descriptor of a numbered redirection", () => {
