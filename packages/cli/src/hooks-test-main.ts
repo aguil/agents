@@ -147,8 +147,9 @@ function printResult(
     return;
   }
   const reason = output.reason === undefined ? "" : ` (${output.reason})`;
+  const rule = output.rule === undefined ? "" : `: ${output.rule}`;
   const message = detail?.message === undefined ? "" : ` — ${detail.message}`;
-  console.log(`verdict: ${output.verdict}${reason}${message}`);
+  console.log(`verdict: ${output.verdict}${reason}${rule}${message}`);
 }
 
 function exitCodeFor(verdict: PolicyHookOutput["verdict"]): number {

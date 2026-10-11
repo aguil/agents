@@ -266,6 +266,19 @@ export function encodeClaudePolicyResponse(input: {
   return { hookSpecificOutput };
 }
 
+/**
+ * The agent-visible denial: the policy, the reason code, and the rule that
+ * matched or was missing, never the command itself (#238).
+ */
+function policyDenialMessage(
+  policyId: string,
+  reason: string,
+  rule?: string,
+): string {
+  const base = `Blocked by policy ${policyId} (${reason})`;
+  return rule === undefined ? base : `${base}: ${rule}`;
+}
+
 export async function runPolicyEvalCli(
   argv: readonly string[],
 ): Promise<number> {
@@ -329,7 +342,7 @@ export async function runPolicyEvalCli(
   const permission = DECISION_TO_PERMISSION[output.verdict];
   const agentMessage =
     output.verdict === "deny" && output.reason !== undefined
-      ? `Blocked by policy ${policy.id} (${output.reason})`
+      ? policyDenialMessage(policy.id, output.reason, output.rule)
       : undefined;
   if (output.verdict === "warn") {
     console.error(`policy-eval: warning (${output.reason ?? "unspecified"})`);

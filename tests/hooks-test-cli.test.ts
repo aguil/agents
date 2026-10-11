@@ -55,6 +55,7 @@ test("denied command prints deny and exits 2", async () => {
   expect(result.exitCode).toBe(2);
   expect(result.stdout).toContain("deny");
   expect(result.stdout).toContain("exec-denied");
+  expect(result.stdout).toContain("(exec-denied): deny entry `rm`");
   expect(result.stdout).toContain(
     "Command is denied by policy triage-readonly",
   );
@@ -94,6 +95,7 @@ test("--format json emits a raw parseable verdict", async () => {
   expect(JSON.parse(result.stdout)).toEqual({
     verdict: "deny",
     reason: "exec-denied",
+    rule: "deny entry `rm`",
   });
 });
 
