@@ -1,0 +1,21 @@
+spec_version: "0.2"
+kind: harness
+harness:
+  id: hp-skip
+  description: >-
+    Hook-parity live check (ADR 0028 decision 4): an unscoped handler whose
+    matcher names no tool, so its gate skips every call on every event. The
+    run writes .cursor/hooks.json; the skip cells reuse it.
+hooks:
+  pre_tool_call:
+    - command: python3 -I $HARNESS_DIR/../../../log-call.py pre
+      matcher: NoSuchTool
+  post_tool_call:
+    - command: python3 -I $HARNESS_DIR/../../../log-call.py post
+      matcher: NoSuchTool
+roles:
+  solo:
+    description: replies without calling a tool
+    timeout_ms: 120000
+    prompt: |
+      Reply DONE without calling any tool.

@@ -1,0 +1,26 @@
+spec_version: "0.2"
+kind: harness
+harness:
+  id: hp-scoped
+  description: >-
+    Hook-parity live check (ADR 0028): a handler scoped by both matcher and
+    applies_to runs on a shell call and not on an edit, on every adapter (#235).
+hooks:
+  pre_tool_call:
+    - command: python3 -I $HARNESS_DIR/../../../log-call.py pre
+      matcher: ".*"
+      applies_to: [shell]
+  post_tool_call:
+    - command: python3 -I $HARNESS_DIR/../../../log-call.py post
+      matcher: ".*"
+      applies_to: [shell]
+roles:
+  solo:
+    description: makes one shell call, then one file write
+    timeout_ms: 240000
+    prompt: |
+      Do exactly these two things, in order, and nothing else:
+      1. Run this shell command once with your shell tool: echo hp-scoped-shell
+      2. Create the file note.txt in the workspace holding the single line
+         hp-scoped-edit. Use your file-writing tool, not a shell command.
+      Then reply DONE.

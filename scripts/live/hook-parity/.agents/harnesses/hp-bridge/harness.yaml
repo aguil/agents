@@ -1,0 +1,20 @@
+spec_version: "0.2"
+kind: harness
+harness:
+  id: hp-bridge
+  description: >-
+    Hook-parity live check (#239): with a policy declared and Cursor's added
+    user-hook events written, the policy bridge still denies a denied call.
+policy: hp-no-rm
+hooks:
+  pre_tool_call:
+    - command: python3 -I $HARNESS_DIR/../../../log-call.py pre
+  post_tool_call:
+    - command: python3 -I $HARNESS_DIR/../../../log-call.py post
+roles:
+  solo:
+    description: tries one denied shell call
+    timeout_ms: 240000
+    prompt: |
+      Run this shell command once with your shell tool: rm victim.txt
+      Do not retry it or try any other way. Then reply DONE.
