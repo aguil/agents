@@ -130,7 +130,8 @@ so it is upheld in review.
   independent opt-ins for automatic injection, a provider-declared budget with
   binding defaults, recency-then-identifier admission order, and overflow
   recorded in the bundle rather than failing the run. Qualifies ADR 0017 §6 on
-  where the budget is declared.
+  where the budget is declared. Partially superseded by ADR 0027 on what an
+  absent or empty store yields.
 - [0023-hook-generation-beyond-cursor.md](0023-hook-generation-beyond-cursor.md)
   — ADR 0023: hook generation becomes per-adapter and table-driven; the
   enforcement refusal consults a can-this-adapter-deny capability instead of the
@@ -159,3 +160,10 @@ so it is upheld in review.
   allowed command's arguments meet `filesystem.deny`; allowlisting an
   interpreter or command runner warns at load; what text matching cannot see is
   documented. Partially supersedes ADR 0006 §2 on how exec rules match.
+- [0027-knowledge-provider-reports-nothing-admitted.md](0027-knowledge-provider-reports-nothing-admitted.md)
+  — ADR 0027: a `knowledge` or `knowledge-search` provider that admits no note
+  adds one `<provider>:_meta:nothing-admitted` report to the bundle, naming the
+  request and the store's state (`outside-workspace`, `absent`, `unreadable`,
+  `scan-incomplete`, `no-notes`, `all-skipped` or `none-eligible`); the store's
+  state is determined, not inferred from an empty listing; never a failure.
+  Partially supersedes ADR 0022 §4 on what an absent or empty store yields.
