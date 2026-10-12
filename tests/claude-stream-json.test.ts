@@ -166,3 +166,21 @@ test("an envelope only in result.permission_denials yields nothing", async () =>
     events.filter((event) => event.type !== "stdout").map((e) => e.type),
   ).toEqual([]);
 });
+
+test("Claude's rate_limit_event record is never matched against an output schema", async () => {
+  const rateLimitLine = (await fixtureLines()).find(
+    (line) =>
+      (JSON.parse(line) as { type?: unknown }).type === "rate_limit_event",
+  );
+  expect(rateLimitLine).toBeDefined();
+
+  // A schema whose required keys the record happens to carry at top level.
+  const events = normalizeAgentOutputLine(
+    {
+      ...request("/scratch"),
+      outputSchemaShapes: [{ kind: "session", keys: ["uuid", "session_id"] }],
+    },
+    rateLimitLine ?? "",
+  );
+  expect(events.map((event) => event.type)).toEqual(["stdout"]);
+});

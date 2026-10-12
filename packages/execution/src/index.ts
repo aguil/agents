@@ -993,8 +993,9 @@ function extractNestedEnvelopes(
  * Stream-event `type` values whose subtree is not the agent's own output:
  * tool calls and their results (Claude Code `tool_use`/`tool_result`,
  * Cursor `tool_call`, OpenCode `tool_use` events and `tool` parts), echoed
- * user turns, and CLI system records such as hook responses. Files a role
- * reads land in these, and must not surface as that role's envelopes.
+ * user turns, and CLI system records such as hook responses and Claude
+ * Code's `rate_limit_event`. Files a role reads land in these, and must not
+ * surface as that role's envelopes.
  */
 const NON_AGENT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
   "tool_use",
@@ -1003,6 +1004,7 @@ const NON_AGENT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
   "tool",
   "user",
   "system",
+  "rate_limit_event",
 ]);
 
 /**
