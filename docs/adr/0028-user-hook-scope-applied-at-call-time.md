@@ -48,13 +48,15 @@ So the Cursor events user handlers run on today, `beforeShellExecution`,
 A handler given `HOOK_MATCHER` there has nothing to test it against, and no
 payload on either CLI carries `"Execute"`. A command prefixed
 `HOOK_MATCHER='<regex>'` did reach its handler byte for byte on Cursor
-`beforeShellExecution`, Cursor `preToolUse` and Claude Code `PreToolUse`. Cursor
-fired `preToolUse` about 120 ms before `beforeShellExecution` for the same call,
-and before `beforeMCPExecution` too. For each edit, Cursor fired `preToolUse`
+`beforeShellExecution`, Cursor `preToolUse` and Claude Code `PreToolUse`. In the
+hook logs of one shell call, Cursor's `preToolUse` stub logged about 120 ms
+before its `beforeShellExecution` stub, and its `preToolUse` stub logged before
+`beforeMCPExecution` for one MCP call. For each edit, Cursor fired `preToolUse`
 twice, for a `Read` of the file and then the `Write`. The Cursor MCP rows come
 from a call Cursor rejected before it ran. Every edit observed created a new
 file; the name of an in-place edit tool, on Cursor, and Claude Code's documented
-`Edit` and `NotebookEdit`, were not observed.
+`Edit` and `NotebookEdit`, were not observed. Neither were the names of Cursor's
+other tools that reach `preToolUse`, such as its search and delete tools.
 
 **A third gap neither issue names.** ADR 0006 §4 maps `pre_tool_call` to
 `beforeShellExecution` and `beforeMCPExecution`, and `post_tool_call` to
@@ -73,13 +75,14 @@ behaviour ADR 0023's context records: an allow lifts the headless permission
 default. A `PostToolUse` hook that exited 0 and printed nothing was recorded as
 `outcome: "success"`. On `cursor-agent 2026.10.01-14929f9`, every edit and shell
 call ran to completion under a `preToolUse` or `afterShellExecution` hook
-printing nothing, `{}` or an allow. The measurement's scorer did not score those
-Cursor rows, because its extractor misread this Cursor version's tool-call
-records, so the Cursor half is a reading of the raw streams, not a scored
-result. A user-level Cursor hooks file was present in every cell and registers a
-`preToolUse` hook that prints nothing, so no Cursor cell was free of an empty
-`preToolUse` hook. The empty skip on `afterMCPExecution`, and on the specific
-events user hooks use today, was not measured.
+printing nothing, `{}` or an allow. The measurement's scorer left those Cursor
+rows unscored; its extractor recorded every call as not made although the
+streams show each one completed, so the Cursor half is a reading of the raw
+streams, not a scored result. A user-level Cursor hooks file was present in
+every cell and registers a `preToolUse` hook that prints nothing, so no Cursor
+cell was free of an empty `preToolUse` hook. The empty skip on
+`afterMCPExecution`, and on the specific events user hooks use today, was not
+measured.
 
 **What one more process costs.** Starting the `agents` CLI and having it exit
 (`agents --version`) took 77 ms at p50 more than `/bin/true` when the binary was
@@ -99,12 +102,12 @@ an entry script, was not timed.
    handler's command. The gate decides whether this call is in the handler's
    scope and, only if it is, runs the handler. Authors write no filtering. The
    handler's `matcher` and `applies_to` mean the same on both adapters, because
-   one program applies them, from one table, to one tool-name vocabulary per
-   class (decision 3). A `HOOK_MATCHER` variable is still set for the handler,
-   so handlers that read it keep working; it is informational, and a handler
-   need not test it. Lifecycle events (`role_start`, `role_stop`, `run_start`,
-   `run_end`) are not gated, and OpenCode, which `agents` generates no hooks
-   for, is not affected.
+   one program applies them, from one table, against one set of names per class
+   (decision 3). A `HOOK_MATCHER` variable is set for the handler, as the Cursor
+   generator sets it today and, newly, on Claude Code; it is informational, and
+   a handler need not test it. Lifecycle events (`role_start`, `role_stop`,
+   `run_start`, `run_end`) are not gated, and OpenCode, which `agents` generates
+   no hooks for, is not affected.
 
 2. **The gate's contract.** The generated command is
 
@@ -116,18 +119,17 @@ an entry script, was not timed.
    with every value a POSIX single-quoted word. `--classes` is the class set the
    generator gave this registration: the classes the native event carries,
    intersected with the handler's `applies_to`, or all of them when it declares
-   none. The gate reads the hook payload from stdin, takes the call's class and
+   none. An empty intersection registers nothing, as the Claude generator does
+   today. The gate reads the hook payload from stdin, takes the call's class and
    tool name from decision 3's table, and then:
    - **runs the handler** when the class is in `--classes` and, if `--matcher`
-     is given, the tool name matches it. It runs it as
+     is given, the tool name matches it (decision 9). It runs it as
      `/bin/sh -c '<handler command>'`, with the payload on stdin unchanged and
      the handler's environment plus `HOOK_MATCHER`, and passes the handler's
      stdout, stderr and exit status through unchanged, so a handler's deny still
      denies, including Claude Code's exit-2 block, which reads stderr;
    - **skips silently** (decision 4) when the call's class is known and outside
-     `--classes`, or its name does not match `--matcher`. On Cursor's
-     `preToolUse`, a `Read`, `Shell` or `MCP:` call is such a known,
-     out-of-scope call;
+     `--classes`, or its name does not match `--matcher`;
    - **runs the handler and reports** when it cannot tell: when stdin does not
      parse as the adapter's payload, or a tool name the table expects is
      missing, or the name is one no row of the table knows. It writes one line
@@ -136,37 +138,57 @@ an entry script, was not timed.
      every call on its event reaches it; failing closed would silently drop the
      hook, the failure #220 reports.
 
-   A handler's `timeout_s` bounds the gate and the handler together.
+   `hook-gate --probe`, with the same arguments, parses them, checks that
+   `--matcher` compiles, and exits 0 with no output, without reading stdin or
+   running the handler (decision 7).
+
+   The adapter's own per-hook `timeout` bounds the gate and the handler
+   together, as it bounds the handler today; the gate sets no timeout of its
+   own, and when the adapter ends the hook, it ends both.
 
 3. **Where the class and the tool name come from.** One table in
    `packages/hooks/src/adapter-table.ts` gives, per adapter and native event,
-   the event's classes, where the tool name is, and the name the gate tests:
+   the event's classes and where the tool name is. Every call is then tested
+   against one set of names per class, the same on both adapters:
 
-   | Adapter     | Native event                                  | Classes          | Tool name the gate tests                                                              |
-   | ----------- | --------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------- |
-   | Cursor      | `beforeShellExecution`, `afterShellExecution` | shell            | none carried: `Shell`                                                                 |
-   | Cursor      | `beforeMCPExecution`, `afterMCPExecution`     | mcp              | `mcp__<mcp_server_name>__<tool_name>`                                                 |
-   | Cursor      | `afterFileEdit`                               | edit             | none carried: every edit name for the adapter; a match on any of them counts          |
-   | Cursor      | `preToolUse`                                  | edit             | `tool_name`; `Write` and `Edit` are edit; `Read`, `Shell`, `MCP:*` are known and skip |
-   | Claude Code | `PreToolUse`, `PostToolUse`                   | shell, mcp, edit | `tool_name`: `Bash` shell; `Write`, `Edit`, `NotebookEdit` edit; `mcp__*` mcp         |
+   | Class | Names a call is tested against                                   |
+   | ----- | ---------------------------------------------------------------- |
+   | shell | `Bash`, `Shell`                                                  |
+   | edit  | `Write`, `Edit`, `NotebookEdit`, `Delete`                        |
+   | mcp   | `mcp__<server>__<tool>`, built from the payload on both adapters |
 
-   Three choices follow from wanting one regex to mean the same on both
-   adapters. On Cursor's shell events, which carry no name, the gate tests
-   `Shell`, the name Cursor's generic events use. On Cursor's MCP events it
-   builds Claude Code's form, `mcp__<server>__<tool>`, from the payload's
-   `mcp_server_name` and `tool_name`, so an MCP `matcher` reads alike on both.
-   On `afterFileEdit`, which does not say which edit tool ran, the gate matches
-   if the regex matches any edit name, so a handler scoped to one edit tool runs
-   after an edit rather than never. Names the table lists but no measurement has
-   observed (Cursor's `Edit`, Claude Code's `Edit` and `NotebookEdit`) are
-   documented, not measured. The implementing change records Cursor's in-place
-   edit name from a live run before it merges, and corrects the row if it is not
-   `Edit`.
+   A call whose payload names its tool is tested against that name, and a shell
+   call against both shell names, since the two adapters name the same tool
+   differently. A call whose payload names no tool, on Cursor's shell events and
+   `afterFileEdit`, matches when the regex matches any name in its class's set,
+   because the event does not say which tool ran. So `matcher: Bash` and
+   `matcher: Shell` both select shell calls on both adapters, `matcher: Write`
+   still tells a `Write` from an `Edit` where the payload names it, and an edit
+   matcher runs after any Cursor edit rather than never. Per event:
 
-   The table also marks `preToolUse`, `afterShellExecution` and
-   `afterMCPExecution` as user-hook events on Cursor. The bridge is not written
-   to them, and the policy evaluator's event vocabulary is unchanged, as
-   `beforeReadFile` is marked as the bridge's alone today.
+   | Adapter     | Native event                                  | Classes          | Tool name                                                                                                   |
+   | ----------- | --------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------- |
+   | Cursor      | `beforeShellExecution`, `afterShellExecution` | shell            | none carried; the class's names                                                                             |
+   | Cursor      | `beforeMCPExecution`, `afterMCPExecution`     | mcp              | `mcp__<mcp_server_name>__<tool_name>`                                                                       |
+   | Cursor      | `afterFileEdit`                               | edit             | none carried; the class's names                                                                             |
+   | Cursor      | `preToolUse`                                  | edit             | `tool_name`; edit names are edit; Cursor's other tool names are known and skip                              |
+   | Claude Code | `PreToolUse`, `PostToolUse`                   | shell, mcp, edit | `tool_name`; `Bash` shell, edit names edit, `mcp__*` mcp; Claude Code's other tool names are known and skip |
+
+   "Other tool names" are the names each CLI's tools carry in hook payloads. The
+   implementing change records Cursor's complete list from the installed
+   `cursor-agent` and Claude Code's from its documentation, before it merges, as
+   known and skipped; a name in neither list falls under decision 2's report.
+   `Delete` counts as an edit because it changes a file. Names in these tables
+   that no measurement has observed (`Edit`, `NotebookEdit`, `Delete`, Cursor's
+   in-place edit tool) are documented, not measured; the implementing change
+   records Cursor's in-place edit name from a live run and corrects the tables
+   if it differs.
+
+   The table marks `preToolUse`, `afterShellExecution` and `afterMCPExecution`
+   as user-hook events on Cursor, a field of their own. The Cursor generator's
+   bridge loop, which today writes the bridge onto every event the canonical
+   mapping names, skips them, and so do the functions that build the policy
+   evaluator's probe vocabulary for `agents hooks test`.
 
 4. **A gate that skips says nothing.** On a silent skip it exits 0 with no
    stdout and no stderr, on every adapter and event. It never prints an allow:
@@ -208,22 +230,23 @@ an entry script, was not timed.
    executable and entry script, as absolute paths, as ADR 0023 decision 10 does
    for the bridge. On Cursor the generated file keeps `agents` on the hook's
    `PATH`, as the bridge does. Before any role runs, `harness run` invokes each
-   distinct generated gate command once, from the workspace and through a login
-   shell, as the adapter's hook would be run, with a payload of a known class
-   outside that registration's classes, or with `--matcher` unmatched where a
-   registration covers every class. Exit 0 with no output passes. Anything else
-   fails the run, because an `agents` too old to know `hook-gate` would leave
-   every gated hook inert, the failure #220 reports. The probe proves the
-   command the adapter would resolve parses its arguments and skips silently; it
-   does not prove a handler's behaviour.
+   distinct generated gate command once with `--probe` added, as `sh -c` from
+   the workspace, as the existing bridge probe does. Exit 0 with no output
+   passes. Anything else fails the run, because an `agents` too old to know
+   `hook-gate`, or a `matcher` that does not compile, would leave every gated
+   hook inert, the failure #220 reports. The probe proves the command parses; it
+   does not prove the adapter resolves the same `agents` from its own
+   environment, nor a handler's behaviour.
 
 8. **The load warning (#220).** When a harness loads for an adapter, each
-   tool-call handler that sets `matcher` is checked against the names decision
-   3's table gives for the shell and edit classes it registers on. MCP names are
-   left out: they are an open set named by the MCP server, which ADR 0009
-   decision 1 declined to interpret. If the regex matches none of those names
-   and the handler registers on shell or edit, `harness run` warns, naming the
-   handler, the adapter and `applies_to`. `matcher: "Execute"` warns on both
+   tool-call handler that sets `matcher` is checked against decision 3's names
+   for the shell and edit classes it registers on. MCP names are an open set
+   named by the MCP server, which ADR 0009 decision 1 declined to interpret, so
+   they are not enumerated. If the regex matches none of those shell and edit
+   names, `harness run` warns, naming the handler, the adapter and `applies_to`;
+   when the handler also registers on mcp, the warning adds that it will run
+   only on MCP calls whose `mcp__<server>__<tool>` name matches. A handler whose
+   only class is mcp is not checked. `matcher: "Execute"` warns on both
    adapters. A `matcher` that is not a valid regular expression is rejected when
    the harness loads. That is new: the loader does not compile `matcher` today,
    and such a handler loaded and never matched.
@@ -242,12 +265,12 @@ an entry script, was not timed.
     gate runs only on its registration's events. The specific events fire only
     for their class. `preToolUse` fires for every tool call, and twice for a
     Cursor edit, so a pre-edit handler on Cursor costs a process on every call,
-    reads included. Only harnesses that declare their own tool-call hooks pay
-    any of it. Should it matter, the shape of the fix is the one ADR 0009
-    decision 2 names, a purpose-built minimal entry point, not a return to
-    handler-side filtering.
+    reads and searches included, though it skips them silently. Only harnesses
+    that declare their own tool-call hooks pay any of it. Should it matter, the
+    shape of the fix is the one ADR 0009 decision 2 names, a purpose-built
+    minimal entry point, not a return to handler-side filtering.
 
-11. **Supersession and exceptions.** This ADR:
+11. **Supersession, exceptions and the spec.** This ADR:
     - supersedes ADR 0006 §4's Cursor mapping in part, adding `preToolUse`,
       `afterShellExecution` and `afterMCPExecution` for user hooks;
     - is an exception to ADR 0006 §3 and ADR 0009 decision 1, which put the
@@ -263,16 +286,24 @@ an entry script, was not timed.
       0023 left in place when it said the authoring surface, events, matchers
       and `applies_to`, was untouched;
     - extends ADR 0024's undeliverable-event record to Cursor's withheld
-      user-hook events.
+      user-hook events;
+    - makes **no `spec_version` increment**. The fields and their syntax are
+      unchanged; what changes is that `matcher` and `applies_to` now do on both
+      adapters what the spec says they do. The two stricter readings, a
+      whole-name match and a load failure for an invalid regex, apply to every
+      spec version, because a harness written for any version meant the same by
+      them, and the consequences below say what changes for it.
 
 **Consequences:**
 
 - A handler's scope means the same on Cursor and Claude Code, and a declared
   hook runs on the same calls on both, except where an event is withheld on an
   unmeasured `cursor-agent`, which the run records.
-- Existing Cursor handlers keep their events and payload shapes. An unscoped
-  handler gains Cursor's pre-edit calls and its post-call shell and MCP calls,
-  which it already had on Claude Code.
+- Existing Cursor handlers keep their current events and payload shapes there.
+  An unscoped handler gains Cursor's pre-edit calls, through `preToolUse`, and
+  its post-call shell and MCP calls, through `afterShellExecution` and
+  `afterMCPExecution`, which it already had on Claude Code. Those are payloads
+  and response shapes a Cursor handler has not seen before.
 - **On Claude Code, a handler loses calls it has today.** An unscoped handler,
   or one whose `matcher` named a tool outside shell, edit and MCP, such as
   `Read`, `Grep`, `WebFetch` or `Task`, ran on those calls; under decision 6 it
@@ -285,8 +316,7 @@ an entry script, was not timed.
   invocation, and on Cursor a pre-edit hook pays it on every tool call.
 - A handler that relied on `HOOK_MATCHER` to filter keeps working; the filtering
   is now done before it runs.
-- `matcher`'s documentation names each adapter's tool names instead of
-  `Execute`.
+- `matcher`'s documentation names each class's tool names instead of `Execute`.
 
 **References:**
 
@@ -295,4 +325,4 @@ an entry script, was not timed.
   and its statement that the authoring surface is untouched), ADR 0024
 - `packages/hooks/src/claude.ts`, `packages/hooks/src/index.ts`,
   `packages/hooks/src/adapter-table.ts`, `packages/cli/src/harness-run-main.ts`,
-  `packages/harness-config/src/index.ts`
+  `packages/cli/src/hooks-test-main.ts`, `packages/harness-config/src/index.ts`

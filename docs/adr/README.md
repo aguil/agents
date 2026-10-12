@@ -170,11 +170,13 @@ so it is upheld in review.
 - [0028-user-hook-scope-applied-at-call-time.md](0028-user-hook-scope-applied-at-call-time.md)
   — ADR 0028: a harness-declared tool-call hook runs behind an
   `agents hook-gate` that applies its `matcher` and `applies_to` at call time on
-  Cursor and Claude Code, from one table of each native event's classes and
-  tool-name field; a gate that skips prints nothing; Cursor user hooks gain
-  `preToolUse` (edit), `afterShellExecution` and `afterMCPExecution` on measured
-  `cursor-agent` versions only; Claude Code's native matcher is the `applies_to`
-  projection; the gate is probed before any role runs; a `matcher` that can
-  match none of an adapter's shell or edit tool names warns at load. Partially
-  supersedes ADR 0006 §4 and ADR 0023 decision 1, and is an exception to ADR
-  0006 §3 and ADR 0009 decision 1 for the added Cursor events.
+  Cursor and Claude Code, from one table of each native event's classes and one
+  set of tool names per class; `matcher` matches the whole name; a gate that
+  skips prints nothing and one that cannot read a call runs the handler and
+  reports; Cursor user hooks gain `preToolUse` (edit), `afterShellExecution` and
+  `afterMCPExecution` on measured `cursor-agent` versions only; Claude Code's
+  native matcher is the `applies_to` projection; each gate is probed with
+  `--probe` before any role runs; a `matcher` that can match no shell or edit
+  name warns at load, and an invalid one fails it. Partially supersedes ADR 0006
+  §4; an exception to ADR 0006 §3, ADR 0009 decision 1 and ADR 0023 decision 9
+  for the added Cursor events; no `spec_version` increment.
