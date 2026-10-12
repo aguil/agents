@@ -26,8 +26,8 @@ roles behaved as if they had no project knowledge cannot tell from the record
 whether the provider was declared, whether the store path was wrong, or whether
 the notes existed but none qualified.
 
-The silence is wider than an absent or empty store. The same empty record
-results whenever a provider admits no note at all:
+The gap is wider than an absent or empty store. A provider can admit no note for
+any of these reasons:
 
 - the store root does not exist, perhaps because `path` is misspelled;
 - the root exists but is not a directory that can be listed;
@@ -38,12 +38,18 @@ results whenever a provider admits no note at all:
   `context: auto`, and for `knowledge-search`, none matches the tags and
   provenance asked for.
 
-Each of these points the reader at a different fix, and today none of them
-leaves a trace. ADR 0022 already reports the opposite case. When eligible notes
-exceed a bound, clause 8 records what was admitted and what was omitted, because
-a bundle that silently held less than the store offered would be misleading.
-Admitting nothing is the limit of the same situation and deserves the same
-treatment.
+Each of these points the reader at a different fix. Four of them, an absent
+root, an unlistable root, a store with no Markdown notes and notes that are not
+eligible, leave no trace at all. The other two leave entries in the
+`<provider>:_meta:skipped` report ADR 0022 clause 8 defines: a root outside the
+workspace is a skip entry for the store path, and each malformed note is a skip
+entry of its own. Even then, nothing in the record says the provider admitted no
+note. A reader has to infer it from what is missing, and in the other four cases
+there is nothing to infer from. ADR 0022 already reports the opposite case. When
+eligible notes exceed a bound, clause 8 records what was admitted and what was
+omitted, because a bundle that silently held less than the store offered would
+be misleading. Admitting nothing is the limit of the same situation and deserves
+the same treatment.
 
 As implemented at the time of writing, the store scan also cannot tell these
 cases apart. `packages/context/src/knowledge.ts` treats a root it cannot list as
