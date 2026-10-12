@@ -1,10 +1,11 @@
 # ADR 0019: finding validation carries structured evidence; `builtin:actionable` stops discarding findings
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-07-29 — Proposed.
+- 2026-08-02 — Accepted: merged in #161.
 
 **Context:** `builtin:actionable` is the finding filter every code-review run
 applies, declared as `filtering.findings: [builtin:actionable]` in
