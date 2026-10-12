@@ -133,12 +133,12 @@ held nothing eligible.
    over silently, and it makes the scan incomplete under clause 3.
 
 5. **The report is a record, not a verdict.** It does not fail the role or the
-   run, does not change run status (which stays gate-owned, per ADR 0021), and
-   is not an event. It lives in the bundle for the same reasons ADR 0022 clause
-   8 gives for overflow reports. The bundle is written to the run scratchpad and
-   is what a reader inspects afterwards, and the exported bundle type does not
-   change. Report artifacts do not count against `max_bytes`, which bounds note
-   content.
+   run, is neither a finding nor a gate, so it changes no run status under the
+   rules ADR 0021 sets, and is not an event. It lives in the bundle for the same
+   reasons ADR 0022 clause 8 gives for overflow reports. The bundle is written
+   to the run scratchpad and is what a reader inspects afterwards, and the
+   exported bundle type does not change. Report artifacts do not count against
+   `max_bytes`, which bounds note content.
 
 **Consequences:**
 
@@ -173,6 +173,7 @@ held nothing eligible.
 - ADR 0017 — knowledge governance. Clause 7 says budget overflow is reported,
   not silent, and is not an error. This ADR extends that principle from a store
   that offers too much to one that offers nothing.
-- ADR 0021 — run status is owned by the gate, not by role output, so a report in
-  the bundle cannot change it.
+- ADR 0021 — how run status is decided: by the gate when a harness declares one,
+  and by findings otherwise. A report in the bundle is neither, so it changes no
+  status.
 - #210 — knowledge providers leave no record when requested knowledge is absent.
