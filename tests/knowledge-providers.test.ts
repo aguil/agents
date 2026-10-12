@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +15,7 @@ import {
   type KnowledgeNote,
   KnowledgeProvider,
   KnowledgeSearchProvider,
+  knowledgeNothingAdmittedState,
   loadKnowledgeStore,
   parseKnowledgeNoteSource,
 } from "@aguil/agents-context";
@@ -47,6 +55,19 @@ function note(
       : { updatedAt: partial.updatedAt }),
     id: partial.id,
   };
+}
+
+/** The parsed `<provider>:_meta:nothing-admitted` report, or undefined. */
+function nothingAdmitted(
+  artifacts: readonly { readonly id: string; readonly content: string }[],
+  provider: "knowledge" | "knowledge-search",
+): Record<string, unknown> | undefined {
+  const report = artifacts.find(
+    (artifact) => artifact.id === `${provider}:_meta:nothing-admitted`,
+  );
+  return report === undefined
+    ? undefined
+    : (JSON.parse(report.content) as Record<string, unknown>);
 }
 
 test("parseKnowledgeNoteSource rejects reserved _meta: ids", () => {
@@ -151,11 +172,27 @@ test("parseKnowledgeNoteSource skips an invalid context value", () => {
   }
 });
 
-test("loadKnowledgeStore returns empty for an absent store", async () => {
+test("an absent store yields a nothing-admitted report, not an empty result (ADR 0027)", async () => {
   await withWorkspace(async (workspacePath) => {
     const loaded = await loadKnowledgeStore(workspacePath);
     expect(loaded.notes).toEqual([]);
     expect(loaded.skipped).toEqual([]);
+    expect(loaded.root).toBe("absent");
+
+    const artifacts = await new KnowledgeProvider().collect({
+      workspacePath,
+      scratchpadPath: join(workspacePath, ".scratch"),
+    });
+    expect(artifacts.map((artifact) => artifact.id)).toEqual([
+      "knowledge:_meta:nothing-admitted",
+    ]);
+    expect(nothingAdmitted(artifacts, "knowledge")).toEqual({
+      provider: "knowledge",
+      path: ".agents/knowledge",
+      request: { context: "auto" },
+      store: "absent",
+      counts: { files: 0, notes: 0, skipped: 0 },
+    });
   });
 });
 
@@ -474,15 +511,21 @@ test("KnowledgeSearchProvider matches tags with AND and filters provenance", asy
       workspacePath,
       scratchpadPath: join(workspacePath, ".scratch"),
     });
-    expect(
-      empty
-        .filter((artifact) => artifact.id.startsWith("knowledge-search:"))
-        .filter(
-          (artifact) =>
-            !artifact.id.endsWith(":_meta:admission") &&
-            !artifact.id.endsWith(":_meta:skipped"),
-        ),
-    ).toHaveLength(0);
+    // ADR 0027: an unmatched search says so, rather than returning nothing.
+    expect(empty.map((artifact) => artifact.id)).toEqual([
+      "knowledge-search:_meta:nothing-admitted",
+    ]);
+    expect(nothingAdmitted(empty, "knowledge-search")).toEqual({
+      provider: "knowledge-search",
+      path: ".agents/knowledge",
+      request: {
+        tags: ["nonexistent"],
+        provenance: "any",
+        machine_id_prefix: "harness:",
+      },
+      store: "none-eligible",
+      counts: { files: 3, notes: 3, skipped: 0 },
+    });
   });
 });
 
@@ -713,5 +756,166 @@ test("a truncated note is cut at a character boundary at every budget from the f
         `max_bytes ${maxBytes}`,
       ).toBeLessThanOrEqual(maxBytes);
     }
+  });
+});
+
+/** Collects with `knowledge` and returns its nothing-admitted report. */
+async function knowledgeReport(
+  workspacePath: string,
+  options: { readonly path?: string } = {},
+): Promise<Record<string, unknown> | undefined> {
+  const artifacts = await new KnowledgeProvider(options).collect({
+    workspacePath,
+    scratchpadPath: join(workspacePath, ".scratch"),
+  });
+  return nothingAdmitted(artifacts, "knowledge");
+}
+
+test("each reason a provider admits nothing has its own report state, in ADR 0027's order", async () => {
+  // outside-workspace: the declared path escapes the workspace.
+  await withWorkspace(async (workspacePath) => {
+    const report = await knowledgeReport(workspacePath, {
+      path: "../elsewhere",
+    });
+    expect(report?.store).toBe("outside-workspace");
+    expect(report?.path).toBe("../elsewhere");
+    expect(report?.counts).toEqual({ files: 0, notes: 0, skipped: 1 });
+  });
+  // unreadable: something is at the path, but not a directory to list.
+  await withWorkspace(async (workspacePath) => {
+    await mkdir(join(workspacePath, ".agents"), { recursive: true });
+    await writeFile(join(workspacePath, ".agents", "knowledge"), "not a dir");
+    expect((await knowledgeReport(workspacePath))?.store).toBe("unreadable");
+  });
+  // no-notes: the directory lists, with no Markdown in it.
+  await withWorkspace(async (workspacePath) => {
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/README.txt",
+      "notes go here",
+    );
+    const report = await knowledgeReport(workspacePath);
+    expect(report?.store).toBe("no-notes");
+    expect(report?.counts).toEqual({ files: 0, notes: 0, skipped: 0 });
+  });
+  // all-skipped: Markdown exists, but every file was skipped as a note.
+  await withWorkspace(async (workspacePath) => {
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/bad.md",
+      "no frontmatter",
+    );
+    const report = await knowledgeReport(workspacePath);
+    expect(report?.store).toBe("all-skipped");
+    expect(report?.counts).toEqual({ files: 1, notes: 0, skipped: 1 });
+  });
+  // none-eligible: a usable note, but not one `knowledge` injects.
+  await withWorkspace(async (workspacePath) => {
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/search-only.md",
+      ["---", "id: search-only", "---", "body"].join("\n"),
+    );
+    const report = await knowledgeReport(workspacePath);
+    expect(report?.store).toBe("none-eligible");
+    expect(report?.counts).toEqual({ files: 1, notes: 1, skipped: 0 });
+  });
+});
+
+test("a store whose only note links outside the workspace is all-skipped (ADR 0027 §3)", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const outside = join(workspacePath, "..", "knowledge-escape-report.md");
+    await writeFile(
+      outside,
+      ["---", "id: escape", "context: auto", "---", "secret"].join("\n"),
+    );
+    try {
+      await mkdir(join(workspacePath, ".agents", "knowledge"), {
+        recursive: true,
+      });
+      await symlink(
+        outside,
+        join(workspacePath, ".agents", "knowledge", "linked.md"),
+      );
+      expect((await knowledgeReport(workspacePath))?.store).toBe("all-skipped");
+    } finally {
+      await rm(outside, { force: true });
+    }
+  });
+});
+
+test("an incomplete scan takes precedence over the states it cannot vouch for (ADR 0027 §3, §4)", async () => {
+  // The scan stops at its path limit before reaching the one eligible note.
+  await withWorkspace(async (workspacePath) => {
+    for (const id of ["a", "b"]) {
+      await writeNote(
+        workspacePath,
+        `.agents/knowledge/${id}.md`,
+        ["---", `id: ${id}`, "---", "search-only"].join("\n"),
+      );
+    }
+    const loaded = await loadKnowledgeStore(workspacePath, undefined, {
+      maxScanned: 1,
+    });
+    expect(loaded.scanIncomplete).toBe(true);
+    expect(knowledgeNothingAdmittedState(loaded)).toBe("scan-incomplete");
+  });
+  // A directory inside the store that cannot be listed. Root ignores the
+  // permission, so the check only means something for other users.
+  if (process.getuid?.() === 0) {
+    return;
+  }
+  await withWorkspace(async (workspacePath) => {
+    const locked = join(workspacePath, ".agents", "knowledge", "locked");
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/locked/hidden.md",
+      ["---", "id: hidden", "context: auto", "---", "body"].join("\n"),
+    );
+    await chmod(locked, 0o000);
+    try {
+      const artifacts = await new KnowledgeProvider().collect({
+        workspacePath,
+        scratchpadPath: join(workspacePath, ".scratch"),
+      });
+      expect(nothingAdmitted(artifacts, "knowledge")?.store).toBe(
+        "scan-incomplete",
+      );
+      const skipped = JSON.parse(
+        artifacts.find((artifact) => artifact.id === "knowledge:_meta:skipped")
+          ?.content ?? "{}",
+      ) as { skipped?: { path: string; reason: string }[] };
+      expect(skipped.skipped).toContainEqual(
+        expect.objectContaining({
+          path: join(".agents/knowledge", "locked"),
+          reason: "unreadable",
+        }),
+      );
+    } finally {
+      await chmod(locked, 0o755);
+    }
+  });
+});
+
+test("a provider that admits a note writes no nothing-admitted report (ADR 0027 §2)", async () => {
+  await withWorkspace(async (workspacePath) => {
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/auto.md",
+      ["---", "id: auto", "context: auto", "tags: [ops]", "---", "body"].join(
+        "\n",
+      ),
+    );
+    const scratchpadPath = join(workspacePath, ".scratch");
+    const injected = await new KnowledgeProvider().collect({
+      workspacePath,
+      scratchpadPath,
+    });
+    expect(nothingAdmitted(injected, "knowledge")).toBeUndefined();
+    const found = await new KnowledgeSearchProvider({ tags: ["ops"] }).collect({
+      workspacePath,
+      scratchpadPath,
+    });
+    expect(nothingAdmitted(found, "knowledge-search")).toBeUndefined();
   });
 });

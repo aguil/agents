@@ -34,8 +34,18 @@ that order and truncates the note that straddles the boundary rather than
 skipping it; everything after is omitted and reported.
 
 A note id may not begin `_meta:` — that prefix is reserved for the providers'
-own reports, emitted as `<provider>:_meta:skipped` and
-`<provider>:_meta:admission`.
+own reports, emitted as `<provider>:_meta:skipped`, `<provider>:_meta:admission`
+and `<provider>:_meta:nothing-admitted`.
+
+A provider that admits no note adds `<provider>:_meta:nothing-admitted` (ADR
+0027). It is a JSON record of the `provider`, the store `path`, the `request`
+that decides eligibility (`{"context": "auto"}` for `knowledge`; `tags`,
+`provenance` and `machine_id_prefix` for `knowledge-search`), `counts` of files,
+notes and skips, and a `store` state. The state is the first of these that
+applies: `outside-workspace`, `absent`, `unreadable`, `scan-incomplete`,
+`no-notes`, `all-skipped` or `none-eligible`. It never fails the run. A store
+subdirectory that cannot be listed is a skip with reason `unreadable`, and makes
+the scan incomplete.
 
 `knowledge-search` params: `tags` (AND, case-insensitive), `limit` (default 5),
 `provenance` (`any` \| `machine` \| `human`), `machine_id_prefix` (default

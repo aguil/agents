@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1787,5 +1795,75 @@ test("harness run sends the harness-run envelope, not the code-review one, on ev
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  }
+});
+
+test("a run asking for knowledge from an absent store carries the nothing-admitted report in its bundle (ADR 0027)", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "harness-knowledge-absent-"));
+  const agentsDir = await mkdtemp(
+    join(tmpdir(), "harness-knowledge-absent-agents-"),
+  );
+  try {
+    const dir = join(agentsDir, "harnesses", "knowledge-absent");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "harness.yaml"),
+      [
+        'spec_version: "0.2"',
+        "kind: harness",
+        "harness: { id: knowledge-absent }",
+        "context:",
+        "  providers:",
+        "    - use: knowledge",
+        "    - use: knowledge-search",
+        "      tags: [runbook]",
+        "roles:",
+        "  a:",
+        "    description: A",
+        '    prompt: "use what the project knows"',
+        "execution: { mode: chain, order: [a] }",
+      ].join("\n"),
+    );
+    const result = await runHarnessCli([
+      "knowledge-absent",
+      "--agents-dir",
+      agentsDir,
+      "--workspace",
+      workspace,
+      "--adapter",
+      "fake",
+    ]);
+    // Absent knowledge is a record, never a failure (ADR 0027 §5).
+    expect(result.exitCode, result.stderr).toBe(0);
+    const runsDir = join(workspace, ".agents-harness", "runs");
+    const [runDir] = await readdir(runsDir);
+    const bundle = JSON.parse(
+      await readFile(
+        join(runsDir, runDir ?? "", "context", "bundle.json"),
+        "utf8",
+      ),
+    ) as { artifacts: Array<{ id: string; content: string }> };
+    for (const [provider, request] of [
+      ["knowledge", { context: "auto" }],
+      [
+        "knowledge-search",
+        { tags: ["runbook"], provenance: "any", machine_id_prefix: "harness:" },
+      ],
+    ] as const) {
+      const report = bundle.artifacts.find(
+        (artifact) => artifact.id === `${provider}:_meta:nothing-admitted`,
+      );
+      expect(report, provider).toBeDefined();
+      expect(JSON.parse(report?.content ?? "{}")).toEqual({
+        provider,
+        path: ".agents/knowledge",
+        request,
+        store: "absent",
+        counts: { files: 0, notes: 0, skipped: 0 },
+      });
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(agentsDir, { recursive: true, force: true });
   }
 });
