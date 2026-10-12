@@ -3327,7 +3327,9 @@ test("captures subprocess stdout/stderr artifacts for debugging", async () => {
         cmd: [
           process.execPath,
           "--eval",
-          "console.log('stream-stdout'); console.error('stream-stderr');",
+          // Raw writes, not console.*: with FORCE_COLOR set, the child's
+          // console.error colors its output (#228).
+          "process.stdout.write('stream-stdout\\n'); process.stderr.write('stream-stderr\\n');",
         ],
         cwd: tempDir,
       }),

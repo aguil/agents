@@ -14,7 +14,11 @@ const fixturesAgentsDir = join(
 async function runHooksTest(
   args: readonly string[],
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  // Without FORCE_COLOR, so the CLI's console.error lines stay uncolored and
+  // the stderr assertions compare text, not escape codes (#228).
+  const { FORCE_COLOR: _forceColor, ...env } = process.env;
   const proc = Bun.spawn({
+    env,
     cmd: [
       "bun",
       "run",
