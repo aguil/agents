@@ -159,3 +159,10 @@ so it is upheld in review.
   allowed command's arguments meet `filesystem.deny`; allowlisting an
   interpreter or command runner warns at load; what text matching cannot see is
   documented. Partially supersedes ADR 0006 §2 on how exec rules match.
+- [0027-knowledge-provider-reports-nothing-admitted.md](0027-knowledge-provider-reports-nothing-admitted.md)
+  — ADR 0027: a `knowledge` or `knowledge-search` provider that admits no note
+  adds one `<provider>:_meta:nothing-admitted` report to the bundle, naming the
+  request and the store's state (`outside-workspace`, `absent`, `unreadable`,
+  `no-notes`, `all-skipped` or `none-eligible`); the store's state is
+  determined, not inferred from an empty listing; never a failure. Partially
+  supersedes ADR 0022 §4 on what an absent or empty store yields. Proposed.
