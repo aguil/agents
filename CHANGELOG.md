@@ -10,6 +10,20 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.11](https://github.com/aguil/agents/compare/v0.8.10...v0.8.11) (2026-10-12)
+
+
+### Added
+
+* **context:** report why a knowledge provider admitted no note ([4c70444](https://github.com/aguil/agents/commit/4c70444adc028d35926e9909b6fa7dbfb69c7d52)), closes [#210](https://github.com/aguil/agents/issues/210)
+
+
+### Fixed
+
+* **context:** cut a truncated knowledge note at a character boundary ([c9140c8](https://github.com/aguil/agents/commit/c9140c8489107bd434e2c191d8153ed9aff287d2)), closes [#210](https://github.com/aguil/agents/issues/210)
+* **context:** reject a knowledge max_bytes too small for a truncation marker ([094db77](https://github.com/aguil/agents/commit/094db777d7c3ed4f9b9759b8b029dc211aa5106f)), closes [#210](https://github.com/aguil/agents/issues/210)
+* **context:** stop knowledge admission at the first note that does not fit ([35d6b4f](https://github.com/aguil/agents/commit/35d6b4fdcf2b76eed265a648d1a749fe5b9e716e)), closes [#210](https://github.com/aguil/agents/issues/210)
+
 ## [0.8.10](https://github.com/aguil/agents/compare/v0.8.9...v0.8.10) (2026-10-12)
 
 
