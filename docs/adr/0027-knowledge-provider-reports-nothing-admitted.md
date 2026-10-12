@@ -94,9 +94,11 @@ held nothing eligible.
    content is a JSON object with these fields:
    - `provider`: `knowledge` or `knowledge-search`.
    - `path`: the store path as declared, or the default `.agents/knowledge`.
-   - `request`: the params that decide eligibility. For `knowledge-search`, that
-     is `tags`, `provenance` and `machine_id_prefix`. For `knowledge`, it is the
-     fixed rule that only `context: auto` notes are eligible.
+   - `request`: the params that decide eligibility, plus the `max_bytes` in
+     effect, declared or default, which is what decides `over-budget`. For
+     `knowledge-search`, the eligibility params are `tags`, `provenance` and
+     `machine_id_prefix`. For `knowledge`, it is the fixed rule that only
+     `context: auto` notes are eligible.
    - `store`: exactly one of the states below, the first that applies in this
      order.
      - `outside-workspace`: the path resolves outside the workspace.
