@@ -270,7 +270,8 @@ Backend / adapters:
   --agent <name>         OpenCode agent name override
   --opencode <path>      Executable (default: opencode)
   --claude <path>        Executable (default: claude)
-  --claude-args <value>  Comma-separated template for Claude ({prompt})
+  --claude-args <value>  Claude template ({prompt}; keep --output-format
+                         stream-json --verbose to record tool calls)
   --cursor <path>        Executable (default: agent)
   --cursor-args <value>  Cursor template ({prompt}; retain --trust for CI)
   --cursor-mode <mode>   Cursor mode: agent | plan | ask

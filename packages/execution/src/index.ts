@@ -993,8 +993,9 @@ function extractNestedEnvelopes(
  * Stream-event `type` values whose subtree is not the agent's own output:
  * tool calls and their results (Claude Code `tool_use`/`tool_result`,
  * Cursor `tool_call`, OpenCode `tool_use` events and `tool` parts), echoed
- * user turns, and CLI system records such as hook responses. Files a role
- * reads land in these, and must not surface as that role's envelopes.
+ * user turns, and CLI system records such as hook responses and Claude
+ * Code's `rate_limit_event`. Files a role reads land in these, and must not
+ * surface as that role's envelopes.
  */
 const NON_AGENT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
   "tool_use",
@@ -1003,12 +1004,19 @@ const NON_AGENT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
   "tool",
   "user",
   "system",
+  "rate_limit_event",
 ]);
 
-/** Object keys that hold tool I/O outside a typed block. */
+/**
+ * Object keys that hold tool I/O outside a typed block. Claude Code's stream
+ * repeats each call's input in an assistant record's `wire_tool_inputs`, and
+ * each denied call's input in its `result` record's `permission_denials`.
+ */
 const NON_AGENT_OUTPUT_KEYS: ReadonlySet<string> = new Set([
   "tool_use_result",
   "tool_call",
+  "wire_tool_inputs",
+  "permission_denials",
 ]);
 
 /**
@@ -1403,8 +1411,16 @@ export function buildClaudeCodeCommand(
   const model = resolveModelForRole(request.roleId, options);
   const defaultTemplate: readonly string[] =
     options.settingsPath === undefined
-      ? ["-p", "{prompt}"]
-      : ["-p", "{prompt}", "--settings", "{settings}"];
+      ? ["-p", "{prompt}", "--output-format", "stream-json", "--verbose"]
+      : [
+          "-p",
+          "{prompt}",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--settings",
+          "{settings}",
+        ];
   const template = options.argsTemplate ?? defaultTemplate;
   assertClaudeHookEnforcementArgs(template, options);
   const args = template.map((arg) => substituteTemplateArg(arg, substitutions));

@@ -103,7 +103,7 @@ etc.), use the `=` binding form to keep the template in one argv cell:
 
 ```bash
 --cursor-args="--strict,--trust,--print"
---claude-args="--verbose,--model,claude-sonnet-4"
+--claude-args="--verbose,--output-format,stream-json,-p,{prompt}"
 ```
 
 Configured model routing (`model` / `models`) always reaches the spawned cursor
