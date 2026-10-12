@@ -459,7 +459,7 @@ async function probeHookGates(
         `harness run: a generated hook gate failed its probe (${failure}), ` +
         "so the harness's tool-call hooks would not run (ADR 0028 decision 7). " +
         `Gate: ${command}. Pass --agents-cli naming an agents CLI that ` +
-        'supports "hook-gate", or fix the handler\'s matcher.'
+        'supports "hook-gate".'
       );
     }
   }
