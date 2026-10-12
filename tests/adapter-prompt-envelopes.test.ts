@@ -66,3 +66,45 @@ test("code-review prompt files contain no copy-pasteable envelope examples", asy
     expectNoParseableEnvelope(content, file);
   }
 });
+
+function promptsFor(
+  envelope: AgentRunRequest["envelope"],
+): ReadonlyArray<readonly [string, string]> {
+  const requestPath = "/scratch/roles/quality/quality.request.json";
+  const withEnvelope: AgentRunRequest = {
+    ...request,
+    metadata: { vcs_mode: "jj" },
+    ...(envelope === undefined ? {} : { envelope }),
+  };
+  return [
+    ["opencode", buildOpenCodePrompt(withEnvelope)],
+    ["claude", buildClaudeCodePrompt(withEnvelope, requestPath)],
+    ["cursor", buildCursorPrompt(withEnvelope, requestPath)],
+  ];
+}
+
+test("a harness-run prompt names its inputs and VCS, with no role, write or finding rule (#211)", () => {
+  for (const [label, prompt] of promptsFor("harness-run")) {
+    expect(prompt, label).toStartWith("Review this change.");
+    expect(prompt, label).toContain("Context bundle: /scratch/context.json");
+    expect(prompt, label).toContain(
+      "Machine-readable run request: /scratch/roles/quality/quality.request.json",
+    );
+    expect(prompt, label).toContain("This workspace uses jujutsu.");
+    expect(prompt, label).not.toMatch(/read-only/i);
+    expect(prompt, label).not.toContain("Do not edit");
+    expect(prompt, label).not.toMatch(/finding|code-review|specialist/i);
+  }
+});
+
+test("a code-review prompt keeps the reviewer envelope, named or by default (#211)", () => {
+  for (const envelope of ["code-review", undefined] as const) {
+    for (const [label, prompt] of promptsFor(envelope)) {
+      const name = `${label} (${envelope ?? "default"})`;
+      expect(prompt, name).toContain("Stay read-only. Do not edit files.");
+      expect(prompt, name).toContain("code-review");
+      expect(prompt, name).toContain("single top-level key `finding`");
+      expect(prompt, name).toContain("This workspace uses jujutsu.");
+    }
+  }
+});

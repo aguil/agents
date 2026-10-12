@@ -16,7 +16,11 @@ import {
   isUnacceptedLineWarning,
   writeJsonFile,
 } from "@aguil/agents-core";
-import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
+import type {
+  AgentAdapter,
+  AgentRunRequest,
+  PromptEnvelope,
+} from "@aguil/agents-execution";
 import { isFinding } from "@aguil/agents-execution";
 import type { EventSink } from "@aguil/agents-telemetry";
 
@@ -187,6 +191,12 @@ export interface NativeBunOrchestratorOptions {
    * spec stays out of orchestration.
    */
   readonly outputSchemaShapes?: readonly OutputSchemaShape[];
+  /**
+   * The envelope adapters append to each role's prompt, named by the command
+   * that runs the harness (#211). Absent means the adapter's default,
+   * `code-review`.
+   */
+  readonly promptEnvelope?: PromptEnvelope;
   /**
    * Invoked immediately before each role runs. Lets the caller apply
    * role-scoped setup — notably regenerating adapter hook config with the
@@ -543,6 +553,9 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       ...(this.options.outputSchemaShapes === undefined
         ? {}
         : { outputSchemaShapes: this.options.outputSchemaShapes }),
+      ...(this.options.promptEnvelope === undefined
+        ? {}
+        : { envelope: this.options.promptEnvelope }),
       ...(env === undefined ? {} : { env }),
     };
 

@@ -22,6 +22,14 @@ export interface AdapterCapabilities {
   readonly cancellation: boolean;
 }
 
+/**
+ * Which instructions an adapter appends after the role's own prompt (#211).
+ * `code-review` is the reviewer envelope: read-only, findings only.
+ * `harness-run` names the run's inputs and VCS, and gives no role, write or
+ * output rule, so a harness role is told only what its harness says.
+ */
+export type PromptEnvelope = "code-review" | "harness-run";
+
 export interface AgentRunRequest {
   readonly runId: string;
   readonly roleId: string;
@@ -38,6 +46,11 @@ export interface AgentRunRequest {
    * reported as an unaccepted line rather than passed through as stdout (JC-8).
    */
   readonly outputSchemaShapes?: readonly OutputSchemaShape[];
+  /**
+   * The envelope the caller asks for. Absent means `code-review`, the
+   * envelope every request got before the field existed.
+   */
+  readonly envelope?: PromptEnvelope;
   /**
    * Merged into the subprocess environment at spawn time. Per-role policy
    * enforcement identity travels here so hook processes spawned by the agent
@@ -1257,7 +1270,7 @@ export function buildOpenCodeCommand(
     "--file",
     requestPath,
     "--title",
-    `code-review:${request.roleId}`,
+    `${request.envelope ?? "code-review"}:${request.roleId}`,
   ];
 
   if (model !== undefined) {
@@ -1297,14 +1310,38 @@ const FINDING_EVIDENCE_GUIDANCE = [
   "  Cite only what you genuinely did. A fabricated citation is worse than an absent one.",
 ].join("\n");
 
-export function buildOpenCodePrompt(request: AgentRunRequest): string {
+function vcsGuidanceLine(request: AgentRunRequest): string {
   const vcsMode = request.metadata?.vcs_mode;
-  const vcsGuidance =
-    vcsMode === "jj"
-      ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
-      : vcsMode === "git"
-        ? "- This workspace uses git. Prefer `git diff`/`git log`."
-        : "";
+  return vcsMode === "jj"
+    ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
+    : vcsMode === "git"
+      ? "- This workspace uses git. Prefer `git diff`/`git log`."
+      : "";
+}
+
+/**
+ * The `harness-run` envelope: the role's prompt, then only the inputs the run
+ * attached and the workspace's VCS. No role, write or output rule (#211).
+ */
+function buildHarnessRunPrompt(
+  request: AgentRunRequest,
+  requestPath: string,
+): string {
+  const vcsGuidance = vcsGuidanceLine(request);
+  const workspace = vcsGuidance === "" ? "" : `\n\nWorkspace:\n${vcsGuidance}`;
+  return `${request.prompt}
+
+Inputs attached to this run:
+- Context bundle: ${request.contextBundlePath}
+- Machine-readable run request: ${requestPath}${workspace}`;
+}
+
+export function buildOpenCodePrompt(request: AgentRunRequest): string {
+  const requestPath = `${request.scratchpadPath}/${request.roleId}.request.json`;
+  if (request.envelope === "harness-run") {
+    return buildHarnessRunPrompt(request, requestPath);
+  }
+  const vcsGuidance = vcsGuidanceLine(request);
 
   return `${request.prompt}
 
@@ -1312,7 +1349,7 @@ You are running as the ${request.roleId} code-review specialist inside an autono
 
 Inputs attached to this session:
 - Context bundle: ${request.contextBundlePath}
-- Machine-readable run request: ${request.scratchpadPath}/${request.roleId}.request.json
+- Machine-readable run request: ${requestPath}
 
 Rules:
 - Stay read-only. Do not edit files.
@@ -1438,13 +1475,10 @@ export function buildClaudeCodePrompt(
   request: AgentRunRequest,
   requestPath: string,
 ): string {
-  const vcsMode = request.metadata?.vcs_mode;
-  const vcsGuidance =
-    vcsMode === "jj"
-      ? "- This workspace uses jujutsu. Prefer `jj diff`/`jj log` and avoid `git diff`/`git log` here."
-      : vcsMode === "git"
-        ? "- This workspace uses git. Prefer `git diff`/`git log`."
-        : "";
+  if (request.envelope === "harness-run") {
+    return buildHarnessRunPrompt(request, requestPath);
+  }
+  const vcsGuidance = vcsGuidanceLine(request);
 
   return `${request.prompt}
 

@@ -4,6 +4,7 @@ import {
   conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,
+  detectWorkspaceVcsMode,
 } from "@aguil/agents-code-review";
 import type { ContextArtifact } from "@aguil/agents-context";
 import {
@@ -728,6 +729,9 @@ export async function runHarnessRunCli(
     ...(loaded.outputSchemas === undefined
       ? {}
       : { outputSchemaShapes: outputSchemaShapes(loaded.outputSchemas) }),
+    // Not the reviewer envelope: a harness role is told only what its harness
+    // and policy say (#211).
+    promptEnvelope: "harness-run",
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),
     ...(passGate === undefined ? {} : { passGate }),
@@ -755,6 +759,8 @@ export async function runHarnessRunCli(
     criteria: acceptanceCriteriaFromArtifacts(collectedArtifacts),
   });
   const runMetadata = {
+    // The harness-run envelope's VCS guidance reads this, as code-review's does.
+    vcs_mode: await detectWorkspaceVcsMode(workspacePath),
     ...conformanceMetadata,
     ...(cursorApproval === undefined
       ? {}

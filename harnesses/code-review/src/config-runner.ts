@@ -464,6 +464,7 @@ export async function runCodeReviewFromConfig(
   const orchestrator = new NativeBunOrchestrator({
     definition,
     adapter,
+    promptEnvelope: "code-review",
     eventSink:
       options.onEvent === undefined
         ? fileEventSink
