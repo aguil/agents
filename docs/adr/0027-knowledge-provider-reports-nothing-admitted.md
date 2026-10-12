@@ -56,12 +56,15 @@ cases apart. `packages/context/src/knowledge.ts` treats a root it cannot list as
 an empty listing, so an absent store, an unreadable one and an empty one all
 produce the same empty load.
 
-A provider admits no note exactly when no note is eligible. ADR 0022 clause 7
-always admits the highest-ranked eligible note, truncating it to fit if
-necessary, and every bound (`max_notes`, `max_bytes`, `limit`) must be a
-positive integer. So "nothing admitted" never hides a note that a bound pushed
-out; it means the notes the provider read offered nothing that qualified. Those
-are all of the store's notes except when the scan hits its limit: the scan stops
+Nothing admitted usually means nothing eligible, but not always. ADR 0022 clause
+7 admits the highest-ranked eligible note even when it must be truncated, and
+`max_notes` and `limit` must be at least 1, so neither can leave the bundle
+empty. `max_bytes` can: it accepts any positive integer, and a budget too small
+to hold even the truncation marker admits no note at all. Clause 8 then records
+the eligible notes as omitted. So the report has to tell "nothing qualified"
+apart from "notes qualified but the budget admitted none".
+
+It also has to know whether the notes it read were all of them. The scan stops
 after a fixed number of Markdown paths (10,000 by default,
 `DEFAULT_KNOWLEDGE_MAX_SCANNED` in `packages/context/src/knowledge.ts`) and
 records a `scan-truncated` skip. Past that point the store is unread, so a
@@ -106,9 +109,12 @@ truncated scan that admitted nothing cannot say the store held nothing eligible.
        one.
      - `none-eligible`: usable notes exist, but none meets the provider's
        eligibility rule.
-   - `counts`: `files` (Markdown files found), `notes` (usable notes) and
-     `skipped`, all counted over the part of the store that was scanned. They
-     let a reader see how far the store got.
+     - `over-budget`: eligible notes exist, but `max_bytes` was too small to
+       admit any of them. The `<provider>:_meta:admission` report names them as
+       omitted, under ADR 0022 clause 8.
+   - `counts`: `files` (Markdown files found), `notes` (usable notes), `skipped`
+     and `eligible`, all counted over the part of the store that was scanned.
+     They let a reader see how far the store got.
 
    The details of each skipped note stay in `<provider>:_meta:skipped`, as ADR
    0022 clause 8 specifies. This report summarizes; it does not repeat them.
@@ -132,7 +138,7 @@ truncated scan that admitted nothing cannot say the store held nothing eligible.
 **Consequences:**
 
 - A run that declares a knowledge provider and gets no notes now says so, and
-  names which of the seven states applies. The cases a person debugging a
+  names which of the eight states applies. The cases a person debugging a
   harness most often hits, a wrong path or notes not marked `context: auto`,
   read differently in the record.
 - Bundles from runs in projects without a knowledge store gain one small
