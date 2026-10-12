@@ -166,4 +166,4 @@ so it is upheld in review.
   `scan-incomplete`, `no-notes`, `all-skipped`, `none-eligible` or
   `over-budget`); the store's state is determined, not inferred from an empty
   listing; never a failure. Partially supersedes ADR 0022 §4 on what an absent
-  or empty store yields. Proposed.
+  or empty store yields.
