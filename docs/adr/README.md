@@ -130,7 +130,8 @@ so it is upheld in review.
   independent opt-ins for automatic injection, a provider-declared budget with
   binding defaults, recency-then-identifier admission order, and overflow
   recorded in the bundle rather than failing the run. Qualifies ADR 0017 §6 on
-  where the budget is declared.
+  where the budget is declared. Partially superseded by ADR 0027 on what an
+  absent or empty store yields.
 - [0023-hook-generation-beyond-cursor.md](0023-hook-generation-beyond-cursor.md)
   — ADR 0023: hook generation becomes per-adapter and table-driven; the
   enforcement refusal consults a can-this-adapter-deny capability instead of the

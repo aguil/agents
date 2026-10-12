@@ -1,10 +1,13 @@
 # ADR 0027: a knowledge provider that admits no note says so in the bundle
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-10-11 — Proposed.
+- 2026-10-11 — Accepted: by the operator, merged in #263. Decisions only; the
+  implementation follows against #210. From here this ADR is immutable except
+  for these status fields.
 
 **Context:** ADR 0022 gave harnesses two knowledge providers. `knowledge`
 injects notes marked `context: auto`, and `knowledge-search` returns notes

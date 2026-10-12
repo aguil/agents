@@ -1,6 +1,6 @@
 # ADR 0022: knowledge read path — store layout, note frontmatter, and bounded context admission
 
-**Status:** Accepted
+**Status:** Partially superseded by ADR 0027
 
 **Status history:**
 
@@ -8,6 +8,11 @@
 - 2026-08-02 — Accepted: merged with the knowledge read-path implementation.
   Partially supersedes ADR 0017 §6 on budget placement (provider params for the
   read path; the `knowledge:` block remains deferred to the write path).
+- 2026-10-11 — Partially superseded by ADR 0027: in clause 4, the words "yields
+  no artifacts" in "An absent or empty store yields no artifacts rather than an
+  error". ADR 0027 has a provider that admits no note add one report artifact to
+  the bundle instead. "Rather than an error" stands, as do the rest of clause 4
+  and every other clause.
 
 **Context:** ADR 0017 governs how a harness run may _write_ knowledge notes. It
 answers three questions about staged notes — a required frontmatter schema whose
