@@ -1,10 +1,13 @@
 # ADR 0028: `agents` applies a user hook's `matcher` and `applies_to` at call time, on Cursor and Claude Code
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-10-12 — Proposed.
+- 2026-10-12 — Accepted: by the operator, merged in #267. Decisions only; the
+  implementation follows against #235 and #220. From here this ADR is immutable
+  except for these status fields.
 
 **Context:** A tool-call handler in `harness.yaml` scopes itself in two ways:
 `matcher`, a regex over tool names (spec v0.1), and `applies_to`, a list of

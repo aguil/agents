@@ -1,6 +1,6 @@
 # ADR 0006: Harness governance Phase 1 — loader, policy evaluation, hook config
 
-**Status:** Partially superseded by ADR 0026
+**Status:** Partially superseded by ADR 0026 and ADR 0028
 
 **Status history:**
 
@@ -9,6 +9,11 @@
   on how exec rules match. ADR 0026 resolves the program and subcommand for deny
   rules and keeps a word prefix, on the tokenizer's words, for allow rules. The
   rest of §2 stands.
+- 2026-10-12 — Partially superseded by ADR 0028: §4's Cursor mapping, for
+  harness-declared hooks, which also register on `preToolUse` (edit),
+  `afterShellExecution` and `afterMCPExecution`; and an exception to §3 for
+  those three events, which carry user hooks and no bridge. The rest of §3 and
+  §4 stands.
 
 **Context:** ADR 0005 generalized the core types and orchestration for
 multi-harness support and forecast a governance layer: configuration loaded from
