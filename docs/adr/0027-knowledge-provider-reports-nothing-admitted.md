@@ -33,7 +33,8 @@ any of these reasons:
 - the root exists but is not a directory that can be listed;
 - the root resolves outside the workspace;
 - the store holds no Markdown notes;
-- every note was skipped as malformed under ADR 0022 clause 4;
+- every note was skipped: malformed under ADR 0022 clause 4, unreadable, or a
+  link resolving outside the workspace under clause 2;
 - usable notes exist but none is eligible: for `knowledge`, none carries
   `context: auto`, and for `knowledge-search`, none matches the tags and
   provenance asked for.
@@ -112,8 +113,10 @@ held nothing eligible.
        `unreadable` entry. The states below would claim more than is known, so
        this one takes precedence over them.
      - `no-notes`: the directory was listed and holds no Markdown file.
-     - `all-skipped`: Markdown files exist, but ADR 0022 clause 4 skipped every
-       one.
+     - `all-skipped`: Markdown files exist, but every one was skipped as a note:
+       malformed under ADR 0022 clause 4, unreadable, or resolving outside the
+       workspace under clause 2. Each skip is listed in
+       `<provider>:_meta:skipped`.
      - `none-eligible`: usable notes exist, but none meets the provider's
        eligibility rule.
    - `counts`: `files` (Markdown files found), `notes` (usable notes), and
