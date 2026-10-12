@@ -140,6 +140,13 @@ export async function main(
     return await runSkillsCli(argv.slice(1));
   }
 
+  // Generated tool-call hooks run this on every gated call (ADR 0028), with
+  // the handler's command as an argument, so no help resolver sees it.
+  if (argv[0] === "hook-gate") {
+    const { runHookGateCli } = await import("./hook-gate-main");
+    return await runHookGateCli(argv.slice(1));
+  }
+
   const triageHelpReq = resolveTriageHelp(argv);
   if (triageHelpReq !== null) {
     console.log(renderTriageHelp(triageHelpReq));

@@ -19,10 +19,14 @@ export {
   adapterHookCapabilities,
   adapterProbeEventNames,
   allEnforceableProbeEventNames,
+  bridgeRunsOn,
   HOOK_ADAPTER_IDS,
+  HOOK_CLASS_TOOL_NAMES,
   type HookAdapterId,
+  type NativeToolEvent,
+  type ToolNameSource,
+  toolNameClass,
 } from "./adapter-table";
-
 export {
   assertWellFormedClaudeSettings,
   type ClaudeHookEvent,
@@ -34,6 +38,16 @@ export {
   generateClaudeHooksConfig,
   renderClaudeSettingsConfig,
 } from "./claude";
+export {
+  compileHookMatcher,
+  decideHookGate,
+  type HookGateAdapter,
+  type HookGateArgs,
+  type HookGateDecision,
+  hookGateCommand,
+  parseHookGateArgv,
+  shellWord,
+} from "./gate";
 
 /** Cursor hook events we target (subset relevant to command handlers). */
 export type CursorHookEvent =
