@@ -58,11 +58,12 @@ produce the same empty load.
 
 Under ADR 0022, admitting nothing means nothing was eligible. Clause 7 always
 admits the highest-ranked eligible note, truncating it into the budget if it
-must, so no bound can leave the bundle empty while an eligible note exists. The
-implementation at the time of writing departs from clause 7 in one corner: a
-`max_bytes` too small to hold the truncation marker drops the top note instead
-of admitting it. That is a defect in the implementation, to be corrected so that
-such a budget fails as malformed configuration under clause 4. It is not a case
+must, so no bound can leave the bundle empty while an eligible note exists.
+Until #264, the implementation departed from clause 7 in two ways that could
+drop the top note. One was a `max_bytes` too small to hold the truncation
+marker. The other was a cut that landed inside a multibyte character. #264
+corrected both: such a budget now fails at resolution as malformed configuration
+under clause 4, and truncation cuts at a character boundary. Neither is a case
 this report models.
 
 It also has to know whether the notes it read were all of them. Two things leave
