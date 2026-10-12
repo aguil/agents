@@ -609,3 +609,49 @@ test("KnowledgeSearchProvider honors limit without requiring context:auto", asyn
     expect(notes).toHaveLength(2);
   });
 });
+
+test("KnowledgeProvider stops admitting at the first note the bytes left cannot hold", async () => {
+  await withWorkspace(async (workspacePath) => {
+    // 90 bytes leave 10 of 100: too few for the long second note's truncation
+    // marker. The 5-byte third note would still fit, but admitting it would
+    // break the prefix ADR 0022 §7 requires, so it is omitted too.
+    const notes = [
+      ["first", "2026-03-01T00:00:00Z", "F".repeat(90)],
+      ["second", "2026-02-01T00:00:00Z", "S".repeat(500)],
+      ["third", "2026-01-01T00:00:00Z", "T".repeat(5)],
+    ] as const;
+    for (const [id, updatedAt, body] of notes) {
+      await writeNote(
+        workspacePath,
+        `.agents/knowledge/${id}.md`,
+        [
+          "---",
+          `id: ${id}`,
+          "context: auto",
+          `updatedAt: ${updatedAt}`,
+          "---",
+          body,
+        ].join("\n"),
+      );
+    }
+
+    const artifacts = await new KnowledgeProvider({ maxBytes: 100 }).collect({
+      workspacePath,
+      scratchpadPath: join(workspacePath, ".scratch"),
+    });
+    const admission = artifacts.find(
+      (artifact) => artifact.id === "knowledge:_meta:admission",
+    );
+    const record = JSON.parse(admission?.content ?? "{}") as {
+      admitted: string[];
+      omitted: string[];
+      bound?: string;
+    };
+    expect(record.admitted).toEqual(["first"]);
+    expect(record.omitted).toEqual(["second", "third"]);
+    expect(record.bound).toBe("max_bytes");
+    expect(artifacts.map((artifact) => artifact.id)).not.toContain(
+      "knowledge:third",
+    );
+  });
+});

@@ -502,6 +502,9 @@ function admitNotesByBudget(
   let remainingBytes = options.maxBytes;
   let bound: KnowledgeBoundHit | undefined;
   const noteCap = options.limit ?? options.maxNotes;
+  // Once a note does not fit in what remains, the budget is spent: admission
+  // stops there, so the admitted set stays a prefix of the order (ADR 0022 §7).
+  let budgetSpent = false;
 
   for (const note of sorted) {
     if (noteCap !== undefined && admitted.length >= noteCap) {
@@ -509,8 +512,11 @@ function admitNotesByBudget(
       bound ??= options.limit !== undefined ? "limit" : "max_notes";
       continue;
     }
-    const content = truncateWithinBudget(note.body, remainingBytes);
+    const content = budgetSpent
+      ? undefined
+      : truncateWithinBudget(note.body, remainingBytes);
     if (content === undefined) {
+      budgetSpent = true;
       omitted.push(note);
       bound ??= "max_bytes";
       continue;
