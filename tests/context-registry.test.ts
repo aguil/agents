@@ -7,6 +7,7 @@ import {
   AgentsInstructionsProvider,
   BUILTIN_CONTEXT_PROVIDER_NAMES,
   FileGlobProvider,
+  KNOWLEDGE_MIN_MAX_BYTES,
   KnowledgeProvider,
   KnowledgeSearchProvider,
   PullRequestMetadataProvider,
@@ -177,4 +178,34 @@ test("provider params are strictly typed", () => {
   expect(() => resolveContextProvider("knowledge", { extra: true })).toThrow(
     "unsupported params: extra",
   );
+});
+
+test("a knowledge provider's max_bytes must hold a truncation marker (ADR 0022 §4, §7)", () => {
+  // The shortest marker a truncated note can carry.
+  expect(KNOWLEDGE_MIN_MAX_BYTES).toBe(
+    Buffer.byteLength("\n[truncated at 0 bytes]", "utf8"),
+  );
+  for (const [use, base] of [
+    ["knowledge", {}],
+    ["knowledge-search", { tags: ["security"] }],
+  ] as const) {
+    expect(() =>
+      resolveContextProvider(use, {
+        ...base,
+        max_bytes: KNOWLEDGE_MIN_MAX_BYTES - 1,
+      }),
+    ).toThrow(
+      `context provider "${use}" param "max_bytes" must be at least ${KNOWLEDGE_MIN_MAX_BYTES}, the size of a truncation marker`,
+    );
+    expect(() =>
+      resolveContextProvider(use, {
+        ...base,
+        max_bytes: KNOWLEDGE_MIN_MAX_BYTES,
+      }),
+    ).not.toThrow();
+  }
+  // Other providers' max_bytes keep their own rule: any positive integer.
+  expect(() =>
+    resolveContextProvider("acceptance-criteria", { max_bytes: 1 }),
+  ).not.toThrow();
 });

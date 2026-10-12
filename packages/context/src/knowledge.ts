@@ -39,6 +39,22 @@ export const DEFAULT_KNOWLEDGE_MAX_SCANNED = 10_000;
  */
 export const DEFAULT_KNOWLEDGE_READ_BYTES = DEFAULT_KNOWLEDGE_MAX_BYTES;
 
+/** The marker appended to a note truncated into the admission budget. */
+function truncationMarker(keptBytes: number): string {
+  return `\n[truncated at ${keptBytes} bytes]`;
+}
+
+/**
+ * The smallest `max_bytes` a knowledge provider accepts: the shortest
+ * truncation marker. Below it the top-ranked note could not be truncated into
+ * the budget and admitted, which ADR 0022 §7 guarantees, so a smaller budget is
+ * malformed configuration and fails at resolution (ADR 0022 §4).
+ */
+export const KNOWLEDGE_MIN_MAX_BYTES = Buffer.byteLength(
+  truncationMarker(0),
+  "utf8",
+);
+
 export type KnowledgeContextMode = "auto" | "search-only";
 
 export type KnowledgeProvenanceFilter = "any" | "machine" | "human";
@@ -452,6 +468,22 @@ export async function loadKnowledgeStore(
  * truncation marker when one is needed. The shared truncateArtifactContent
  * helper can overshoot by the marker length; aggregate admission cannot.
  */
+/**
+ * The longest prefix of `content` whose UTF-8 encoding fits in `maxBytes`,
+ * cut at a character boundary. Slicing mid-character would decode the partial
+ * bytes as U+FFFD, three bytes each, which both corrupts the kept text and can
+ * make the result larger than the budget it was cut to.
+ */
+function utf8Prefix(content: string, maxBytes: number): string {
+  const bytes = Buffer.from(content, "utf8");
+  let end = Math.min(maxBytes, bytes.length);
+  // A byte of the form 0b10xxxxxx continues the character before it.
+  while (end > 0 && end < bytes.length && ((bytes[end] ?? 0) & 0xc0) === 0x80) {
+    end -= 1;
+  }
+  return bytes.subarray(0, end).toString("utf8");
+}
+
 function truncateWithinBudget(
   content: string,
   maxBytes: number,
@@ -462,18 +494,15 @@ function truncateWithinBudget(
   if (Buffer.byteLength(content, "utf8") <= maxBytes) {
     return content;
   }
-  const markerFor = (n: number): string => `\n[truncated at ${n} bytes]`;
   // Worst-case marker length for this budget (digits grow slowly with n).
   let cut = maxBytes;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const marker = markerFor(cut);
+    const marker = truncationMarker(cut);
     const markerBytes = Buffer.byteLength(marker, "utf8");
     const headBudget = Math.max(0, maxBytes - markerBytes);
-    const head = Buffer.from(content, "utf8")
-      .subarray(0, headBudget)
-      .toString("utf8");
+    const head = utf8Prefix(content, headBudget);
     const actualCut = Buffer.byteLength(head, "utf8");
-    const result = `${head}${markerFor(actualCut)}`;
+    const result = `${head}${truncationMarker(actualCut)}`;
     if (Buffer.byteLength(result, "utf8") <= maxBytes) {
       return result;
     }
@@ -502,6 +531,9 @@ function admitNotesByBudget(
   let remainingBytes = options.maxBytes;
   let bound: KnowledgeBoundHit | undefined;
   const noteCap = options.limit ?? options.maxNotes;
+  // Once a note does not fit in what remains, the budget is spent: admission
+  // stops there, so the admitted set stays a prefix of the order (ADR 0022 §7).
+  let budgetSpent = false;
 
   for (const note of sorted) {
     if (noteCap !== undefined && admitted.length >= noteCap) {
@@ -509,8 +541,11 @@ function admitNotesByBudget(
       bound ??= options.limit !== undefined ? "limit" : "max_notes";
       continue;
     }
-    const content = truncateWithinBudget(note.body, remainingBytes);
+    const content = budgetSpent
+      ? undefined
+      : truncateWithinBudget(note.body, remainingBytes);
     if (content === undefined) {
+      budgetSpent = true;
       omitted.push(note);
       bound ??= "max_bytes";
       continue;

@@ -20,6 +20,7 @@ import {
   truncateArtifactContent,
 } from "./fs-bounds";
 import {
+  KNOWLEDGE_MIN_MAX_BYTES,
   type KnowledgeProvenanceFilter,
   KnowledgeProvider,
   KnowledgeSearchProvider,
@@ -41,6 +42,7 @@ export {
   DEFAULT_KNOWLEDGE_READ_BYTES,
   DEFAULT_KNOWLEDGE_SEARCH_LIMIT,
   DEFAULT_MACHINE_ID_PREFIX,
+  KNOWLEDGE_MIN_MAX_BYTES,
   type KnowledgeAdmission,
   type KnowledgeBoundHit,
   type KnowledgeContextMode,
@@ -498,6 +500,25 @@ function optionalContextPositiveInt(
   return value;
 }
 
+/**
+ * A knowledge provider's `max_bytes`: a positive integer no smaller than the
+ * shortest truncation marker, so the top-ranked note can always be truncated
+ * into the budget and admitted (ADR 0022 §7). A smaller budget is malformed
+ * configuration and fails here, at resolution (ADR 0022 §4).
+ */
+function optionalKnowledgeMaxBytes(
+  params: Record<string, unknown>,
+  use: string,
+): number | undefined {
+  const value = optionalContextPositiveInt(params, "max_bytes", use);
+  if (value !== undefined && value < KNOWLEDGE_MIN_MAX_BYTES) {
+    throw new Error(
+      `context provider "${use}" param "max_bytes" must be at least ${KNOWLEDGE_MIN_MAX_BYTES}, the size of a truncation marker`,
+    );
+  }
+  return value;
+}
+
 function optionalContextBoolean(
   params: Record<string, unknown>,
   key: string,
@@ -716,11 +737,9 @@ const CONTEXT_PROVIDER_FACTORIES: Readonly<
         : {
             maxNotes: optionalContextPositiveInt(record, "max_notes", use),
           }),
-      ...(optionalContextPositiveInt(record, "max_bytes", use) === undefined
+      ...(optionalKnowledgeMaxBytes(record, use) === undefined
         ? {}
-        : {
-            maxBytes: optionalContextPositiveInt(record, "max_bytes", use),
-          }),
+        : { maxBytes: optionalKnowledgeMaxBytes(record, use) }),
     });
   },
   "knowledge-search": (params) => {
@@ -756,11 +775,9 @@ const CONTEXT_PROVIDER_FACTORIES: Readonly<
       ...(optionalContextString(record, "path", use) === undefined
         ? {}
         : { path: optionalContextString(record, "path", use) }),
-      ...(optionalContextPositiveInt(record, "max_bytes", use) === undefined
+      ...(optionalKnowledgeMaxBytes(record, use) === undefined
         ? {}
-        : {
-            maxBytes: optionalContextPositiveInt(record, "max_bytes", use),
-          }),
+        : { maxBytes: optionalKnowledgeMaxBytes(record, use) }),
     });
   },
 };

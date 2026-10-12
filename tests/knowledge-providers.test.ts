@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   compareKnowledgeNotesForAdmission,
+  KNOWLEDGE_MIN_MAX_BYTES,
   type KnowledgeNote,
   KnowledgeProvider,
   KnowledgeSearchProvider,
@@ -607,5 +608,110 @@ test("KnowledgeSearchProvider honors limit without requiring context:auto", asyn
         !artifact.id.endsWith(":_meta:skipped"),
     );
     expect(notes).toHaveLength(2);
+  });
+});
+
+test("KnowledgeProvider stops admitting at the first note the bytes left cannot hold", async () => {
+  await withWorkspace(async (workspacePath) => {
+    // 90 bytes leave 10 of 100: too few for the long second note's truncation
+    // marker. The 5-byte third note would still fit, but admitting it would
+    // break the prefix ADR 0022 §7 requires, so it is omitted too.
+    const notes = [
+      ["first", "2026-03-01T00:00:00Z", "F".repeat(90)],
+      ["second", "2026-02-01T00:00:00Z", "S".repeat(500)],
+      ["third", "2026-01-01T00:00:00Z", "T".repeat(5)],
+    ] as const;
+    for (const [id, updatedAt, body] of notes) {
+      await writeNote(
+        workspacePath,
+        `.agents/knowledge/${id}.md`,
+        [
+          "---",
+          `id: ${id}`,
+          "context: auto",
+          `updatedAt: ${updatedAt}`,
+          "---",
+          body,
+        ].join("\n"),
+      );
+    }
+
+    const artifacts = await new KnowledgeProvider({ maxBytes: 100 }).collect({
+      workspacePath,
+      scratchpadPath: join(workspacePath, ".scratch"),
+    });
+    const admission = artifacts.find(
+      (artifact) => artifact.id === "knowledge:_meta:admission",
+    );
+    const record = JSON.parse(admission?.content ?? "{}") as {
+      admitted: string[];
+      omitted: string[];
+      bound?: string;
+    };
+    expect(record.admitted).toEqual(["first"]);
+    expect(record.omitted).toEqual(["second", "third"]);
+    expect(record.bound).toBe("max_bytes");
+    expect(artifacts.map((artifact) => artifact.id)).not.toContain(
+      "knowledge:third",
+    );
+  });
+});
+
+test("at the minimum max_bytes the top-ranked note is admitted as a marker (ADR 0022 §7)", async () => {
+  await withWorkspace(async (workspacePath) => {
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/leader.md",
+      ["---", "id: leader", "context: auto", "---", "L".repeat(200)].join("\n"),
+    );
+    const artifacts = await new KnowledgeProvider({
+      maxBytes: KNOWLEDGE_MIN_MAX_BYTES,
+    }).collect({
+      workspacePath,
+      scratchpadPath: join(workspacePath, ".scratch"),
+    });
+    const leader = artifacts.find(
+      (artifact) => artifact.id === "knowledge:leader",
+    );
+    // The whole budget is the marker: the note is admitted with no content
+    // bytes, and the truncation is marked, as clause 7 promises.
+    expect(leader?.content).toBe("\n[truncated at 0 bytes]");
+    expect(Buffer.byteLength(leader?.content ?? "", "utf8")).toBe(
+      KNOWLEDGE_MIN_MAX_BYTES,
+    );
+  });
+});
+
+test("a truncated note is cut at a character boundary at every budget from the floor up (ADR 0022 §7)", async () => {
+  await withWorkspace(async (workspacePath) => {
+    // One-, two-, three- and four-byte characters, so some budget lands
+    // inside each width.
+    const body = "aé中😀".repeat(20);
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/leader.md",
+      ["---", "id: leader", "context: auto", "---", body].join("\n"),
+    );
+    for (
+      let maxBytes = KNOWLEDGE_MIN_MAX_BYTES;
+      maxBytes <= 60;
+      maxBytes += 1
+    ) {
+      const artifacts = await new KnowledgeProvider({ maxBytes }).collect({
+        workspacePath,
+        scratchpadPath: join(workspacePath, ".scratch"),
+      });
+      const content = artifacts.find(
+        (artifact) => artifact.id === "knowledge:leader",
+      )?.content;
+      expect(content, `max_bytes ${maxBytes}`).toBeDefined();
+      const kept = (content ?? "").replace(/\n\[truncated at \d+ bytes\]$/, "");
+      expect(kept, `max_bytes ${maxBytes}`).not.toContain("�");
+      expect(body.startsWith(kept), `max_bytes ${maxBytes}`).toBe(true);
+      expect(
+        Buffer.byteLength(content ?? "", "utf8"),
+        `max_bytes ${maxBytes}`,
+      ).toBeLessThanOrEqual(maxBytes);
+    }
   });
 });
