@@ -97,9 +97,11 @@ held nothing eligible.
    content is a JSON object with these fields:
    - `provider`: `knowledge` or `knowledge-search`.
    - `path`: the store path as declared, or the default `.agents/knowledge`.
-   - `request`: the params that decide eligibility. For `knowledge-search`, that
-     is `tags`, `provenance` and `machine_id_prefix`. For `knowledge`, it is the
-     fixed rule that only `context: auto` notes are eligible.
+   - `request`: a JSON object of what decides eligibility, with the values in
+     effect, defaults included. For `knowledge-search` it is
+     `{"tags": [...], "provenance": "any" | "machine" | "human", "machine_id_prefix": "<prefix>"}`,
+     with `tags` as declared. For `knowledge`, which takes no eligibility param,
+     it is always `{"context": "auto"}`, the one rule ADR 0022 clause 5 applies.
    - `store`: exactly one of the states below, the first that applies in this
      order.
      - `outside-workspace`: the path resolves outside the workspace.
