@@ -60,7 +60,12 @@ A provider admits no note exactly when no note is eligible. ADR 0022 clause 7
 always admits the highest-ranked eligible note, truncating it to fit if
 necessary, and every bound (`max_notes`, `max_bytes`, `limit`) must be a
 positive integer. So "nothing admitted" never hides a note that a bound pushed
-out; it always means the store offered nothing that qualified.
+out; it means the notes the provider read offered nothing that qualified. Those
+are all of the store's notes except when the scan hits its limit: the scan stops
+after a fixed number of Markdown paths (10,000 by default,
+`DEFAULT_KNOWLEDGE_MAX_SCANNED` in `packages/context/src/knowledge.ts`) and
+records a `scan-truncated` skip. Past that point the store is unread, so a
+truncated scan that admitted nothing cannot say the store held nothing eligible.
 
 **Decision:**
 
@@ -93,13 +98,17 @@ out; it always means the store offered nothing that qualified.
      - `absent`: nothing exists at the path.
      - `unreadable`: something exists at the path but cannot be listed as a
        directory.
+     - `scan-truncated`: the scan stopped at its path limit, so part of the
+       store was never read. The states below would claim more than is known, so
+       this one takes precedence over them.
      - `no-notes`: the directory was listed and holds no Markdown file.
      - `all-skipped`: Markdown files exist, but ADR 0022 clause 4 skipped every
        one.
      - `none-eligible`: usable notes exist, but none meets the provider's
        eligibility rule.
    - `counts`: `files` (Markdown files found), `notes` (usable notes) and
-     `skipped`. They let a reader see how far the store got.
+     `skipped`, all counted over the part of the store that was scanned. They
+     let a reader see how far the store got.
 
    The details of each skipped note stay in `<provider>:_meta:skipped`, as ADR
    0022 clause 8 specifies. This report summarizes; it does not repeat them.
@@ -123,9 +132,9 @@ out; it always means the store offered nothing that qualified.
 **Consequences:**
 
 - A run that declares a knowledge provider and gets no notes now says so, and
-  says which of six causes applies. The cases a person debugging a harness most
-  often hits, a wrong path or notes not marked `context: auto`, read differently
-  in the record.
+  names which of the seven states applies. The cases a person debugging a
+  harness most often hits, a wrong path or notes not marked `context: auto`,
+  read differently in the record.
 - Bundles from runs in projects without a knowledge store gain one small
   artifact per declared provider. Consumers that list or count artifacts see it;
   the reserved `_meta:` identifier lets them filter it out, as they already can
