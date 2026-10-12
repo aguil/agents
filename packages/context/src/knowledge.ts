@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   readBoundedFile,
@@ -86,10 +86,39 @@ export interface KnowledgeSkip {
   readonly detail?: string;
 }
 
+/**
+ * The store root's state, determined before the scan rather than inferred from
+ * an empty listing (ADR 0027 §4). `listed` means the root was a directory the
+ * scan could list.
+ */
+export type KnowledgeStoreRoot =
+  | "outside-workspace"
+  | "absent"
+  | "unreadable"
+  | "listed";
+
 export interface KnowledgeStoreLoad {
   readonly notes: readonly KnowledgeNote[];
   readonly skipped: readonly KnowledgeSkip[];
+  readonly root: KnowledgeStoreRoot;
+  /** Markdown files found, over the part of the store that was scanned. */
+  readonly files: number;
+  /**
+   * True when part of the store was never read: the scan hit its path limit,
+   * or a directory inside the store could not be listed (ADR 0027 §3, §4).
+   */
+  readonly scanIncomplete: boolean;
 }
+
+/** Why a provider that admitted no note admitted none (ADR 0027 §3). */
+export type KnowledgeNothingAdmittedState =
+  | "outside-workspace"
+  | "absent"
+  | "unreadable"
+  | "scan-incomplete"
+  | "no-notes"
+  | "all-skipped"
+  | "none-eligible";
 
 export type KnowledgeBoundHit = "max_notes" | "max_bytes" | "limit";
 
@@ -323,8 +352,13 @@ export function noteMatchesProvenance(
 async function listKnowledgeMarkdownFiles(
   root: string,
   maxScanned: number,
-): Promise<{ readonly files: readonly string[]; readonly truncated: boolean }> {
+): Promise<{
+  readonly files: readonly string[];
+  readonly truncated: boolean;
+  readonly unreadableDirs: readonly string[];
+}> {
   const found: string[] = [];
+  const unreadableDirs: string[] = [];
   let truncated = false;
   async function walk(relativeDir: string): Promise<void> {
     if (truncated || found.length >= maxScanned) {
@@ -334,7 +368,13 @@ async function listKnowledgeMarkdownFiles(
     let entries: Dirent<string>[];
     try {
       entries = await readdir(join(root, relativeDir), { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      // The root failing to list is the caller's to classify; a subdirectory
+      // failing leaves the scan incomplete, never silently short (ADR 0027 §4).
+      if (relativeDir === "") {
+        throw error;
+      }
+      unreadableDirs.push(relativeDir);
       return;
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -359,7 +399,7 @@ async function listKnowledgeMarkdownFiles(
     }
   }
   await walk("");
-  return { files: found, truncated };
+  return { files: found, truncated, unreadableDirs };
 }
 
 export interface LoadKnowledgeStoreOptions {
@@ -390,23 +430,56 @@ export async function loadKnowledgeStore(
           detail: "knowledge store path escapes the workspace",
         },
       ],
+      root: "outside-workspace",
+      files: 0,
+      scanIncomplete: false,
     };
+  }
+
+  // Absent, unreadable and empty are told apart before scanning, and none is
+  // an error (ADR 0022 §4, ADR 0027 §1, §4).
+  const unscanned = (state: "absent" | "unreadable"): KnowledgeStoreLoad => ({
+    notes: [],
+    skipped: [],
+    root: state,
+    files: 0,
+    scanIncomplete: false,
+  });
+  try {
+    if (!(await stat(root)).isDirectory()) {
+      return unscanned("unreadable");
+    }
+  } catch (error) {
+    return unscanned(
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+        ? "absent"
+        : "unreadable",
+    );
   }
 
   let relativeMatches: readonly string[] = [];
   let scanTruncated = false;
+  let unreadableDirs: readonly string[] = [];
   try {
     const listed = await listKnowledgeMarkdownFiles(root, maxScanned);
     relativeMatches = listed.files;
     scanTruncated = listed.truncated;
+    unreadableDirs = listed.unreadableDirs;
   } catch {
-    // Absent or unreadable root → empty store, not an error.
-    return { notes: [], skipped: [] };
+    return unscanned("unreadable");
   }
 
   const notes: KnowledgeNote[] = [];
   const skipped: KnowledgeSkip[] = [];
   const seenIds = new Map<string, string>();
+
+  for (const dir of unreadableDirs) {
+    skipped.push({
+      path: join(storePath, dir),
+      reason: "unreadable",
+      detail: "directory could not be listed",
+    });
+  }
 
   if (scanTruncated) {
     skipped.push({
@@ -460,7 +533,13 @@ export async function loadKnowledgeStore(
     notes.push(parsed.note);
   }
 
-  return { notes, skipped };
+  return {
+    notes,
+    skipped,
+    root: "listed",
+    files: relativeMatches.length,
+    scanIncomplete: scanTruncated || unreadableDirs.length > 0,
+  };
 }
 
 /**
@@ -585,6 +664,59 @@ function metaArtifacts(
   return artifacts;
 }
 
+/**
+ * The first state in ADR 0027 §3's order that applies to a load whose
+ * provider admitted no note.
+ */
+export function knowledgeNothingAdmittedState(
+  loaded: KnowledgeStoreLoad,
+): KnowledgeNothingAdmittedState {
+  if (loaded.root !== "listed") {
+    return loaded.root;
+  }
+  if (loaded.scanIncomplete) {
+    return "scan-incomplete";
+  }
+  if (loaded.files === 0) {
+    return "no-notes";
+  }
+  if (loaded.notes.length === 0) {
+    return "all-skipped";
+  }
+  return "none-eligible";
+}
+
+/**
+ * ADR 0027 §2-§3: a provider that admits no note says so, naming what was
+ * asked for and why nothing qualified. A record only; never a failure.
+ */
+function nothingAdmittedArtifact(
+  provider: "knowledge" | "knowledge-search",
+  path: string,
+  request: Readonly<Record<string, unknown>>,
+  loaded: KnowledgeStoreLoad,
+): ContextArtifact {
+  return {
+    id: `${provider}:_meta:nothing-admitted`,
+    title: "Knowledge: nothing admitted",
+    content: JSON.stringify(
+      {
+        provider,
+        path,
+        request,
+        store: knowledgeNothingAdmittedState(loaded),
+        counts: {
+          files: loaded.files,
+          notes: loaded.notes.length,
+          skipped: loaded.skipped.length,
+        },
+      },
+      null,
+      2,
+    ),
+  };
+}
+
 function noteArtifacts(
   idPrefix: string,
   notes: readonly KnowledgeNote[],
@@ -625,6 +757,16 @@ export class KnowledgeProvider implements ContextProvider {
     return [
       ...noteArtifacts("knowledge", result.admitted, result.contents),
       ...metaArtifacts("knowledge", loaded.skipped, admission),
+      ...(result.admitted.length === 0
+        ? [
+            nothingAdmittedArtifact(
+              "knowledge",
+              storePath,
+              { context: "auto" },
+              loaded,
+            ),
+          ]
+        : []),
     ];
   }
 }
@@ -666,6 +808,20 @@ export class KnowledgeSearchProvider implements ContextProvider {
     return [
       ...noteArtifacts("knowledge-search", result.admitted, result.contents),
       ...metaArtifacts("knowledge-search", loaded.skipped, admission),
+      ...(result.admitted.length === 0
+        ? [
+            nothingAdmittedArtifact(
+              "knowledge-search",
+              storePath,
+              {
+                tags: this.options.tags,
+                provenance,
+                machine_id_prefix: machineIdPrefix,
+              },
+              loaded,
+            ),
+          ]
+        : []),
     ];
   }
 }
