@@ -10,6 +10,15 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.12](https://github.com/aguil/agents/compare/v0.8.11...v0.8.12) (2026-10-12)
+
+
+### Fixed
+
+* **execution:** Claude roles record their stream, tool calls and denials, in stdout.log ([94979c7](https://github.com/aguil/agents/commit/94979c7724341623d9ef273340ef87f154696646)), closes [#252](https://github.com/aguil/agents/issues/252)
+* **execution:** skip Claude Code's copies of tool input in its stream ([447aabb](https://github.com/aguil/agents/commit/447aabb269bd205245d4e4284acc6b1191f197d7)), closes [#252](https://github.com/aguil/agents/issues/252)
+* **execution:** treat Claude's rate_limit_event as CLI output ([942ff1d](https://github.com/aguil/agents/commit/942ff1dc9a752fd4d17ae15fd15681e6f76984fc)), closes [#252](https://github.com/aguil/agents/issues/252)
+
 ## [0.8.11](https://github.com/aguil/agents/compare/v0.8.10...v0.8.11) (2026-10-12)
 
 
