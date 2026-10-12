@@ -9,7 +9,9 @@ import {
   ADAPTER_HOOK_CAPABILITIES,
   adapterDispatchableEvents,
   adapterHookCapabilities,
+  bridgeRunsOn,
 } from "./adapter-table";
+import { hookGateCommand, shellWord } from "./gate";
 
 export {
   ADAPTER_HOOK_CAPABILITIES,
@@ -54,7 +56,10 @@ export type CursorHookEvent =
   | "beforeShellExecution"
   | "beforeMCPExecution"
   | "beforeReadFile"
+  | "preToolUse"
   | "afterFileEdit"
+  | "afterShellExecution"
+  | "afterMCPExecution"
   | "stop";
 
 /**
@@ -87,6 +92,42 @@ export function cursorReadHookWithheldWarning(version: string): string {
     `hooks: beforeReadFile withheld — ${why} ` +
     `(supported: ${CURSOR_READ_HOOK_VERSIONS.join(", ")}), so Cursor's ` +
     "native file reads are not checked against filesystem rules in this run"
+  );
+}
+
+/**
+ * `cursor-agent` versions measured to fire the user-hook events ADR 0028
+ * adds, `preToolUse`, `afterShellExecution` and `afterMCPExecution`, headless.
+ * Exact versions only, as for `CURSOR_READ_HOOK_VERSIONS`, which measures a
+ * different property: an event the installed CLI does not know silently
+ * stops every other hook in the workspace, the bridge included (#239).
+ */
+export const CURSOR_USER_HOOK_EVENT_VERSIONS: readonly string[] = [
+  "2026.10.01-14929f9",
+];
+
+/** Whether ADR 0028's added user-hook events may be written for this version. */
+export function cursorSupportsUserHookEvents(version: string): boolean {
+  return CURSOR_USER_HOOK_EVENT_VERSIONS.includes(version.trim());
+}
+
+/**
+ * The warning printed when the added user-hook events are withheld (ADR 0028
+ * decision 5): the harness's tool-call hooks miss those calls on this CLI.
+ */
+export function cursorUserHookEventsWithheldWarning(
+  version: string,
+  withheld: readonly string[],
+): string {
+  const found = version.trim();
+  const why =
+    found === ""
+      ? "the installed cursor-agent's version could not be read"
+      : `cursor-agent ${found} is not a version measured to fire them`;
+  return (
+    `hooks: ${withheld.join(", ")} withheld — ${why} ` +
+    `(supported: ${CURSOR_USER_HOOK_EVENT_VERSIONS.join(", ")}), so the ` +
+    "harness's tool-call hooks do not run on those events' calls in this run (ADR 0028)"
   );
 }
 
@@ -223,33 +264,6 @@ export function hookEventAdapterDispatchability(): ReadonlyArray<{
   return rows;
 }
 
-/**
- * Event-class classification of Cursor tool events (spec v0.2
- * `applies_to`). A handler scoped to a class list only registers on Cursor
- * events belonging to those classes, so a shell-only handler no longer
- * spawns on every MCP call (#71).
- */
-const CURSOR_EVENT_CLASS: Readonly<
-  Partial<Record<CursorHookEvent, HookEventClass>>
-> = {
-  beforeShellExecution: "shell",
-  beforeMCPExecution: "mcp",
-  afterFileEdit: "edit",
-};
-
-function handlerRegistersOn(
-  handler: HookHandlerSpec,
-  cursorEvent: CursorHookEvent,
-): boolean {
-  if (handler.appliesTo === undefined) {
-    return true;
-  }
-  const eventClass = CURSOR_EVENT_CLASS[cursorEvent];
-  // Non-tool events (e.g. stop) have no class; applies_to never narrows
-  // them — the loader already rejects applies_to on non-tool-call events.
-  return eventClass === undefined || handler.appliesTo.includes(eventClass);
-}
-
 export interface CursorHookEntry {
   readonly command: string;
   readonly timeout?: number;
@@ -266,12 +280,15 @@ export interface GenerateCursorHooksOptions {
   readonly hooks: HooksSpec;
   /**
    * When true, registers the builtin env-carried policy bridge as the FIRST
-   * handler on every mapped tool event. The bridge reads AGENTS_POLICY_ID /
+   * handler on every mapped tool event but the user-hook events. The bridge reads AGENTS_POLICY_ID /
    * AGENTS_AGENTS_DIR from its inherited process environment, so the generated
    * file is role- and run-invariant.
    */
   readonly policyBridge?: boolean;
-  /** CLI executable used for the builtin bridge (default: "agents"). */
+  /**
+   * CLI executable used for the builtin bridge and the hook gate (default:
+   * "agents", on the hook's PATH).
+   */
   readonly agentsCli?: string;
   /**
    * Workspace root passed to the bridge as `--workspace`, so absolute paths
@@ -285,12 +302,28 @@ export interface GenerateCursorHooksOptions {
    * content, and no `applies_to` class scopes a handler away from reads.
    */
   readonly readHook?: boolean;
+  /**
+   * Write ADR 0028's added user-hook events. Set it only when
+   * `cursorSupportsUserHookEvents` holds for the installed CLI; otherwise
+   * they are withheld and returned in `withheldEvents`.
+   */
+  readonly userHookEvents?: boolean;
 }
 
 export interface GeneratedCursorHooks {
   readonly config: CursorHooksConfig;
   /** Canonical events that have no Cursor equivalent. */
   readonly skippedEvents: readonly HookEvent[];
+  /**
+   * User-hook events a declared handler would register on but that were not
+   * written, because `userHookEvents` was not set (ADR 0028 decision 5).
+   */
+  readonly withheldEvents: readonly CursorHookEvent[];
+  /**
+   * Each distinct gate command, with `--probe`, for the start-up check (ADR
+   * 0028 decision 7).
+   */
+  readonly gateProbes: readonly string[];
 }
 
 function policyBridgeEntry(
@@ -312,18 +345,39 @@ function policyBridgeEntry(
   return { command: `${cli} policy-eval${workspace}` };
 }
 
-function toCursorEntry(handler: HookHandlerSpec): CursorHookEntry {
-  // Cursor's hook schema has no matcher field, so the matcher is projected
-  // into the command itself as a HOOK_MATCHER environment variable the
-  // handler script can filter on (hook payloads carry the tool name).
-  const command =
-    handler.matcher === undefined
-      ? handler.command
-      : `HOOK_MATCHER=${JSON.stringify(handler.matcher)} ${handler.command}`;
+function toCursorEntry(
+  handler: HookHandlerSpec,
+  command: string,
+): CursorHookEntry {
   return {
     command,
     ...(handler.timeoutS === undefined ? {} : { timeout: handler.timeoutS }),
   };
+}
+
+/**
+ * A lifecycle handler is not gated (ADR 0028 decision 1). Its `matcher`
+ * still reaches it as `HOOK_MATCHER`, single-quoted so the shell expands
+ * nothing in it.
+ */
+function lifecycleCommand(handler: HookHandlerSpec): string {
+  return handler.matcher === undefined
+    ? handler.command
+    : `HOOK_MATCHER=${shellWord(handler.matcher)} ${handler.command}`;
+}
+
+/**
+ * The classes one registration carries: the event's, narrowed by the
+ * handler's `applies_to`; absence means all of them (ADR 0009 decision 1).
+ */
+function registrationClasses(
+  handler: HookHandlerSpec,
+  eventClasses: readonly HookEventClass[],
+): readonly HookEventClass[] {
+  return eventClasses.filter(
+    (eventClass) =>
+      handler.appliesTo === undefined || handler.appliesTo.includes(eventClass),
+  );
 }
 
 /**
@@ -345,11 +399,13 @@ export function generateCursorHooksConfig(
     }
   };
 
+  const row = adapterHookCapabilities("cursor");
   const bridge = policyBridgeEntry(options);
   if (bridge !== undefined) {
-    // ADR 0006 §3: the policy bridge is the first handler on EVERY mapped
+    // ADR 0006 §3: the policy bridge is the first handler on every mapped
     // tool event, not just pre-tool projections — post_tool_call's
-    // afterFileEdit needs policy evaluation before user hooks too.
+    // afterFileEdit needs policy evaluation before user hooks too. ADR 0028
+    // is the exception: its user-hook events carry no bridge.
     const toolEvents: readonly HookEvent[] = [
       "pre_tool_call",
       "post_tool_call",
@@ -357,6 +413,9 @@ export function generateCursorHooksConfig(
     const seen = new Set<CursorHookEvent>();
     for (const event of toolEvents) {
       for (const cursorEvent of CURSOR_EVENT_MAPPING[event] ?? []) {
+        if (row !== undefined && !bridgeRunsOn(row, cursorEvent)) {
+          continue;
+        }
         if (!seen.has(cursorEvent)) {
           seen.add(cursorEvent);
           push(cursorEvent, bridge);
@@ -370,6 +429,9 @@ export function generateCursorHooksConfig(
     }
   }
 
+  const agentsCli = options.agentsCli ?? "agents";
+  const withheld = new Set<CursorHookEvent>();
+  const gateProbes = new Set<string>();
   for (const [event, handlers] of Object.entries(
     options.hooks,
   ) as ReadonlyArray<[HookEvent, readonly HookHandlerSpec[]]>) {
@@ -379,10 +441,39 @@ export function generateCursorHooksConfig(
       continue;
     }
     for (const cursorEvent of cursorEvents) {
+      const toolEvent = row?.toolEvents[cursorEvent];
       for (const handler of handlers) {
-        if (handlerRegistersOn(handler, cursorEvent)) {
-          push(cursorEvent, toCursorEntry(handler));
+        if (toolEvent === undefined) {
+          push(cursorEvent, toCursorEntry(handler, lifecycleCommand(handler)));
+          continue;
         }
+        // Each registration carries only its event's classes, so no call
+        // reaches a handler twice (ADR 0028 decision 5).
+        const classes = registrationClasses(handler, toolEvent.classes);
+        if (classes.length === 0) {
+          continue;
+        }
+        if (
+          toolEvent.userHooksOnly === true &&
+          options.userHookEvents !== true
+        ) {
+          withheld.add(cursorEvent);
+          continue;
+        }
+        const gate = {
+          adapter: "cursor",
+          event: cursorEvent,
+          classes,
+          ...(handler.matcher === undefined
+            ? {}
+            : { matcher: handler.matcher }),
+          command: handler.command,
+        } as const;
+        gateProbes.add(hookGateCommand(agentsCli, gate, { probe: true }));
+        push(
+          cursorEvent,
+          toCursorEntry(handler, hookGateCommand(agentsCli, gate)),
+        );
       }
     }
   }
@@ -390,6 +481,8 @@ export function generateCursorHooksConfig(
   return {
     config: { version: 1, hooks: entries },
     skippedEvents,
+    withheldEvents: [...withheld],
+    gateProbes: [...gateProbes],
   };
 }
 

@@ -28,17 +28,17 @@ true. Adding a `HookEvent` without filling every adapter column fails
 ## Policy bridge
 
 When `policyBridge: true`, the generator registers `agents policy-eval` first on
-every mapped tool event. Claude is the exception: there the bridge is a
-`PreToolUse` hook only, and harness-declared `post_tool_call` handlers still map
-to `PostToolUse` (ADR 0023 decision 9). Claude's bridge passes `--format claude`
-so the response encoding matches what the CLI expects
-(`hookSpecificOutput.permissionDecision`). Cursor keeps the default
-`{ permission }` shape. Given `workspaceRoot`, Claude's bridge also passes
-`--workspace <root>`. Claude Code sends absolute file paths, so the bridge
-rewrites the ones inside the root as workspace-relative before filesystem rules
-see them. A path outside the root stays absolute and stays denied. Cursor's
-bridge is given `workspaceRoot` the same way, since a native read's path is
-absolute too.
+every mapped tool event except Cursor's user-hook events (see below). Claude is
+the exception: there the bridge is a `PreToolUse` hook only, and
+harness-declared `post_tool_call` handlers still map to `PostToolUse` (ADR 0023
+decision 9). Claude's bridge passes `--format claude` so the response encoding
+matches what the CLI expects (`hookSpecificOutput.permissionDecision`). Cursor
+keeps the default `{ permission }` shape. Given `workspaceRoot`, Claude's bridge
+also passes `--workspace <root>`. Claude Code sends absolute file paths, so the
+bridge rewrites the ones inside the root as workspace-relative before filesystem
+rules see them. A path outside the root stays absolute and stays denied.
+Cursor's bridge is given `workspaceRoot` the same way, since a native read's
+path is absolute too.
 
 ## Cursor reads (#198)
 
@@ -64,6 +64,55 @@ and runs the bridge once before any role with no policy identity. A bridge that
 does not answer `deny` there fails the run, because Claude Code runs the tool
 after a hook error (ADR 0023 decision 10).
 
+## User tool-call hooks run behind a gate (ADR 0028)
+
+Every harness-declared `pre_tool_call` or `post_tool_call` handler is generated
+as `agents hook-gate`, which decides whether the call is in the handler's scope
+and runs the handler only if it is:
+
+```text
+<agents> hook-gate --adapter <cursor|claude> --event <native event>
+  --classes <class>[,<class>…] [--matcher '<regex>'] -- '<handler command>'
+```
+
+Every value is a single-quoted shell word. `--classes` is the event's classes
+narrowed by the handler's `applies_to`; an empty intersection registers nothing.
+The gate reads the payload from stdin and takes the call's class and tool name
+from `toolEvents` in `ADAPTER_HOOK_CAPABILITIES`. It tests the tool name against
+`matcher` as a whole-name JavaScript regex, `^(?:<matcher>)$`. A call that names
+no tool, such as Cursor's `beforeShellExecution` or `afterFileEdit`, is tested
+against every name in its class (`HOOK_CLASS_TOOL_NAMES`), and a shell call
+against both `Bash` and `Shell`. Cursor MCP calls are named
+`mcp__<mcp_server_name>__<tool_name>`, as on Claude Code.
+
+- In scope, it runs the handler as `/bin/sh -c '<command>'` with the payload on
+  stdin and `HOOK_MATCHER` set to the matcher. The handler's stdout, stderr and
+  exit status pass through unchanged, so a deny, or Claude Code's exit-2 block,
+  still blocks.
+- Out of scope, it exits 0 and prints nothing. It never prints an allow: on
+  Claude Code an allow would lift the headless permission default.
+- When it cannot tell, it writes one line to stderr and runs the handler. That
+  covers stdin that is not a JSON object, a missing tool name, and a name that
+  is in no class and not in the adapter's `otherToolNames`.
+
+Lifecycle handlers are not gated.
+
+On Claude Code the native `matcher` is the class projection (`Bash`, `mcp__.*`,
+`Edit|Write|NotebookEdit`), and the gate runs as the running CLI's Bun
+executable and entry script. On Cursor the gate is `agents` on the hook's
+`PATH`, or `agentsCli`. Each generator returns `gateProbes`, the distinct gate
+commands with `--probe`, and `agents harness run` runs each once before any
+role. Any output or a non-zero exit fails the run.
+
+Cursor's user hooks also register on `preToolUse` (edit), `afterShellExecution`
+(shell) and `afterMCPExecution` (mcp). These events carry no bridge, so a
+pre-edit user hook runs without the bridge before it. Cursor's bridge still
+checks edits on `afterFileEdit`. Like `beforeReadFile`, these events are written
+only when `userHookEvents` is set, which `agents harness run` does only on a
+`cursor-agent` listed in `CURSOR_USER_HOOK_EVENT_VERSIONS`. Otherwise they are
+returned in `withheldEvents`, warned about, and recorded in
+`undeliverable_hooks`.
+
 ## Lifecycle honesty (ADR 0024)
 
 `LIFECYCLE_HOOK_EVENTS` is the checklist of lifecycle events that _may_ be inert
@@ -76,4 +125,5 @@ generator, such as `opencode` and `fake`). `run_*` must never be projected onto
 a session-end event. `undeliverableLifecycleHookEvents(hooks, adapter)` returns
 the same events the warnings name; `agents harness run` records them in the run
 result's `metadata` as `undeliverable_hooks`, comma-separated, followed by any
-native event withheld from the run, such as `beforeReadFile`.
+native event withheld from the run, such as `beforeReadFile` or Cursor's
+user-hook events.

@@ -1,10 +1,12 @@
-import type {
-  HookEvent,
-  HookEventClass,
-  HookHandlerSpec,
-  HooksSpec,
+import {
+  HOOK_EVENT_CLASSES,
+  type HookEvent,
+  type HookEventClass,
+  type HookHandlerSpec,
+  type HooksSpec,
 } from "@aguil/agents-harness-config";
 import { adapterHookCapabilities } from "./adapter-table";
+import { hookGateCommand, shellWord } from "./gate";
 
 /** Claude Code hook event names we emit. */
 export type ClaudeHookEvent =
@@ -34,8 +36,9 @@ export interface GenerateClaudeHooksOptions {
   readonly hooks: HooksSpec;
   readonly policyBridge?: boolean;
   /**
-   * The agents CLI the bridge runs: one executable, or an argv prefix such as
-   * `[bun, entry]`. Each element is single-quoted as one shell word.
+   * The agents CLI the bridge and the hook gate run: one executable, or an
+   * argv prefix such as `[bun, entry]`. Each element is single-quoted as one
+   * shell word.
    */
   readonly agentsCli?: string | readonly string[];
   /**
@@ -49,6 +52,11 @@ export interface GenerateClaudeHooksOptions {
 export interface GeneratedClaudeHooks {
   readonly config: ClaudeSettingsConfig;
   readonly skippedEvents: readonly HookEvent[];
+  /**
+   * Each distinct gate command, with `--probe`, for the start-up check (ADR
+   * 0028 decision 7).
+   */
+  readonly gateProbes: readonly string[];
 }
 
 const CLAUDE_EVENT_MAPPING: Readonly<
@@ -70,35 +78,22 @@ const CLAUDE_EVENT_MAPPING: Readonly<
 })();
 
 /**
- * Spec v0.2 `applies_to` → Claude tool-name matcher. Unscoped handlers omit
- * the matcher (all tools). A handler that already sets `matcher` keeps it.
+ * Classes → Claude tool-name matcher: the native matcher of every gated
+ * registration (ADR 0028 decision 6). The gate applies the handler's own
+ * `matcher`.
  */
-function appliesToMatcher(
-  appliesTo: readonly HookEventClass[] | undefined,
-): string | undefined {
-  if (appliesTo === undefined) {
-    return undefined;
-  }
+function classMatcher(classes: readonly HookEventClass[]): string | undefined {
   const parts: string[] = [];
-  if (appliesTo.includes("shell")) {
+  if (classes.includes("shell")) {
     parts.push("Bash");
   }
-  if (appliesTo.includes("mcp")) {
+  if (classes.includes("mcp")) {
     parts.push("mcp__.*");
   }
-  if (appliesTo.includes("edit")) {
+  if (classes.includes("edit")) {
     parts.push("Edit", "Write", "NotebookEdit");
   }
   return parts.length === 0 ? undefined : parts.join("|");
-}
-
-/**
- * Quote one word for a POSIX shell. Claude Code runs a hook's command through
- * a shell, where JSON's double quotes would still expand `$`, `$(...)` and
- * backticks inside a path; single quotes expand nothing.
- */
-function shellWord(word: string): string {
-  return `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 function policyBridgeHandler(
@@ -123,26 +118,28 @@ function policyBridgeHandler(
   };
 }
 
-function toClaudeHandler(handler: HookHandlerSpec): ClaudeHookHandler {
+function toClaudeHandler(
+  handler: HookHandlerSpec,
+  command: string = handler.command,
+): ClaudeHookHandler {
   return {
     type: "command",
-    command: handler.command,
+    command,
     ...(handler.timeoutS === undefined ? {} : { timeout: handler.timeoutS }),
   };
 }
 
-function matcherFor(
+/**
+ * The classes one registration carries: the event's, narrowed by the
+ * handler's `applies_to`; absence means all of them (ADR 0009 decision 1).
+ */
+function registrationClasses(
   handler: HookHandlerSpec,
-  claudeEvent: ClaudeHookEvent,
-): string | undefined {
-  // Stop / SessionStart ignore matchers; do not emit a misleading field.
-  if (claudeEvent === "Stop" || claudeEvent === "SessionStart") {
-    return undefined;
-  }
-  if (handler.matcher !== undefined) {
-    return handler.matcher;
-  }
-  return appliesToMatcher(handler.appliesTo);
+): readonly HookEventClass[] {
+  return HOOK_EVENT_CLASSES.filter(
+    (eventClass) =>
+      handler.appliesTo === undefined || handler.appliesTo.includes(eventClass),
+  );
 }
 
 /**
@@ -173,6 +170,8 @@ export function generateClaudeHooksConfig(
     push("PreToolUse", { hooks: [bridge] });
   }
 
+  const agentsCli = options.agentsCli ?? "agents";
+  const gateProbes = new Set<string>();
   for (const [event, handlers] of Object.entries(
     options.hooks,
   ) as ReadonlyArray<[HookEvent, readonly HookHandlerSpec[]]>) {
@@ -183,23 +182,30 @@ export function generateClaudeHooksConfig(
     }
     for (const claudeEvent of claudeEvents) {
       for (const handler of handlers) {
-        // applies_to on tool events: if the class list produces no matcher
-        // parts, skip (empty intersection). Unscoped / explicit matcher always
-        // register.
-        if (
-          handler.appliesTo !== undefined &&
-          handler.matcher === undefined &&
-          (claudeEvent === "PreToolUse" || claudeEvent === "PostToolUse")
-        ) {
-          const projected = appliesToMatcher(handler.appliesTo);
-          if (projected === undefined) {
-            continue;
-          }
+        // Lifecycle events are not gated, and Stop / SessionStart ignore
+        // matchers, so no misleading field is emitted.
+        if (claudeEvent !== "PreToolUse" && claudeEvent !== "PostToolUse") {
+          push(claudeEvent, { hooks: [toClaudeHandler(handler)] });
+          continue;
         }
-        const matcher = matcherFor(handler, claudeEvent);
+        const classes = registrationClasses(handler);
+        const matcher = classMatcher(classes);
+        if (matcher === undefined) {
+          continue;
+        }
+        const gate = {
+          adapter: "claude",
+          event: claudeEvent,
+          classes,
+          ...(handler.matcher === undefined
+            ? {}
+            : { matcher: handler.matcher }),
+          command: handler.command,
+        } as const;
+        gateProbes.add(hookGateCommand(agentsCli, gate, { probe: true }));
         push(claudeEvent, {
-          ...(matcher === undefined ? {} : { matcher }),
-          hooks: [toClaudeHandler(handler)],
+          matcher,
+          hooks: [toClaudeHandler(handler, hookGateCommand(agentsCli, gate))],
         });
       }
     }
@@ -208,6 +214,7 @@ export function generateClaudeHooksConfig(
   return {
     config: { hooks: groups },
     skippedEvents,
+    gateProbes: [...gateProbes],
   };
 }
 

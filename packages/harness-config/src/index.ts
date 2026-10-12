@@ -907,6 +907,23 @@ function parseAppliesTo(
   return { appliesTo: classes };
 }
 
+/**
+ * A handler's `matcher` must compile as a JavaScript regular expression: it
+ * is applied to tool names at call time, and one that does not compile would
+ * never match (ADR 0028 decision 8).
+ */
+function parseMatcher(value: unknown, label: string): string {
+  const matcher = requiredString(value, label);
+  try {
+    new RegExp(matcher);
+  } catch (error) {
+    fail(
+      `${label} is not a valid regular expression: ${(error as Error).message}`,
+    );
+  }
+  return matcher;
+}
+
 function parseHooks(value: unknown, harnessDir: string): HooksSpec {
   if (value === undefined) {
     return {};
@@ -941,7 +958,7 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
         ...(handler.matcher === undefined
           ? {}
           : {
-              matcher: requiredString(
+              matcher: parseMatcher(
                 handler.matcher,
                 `hooks.${event}[${index}].matcher`,
               ),

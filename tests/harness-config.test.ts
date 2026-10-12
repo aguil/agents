@@ -208,6 +208,51 @@ test("loadManifest reads enabled harnesses and tolerates a missing file", async 
   expect(empty.enabledHarnesses).toEqual([]);
 });
 
+test("a matcher that is not a valid regular expression fails the load (ADR 0028 decision 8)", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(join(tmpdir(), "harness-config-"));
+  try {
+    const dir = join(scratch, "harnesses", "matched");
+    await mkdir(dir, { recursive: true });
+    const spec = (matcher: string, event = "pre_tool_call") =>
+      writeFile(
+        join(dir, "harness.yaml"),
+        [
+          'spec_version: "0.1"',
+          "kind: harness",
+          "harness: { id: matched }",
+          "roles: { a: { description: A } }",
+          "hooks:",
+          `  ${event}:`,
+          '    - command: "x"',
+          `      matcher: ${JSON.stringify(matcher)}`,
+        ].join("\n"),
+      );
+    await spec("Write|Edit");
+    const loaded = await loadHarness({
+      agentsDir: scratch,
+      harnessId: "matched",
+    });
+    expect(loaded.hooks.pre_tool_call?.[0].matcher).toBe("Write|Edit");
+    // Every spec version and every event: a harness meant a regex by it.
+    for (const [matcher, event] of [
+      ["(", "pre_tool_call"],
+      ["a)|(b", "post_tool_call"],
+      ["[", "role_stop"],
+    ] as const) {
+      await spec(matcher, event);
+      await expect(
+        loadHarness({ agentsDir: scratch, harnessId: "matched" }),
+      ).rejects.toThrow(
+        `hooks.${event}[0].matcher is not a valid regular expression`,
+      );
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
 test("loadHarness rejects missing files, bad versions, and bad role refs", async () => {
   await expect(
     loadHarness({ agentsDir: fixturesDir, harnessId: "nope" }),

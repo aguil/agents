@@ -88,8 +88,8 @@ export const HOOK_CLASS_TOOL_NAMES: Readonly<
  * the drift test can treat every adapter uniformly.
  */
 const CURSOR_NATIVE: Readonly<Record<HookEvent, readonly string[]>> = {
-  pre_tool_call: ["beforeShellExecution", "beforeMCPExecution"],
-  post_tool_call: ["afterFileEdit"],
+  pre_tool_call: ["beforeShellExecution", "beforeMCPExecution", "preToolUse"],
+  post_tool_call: ["afterFileEdit", "afterShellExecution", "afterMCPExecution"],
   role_start: [],
   role_stop: ["stop"],
   run_start: [],

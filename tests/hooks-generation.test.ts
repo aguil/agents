@@ -7,10 +7,15 @@ import {
 } from "@aguil/agents-harness-config";
 import {
   ADAPTER_HOOK_CAPABILITIES,
+  allEnforceableProbeEventNames,
   CURSOR_READ_HOOK_VERSIONS,
+  CURSOR_USER_HOOK_EVENT_VERSIONS,
   cursorHookEventDispatchability,
   cursorReadHookWithheldWarning,
   cursorSupportsReadHook,
+  cursorSupportsUserHookEvents,
+  cursorUserHookEventsWithheldWarning,
+  generateClaudeHooksConfig,
   generateCursorHooksConfig,
   HOOK_ADAPTER_IDS,
   hookEventAdapterDispatchability,
@@ -19,6 +24,25 @@ import {
   undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
 } from "@aguil/agents-hooks";
+
+/**
+ * The command ADR 0028 decision 2 generates for one gated registration,
+ * spelled out so a change to the generator's quoting fails here.
+ */
+function gated(
+  cli: string,
+  adapter: string,
+  event: string,
+  classes: string,
+  command: string,
+  matcher?: string,
+): string {
+  return (
+    `${cli} hook-gate --adapter '${adapter}' --event '${event}' --classes '${classes}'` +
+    (matcher === undefined ? "" : ` --matcher '${matcher}'`) +
+    ` -- '${command}'`
+  );
+}
 
 const sampleHooks: HooksSpec = {
   pre_tool_call: [
@@ -38,10 +62,17 @@ test("policy bridge is the first handler on every mapped tool event", () => {
   const mcp = config.hooks.beforeMCPExecution ?? [];
   expect(shell[0].command).toBe('"agents" policy-eval');
   expect(mcp[0].command).toBe('"agents" policy-eval');
-  // User hook comes after the bridge, carrying its matcher as an env
-  // prefix the handler script can filter on.
+  // The user hook comes after the bridge, behind the gate, which applies its
+  // matcher (ADR 0028 decision 1).
   expect(shell[1].command).toBe(
-    'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
+    gated(
+      "'agents'",
+      "cursor",
+      "beforeShellExecution",
+      "shell",
+      "/h/hooks/validate-shell.sh",
+      "Execute",
+    ),
   );
   expect(shell[1].timeout).toBe(10);
 });
@@ -53,7 +84,15 @@ test("policy bridge also precedes post_tool_call user hooks (afterFileEdit)", ()
   });
   const fileEdit = config.hooks.afterFileEdit ?? [];
   expect(fileEdit[0].command).toBe('"agents" policy-eval');
-  expect(fileEdit[1].command).toContain("prettier");
+  expect(fileEdit[1].command).toBe(
+    gated(
+      "'agents'",
+      "cursor",
+      "afterFileEdit",
+      "edit",
+      "prettier --write {{tool_input.file_path}}",
+    ),
+  );
 });
 
 test("custom policy bridge CLI is JSON-quoted without role-specific data", () => {
@@ -77,19 +116,34 @@ test("canonical events project to Cursor equivalents; unmappable events are repo
     hooks: sampleHooks,
   });
   expect(config.hooks.afterFileEdit?.[0].command).toContain("prettier");
+  // Lifecycle handlers are not gated (ADR 0028 decision 1).
   expect(config.hooks.stop?.[0].command).toBe("/h/hooks/check-coverage.sh");
   // Fixture artifact: sampleHooks declares only run_end among the unmapped
   // events, so skippedEvents is ["run_end"] here. The dispatchability contract
   // below is what pins the full surface (ADR 0024 §4) — do not treat this
   // equality as the contract.
   expect(skippedEvents).toEqual(["run_end"]);
-  // No policy → no bridge entries; user pre_tool_call hooks project to both
-  // Cursor tool events, carrying the matcher env prefix.
+  // No policy → no bridge entries; an unscoped pre_tool_call handler is
+  // gated on each Cursor pre-call event with that event's class.
   expect(config.hooks.beforeShellExecution?.[0].command).toBe(
-    'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
+    gated(
+      "'agents'",
+      "cursor",
+      "beforeShellExecution",
+      "shell",
+      "/h/hooks/validate-shell.sh",
+      "Execute",
+    ),
   );
   expect(config.hooks.beforeMCPExecution?.[0].command).toBe(
-    'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
+    gated(
+      "'agents'",
+      "cursor",
+      "beforeMCPExecution",
+      "mcp",
+      "/h/hooks/validate-shell.sh",
+      "Execute",
+    ),
   );
 });
 
@@ -181,12 +235,32 @@ test("Claude generator projects events, matchers, and policy bridge format", asy
     group.hooks.map((hook) => hook.command),
   );
   expect(postCommands).not.toContain("'agents' policy-eval --format claude");
-  expect(postCommands).toEqual(["prettier --write {{tool_input.file_path}}"]);
-  // User pre_tool_call carries matcher as Claude's matcher field.
-  const preUser = config.hooks.PreToolUse?.find(
-    (group) => group.matcher === "Execute",
+  expect(postCommands).toEqual([
+    gated(
+      "'agents'",
+      "claude",
+      "PostToolUse",
+      "shell,mcp,edit",
+      "prettier --write {{tool_input.file_path}}",
+    ),
+  ]);
+  // The handler's own matcher goes to the gate, never to Claude's matcher
+  // field, which is the class projection (ADR 0028 decision 6).
+  expect(
+    config.hooks.PreToolUse?.some((group) => group.matcher === "Execute"),
+  ).toBe(false);
+  const preUser = config.hooks.PreToolUse?.[1];
+  expect(preUser?.matcher).toBe("Bash|mcp__.*|Edit|Write|NotebookEdit");
+  expect(preUser?.hooks[0].command).toBe(
+    gated(
+      "'agents'",
+      "claude",
+      "PreToolUse",
+      "shell,mcp,edit",
+      "/h/hooks/validate-shell.sh",
+      "Execute",
+    ),
   );
-  expect(preUser?.hooks[0].command).toBe("/h/hooks/validate-shell.sh");
   expect(preUser?.hooks[0].timeout).toBe(10);
   expect(config.hooks.Stop?.[0].hooks[0].command).toBe(
     "/h/hooks/check-coverage.sh",
@@ -211,7 +285,13 @@ test("Claude generator without a policy registers no bridge", async () => {
     false,
   );
   expect(config.hooks.PostToolUse?.[0].hooks[0].command).toBe(
-    "prettier --write {{tool_input.file_path}}",
+    gated(
+      "'agents'",
+      "claude",
+      "PostToolUse",
+      "shell,mcp,edit",
+      "prettier --write {{tool_input.file_path}}",
+    ),
   );
 });
 
@@ -273,7 +353,13 @@ test("Claude applies_to scopes matchers to tool classes", async () => {
   });
   expect(config.hooks.PreToolUse?.[0].matcher).toBe("Bash");
   expect(config.hooks.PreToolUse?.[0].hooks[0].command).toBe(
-    "/h/hooks/shell-only.sh",
+    gated(
+      "'agents'",
+      "claude",
+      "PreToolUse",
+      "shell",
+      "/h/hooks/shell-only.sh",
+    ),
   );
 });
 
@@ -349,7 +435,14 @@ test("policyBridge false yields no bridge entries", () => {
     policyBridge: false,
   });
   expect(config.hooks.beforeShellExecution?.[0].command).toBe(
-    'HOOK_MATCHER="Execute" /h/hooks/validate-shell.sh',
+    gated(
+      "'agents'",
+      "cursor",
+      "beforeShellExecution",
+      "shell",
+      "/h/hooks/validate-shell.sh",
+      "Execute",
+    ),
   );
   expect(config.hooks.afterFileEdit?.[0].command).toContain("prettier");
 });
@@ -386,30 +479,42 @@ test("applies_to scopes handlers to event classes (#71)", () => {
       post_tool_call: [mcpAndEdit],
     },
     policyBridge: true,
+    userHookEvents: true,
   });
 
   const commands = (event: keyof typeof config.hooks) =>
     (config.hooks[event] ?? []).map((entry) => entry.command);
+  const g = (event: string, classes: string, command: string, m?: string) =>
+    gated("'agents'", "cursor", event, classes, command, m);
 
   // Shell-only handler registers on beforeShellExecution but NOT on
   // beforeMCPExecution — the wasted spawn per MCP call is gone.
-  expect(commands("beforeShellExecution")).toContain(
-    'HOOK_MATCHER="Execute" /h/hooks/shell-only.sh',
-  );
-  expect(commands("beforeMCPExecution")).not.toContain(
-    'HOOK_MATCHER="Execute" /h/hooks/shell-only.sh',
-  );
-  // Class lists select exactly their events; unscoped handlers keep the
-  // register-everywhere behavior (absence must not narrow).
-  expect(commands("beforeMCPExecution")).toContain("/h/hooks/audit.sh");
-  expect(commands("beforeShellExecution")).not.toContain("/h/hooks/audit.sh");
-  expect(commands("afterFileEdit")).toContain("/h/hooks/audit.sh");
-  expect(commands("beforeShellExecution")).toContain("/h/hooks/everything.sh");
-  expect(commands("beforeMCPExecution")).toContain("/h/hooks/everything.sh");
-  // The policy bridge is never narrowed: still first on every tool event.
-  expect(commands("beforeShellExecution")[0]).toBe('"agents" policy-eval');
-  expect(commands("beforeMCPExecution")[0]).toBe('"agents" policy-eval');
-  expect(commands("afterFileEdit")[0]).toBe('"agents" policy-eval');
+  expect(commands("beforeShellExecution")).toEqual([
+    '"agents" policy-eval',
+    g("beforeShellExecution", "shell", "/h/hooks/shell-only.sh", "Execute"),
+    g("beforeShellExecution", "shell", "/h/hooks/everything.sh"),
+  ]);
+  // Class lists select exactly their events; unscoped handlers register on
+  // every class (absence must not narrow).
+  expect(commands("beforeMCPExecution")).toEqual([
+    '"agents" policy-eval',
+    g("beforeMCPExecution", "mcp", "/h/hooks/audit.sh"),
+    g("beforeMCPExecution", "mcp", "/h/hooks/everything.sh"),
+  ]);
+  // Pre-edit is preToolUse, with no bridge before it (ADR 0028 decision 5).
+  expect(commands("preToolUse")).toEqual([
+    g("preToolUse", "edit", "/h/hooks/audit.sh"),
+    g("preToolUse", "edit", "/h/hooks/everything.sh"),
+  ]);
+  expect(commands("afterFileEdit")).toEqual([
+    '"agents" policy-eval',
+    g("afterFileEdit", "edit", "/h/hooks/audit.sh"),
+  ]);
+  expect(commands("afterMCPExecution")).toEqual([
+    g("afterMCPExecution", "mcp", "/h/hooks/audit.sh"),
+  ]);
+  // No post_tool_call handler takes shell, so the event is not written.
+  expect(config.hooks).not.toHaveProperty("afterShellExecution");
 });
 
 test("renderCursorHooksConfig emits stable versioned JSON", () => {
@@ -440,8 +545,20 @@ test("beforeReadFile carries the policy bridge alone, never a user handler (#198
     (config.hooks.beforeShellExecution ?? []).map((entry) => entry.command),
   ).toEqual([
     '"agents" policy-eval',
-    "/h/hooks/any-tool.sh",
-    "/h/hooks/shell-only.sh",
+    gated(
+      "'agents'",
+      "cursor",
+      "beforeShellExecution",
+      "shell",
+      "/h/hooks/any-tool.sh",
+    ),
+    gated(
+      "'agents'",
+      "cursor",
+      "beforeShellExecution",
+      "shell",
+      "/h/hooks/shell-only.sh",
+    ),
   ]);
 });
 
@@ -485,4 +602,259 @@ test("only measured cursor-agent versions support beforeReadFile (#198, JC-12)",
   expect(cursorReadHookWithheldWarning("2026.10.02-0000000")).toContain(
     "cursor-agent 2026.10.02-0000000 is not a version measured to support it",
   );
+});
+
+test("only measured cursor-agent versions get ADR 0028's user-hook events (#239)", () => {
+  expect(CURSOR_USER_HOOK_EVENT_VERSIONS).toEqual(["2026.10.01-14929f9"]);
+  expect(cursorSupportsUserHookEvents("2026.10.01-14929f9\n")).toBe(true);
+  expect(cursorSupportsUserHookEvents("2026.10.02-0000000")).toBe(false);
+  expect(cursorSupportsUserHookEvents("")).toBe(false);
+  expect(
+    cursorUserHookEventsWithheldWarning("2026.10.02-0000000", [
+      "preToolUse",
+      "afterShellExecution",
+    ]),
+  ).toBe(
+    "hooks: preToolUse, afterShellExecution withheld — cursor-agent 2026.10.02-0000000 " +
+      "is not a version measured to fire them (supported: 2026.10.01-14929f9), so the " +
+      "harness's tool-call hooks do not run on those events' calls in this run (ADR 0028)",
+  );
+});
+
+test("Cursor's added user-hook events are written only when asked for, else withheld (ADR 0028 decision 5)", () => {
+  const hooks: HooksSpec = {
+    pre_tool_call: [{ command: "/h/pre.sh" }],
+    post_tool_call: [{ command: "/h/post.sh" }],
+  };
+  const added = [
+    "preToolUse",
+    "afterShellExecution",
+    "afterMCPExecution",
+  ] as const;
+  const withheld = generateCursorHooksConfig({ hooks, policyBridge: true });
+  for (const event of added) {
+    expect(withheld.config.hooks).not.toHaveProperty(event);
+  }
+  expect(withheld.withheldEvents).toEqual(added);
+  // The events every Cursor handler had before are unchanged.
+  expect(Object.keys(withheld.config.hooks)).toEqual([
+    "beforeShellExecution",
+    "beforeMCPExecution",
+    "afterFileEdit",
+  ]);
+
+  const written = generateCursorHooksConfig({
+    hooks,
+    policyBridge: true,
+    userHookEvents: true,
+  });
+  expect(written.withheldEvents).toEqual([]);
+  for (const [event, classes, command] of [
+    ["preToolUse", "edit", "/h/pre.sh"],
+    ["afterShellExecution", "shell", "/h/post.sh"],
+    ["afterMCPExecution", "mcp", "/h/post.sh"],
+  ] as const) {
+    // A user hook alone: the bridge is never written on these (decision 5).
+    expect(written.config.hooks[event]).toEqual([
+      { command: gated("'agents'", "cursor", event, classes, command) },
+    ]);
+  }
+});
+
+test("an event is withheld only when a declared handler would register on it", () => {
+  const { withheldEvents, config } = generateCursorHooksConfig({
+    hooks: {
+      pre_tool_call: [{ command: "/h/shell.sh", appliesTo: ["shell"] }],
+      post_tool_call: [{ command: "/h/edit.sh", appliesTo: ["edit"] }],
+    },
+  });
+  expect(withheldEvents).toEqual([]);
+  expect(Object.keys(config.hooks)).toEqual([
+    "beforeShellExecution",
+    "afterFileEdit",
+  ]);
+});
+
+test("an empty class intersection registers nothing (ADR 0028 decision 2)", () => {
+  // pre-edit has one Cursor event, so an edit-only pre_tool_call handler
+  // registers there and nowhere else.
+  const { config } = generateCursorHooksConfig({
+    hooks: { pre_tool_call: [{ command: "/h/edit.sh", appliesTo: ["edit"] }] },
+    userHookEvents: true,
+  });
+  expect(Object.keys(config.hooks)).toEqual(["preToolUse"]);
+  const claude = generateClaudeHooksConfig({
+    hooks: { pre_tool_call: [{ command: "/h/mcp.sh", appliesTo: ["mcp"] }] },
+  });
+  expect(claude.config.hooks.PreToolUse).toEqual([
+    {
+      matcher: "mcp__.*",
+      hooks: [
+        {
+          type: "command",
+          command: gated(
+            "'agents'",
+            "claude",
+            "PreToolUse",
+            "mcp",
+            "/h/mcp.sh",
+          ),
+        },
+      ],
+    },
+  ]);
+});
+
+test("the policy probe vocabulary leaves out the user-hook events (ADR 0028 decision 3)", () => {
+  const names = allEnforceableProbeEventNames();
+  for (const event of ["beforeShellExecution", "afterFileEdit", "PreToolUse"]) {
+    expect(names.has(event)).toBe(true);
+  }
+  for (const event of [
+    "preToolUse",
+    "afterShellExecution",
+    "afterMCPExecution",
+  ]) {
+    expect(names.has(event)).toBe(false);
+  }
+});
+
+test("Claude registers an unscoped handler on the three classes, not every tool (ADR 0028 decision 6)", () => {
+  const { config } = generateClaudeHooksConfig({
+    hooks: {
+      pre_tool_call: [
+        { command: "/h/any.sh" },
+        // #235: both fields, and applies_to still decides the native matcher.
+        { command: "/h/both.sh", matcher: ".*", appliesTo: ["shell"] },
+      ],
+    },
+    policyBridge: true,
+  });
+  expect(config.hooks.PreToolUse?.map((group) => group.matcher)).toEqual([
+    undefined,
+    "Bash|mcp__.*|Edit|Write|NotebookEdit",
+    "Bash",
+  ]);
+  expect(config.hooks.PreToolUse?.[2]?.hooks[0]?.command).toBe(
+    gated("'agents'", "claude", "PreToolUse", "shell", "/h/both.sh", ".*"),
+  );
+});
+
+test("gate values reach the agents CLI unexpanded by the shell, on both adapters (ADR 0028 decision 2, JC-5)", async () => {
+  const handler = 'echo "$HOME" $(id) `id` it\'s';
+  const matcher = "it's|$(echo x)|`id`";
+  const hooks: HooksSpec = { pre_tool_call: [{ command: handler, matcher }] };
+  const cursor = generateCursorHooksConfig({
+    hooks,
+    // printf stands in for the CLI and prints each argument it receives.
+    agentsCli: "printf",
+  });
+  const claude = generateClaudeHooksConfig({
+    hooks,
+    agentsCli: ["printf", "%s\n"],
+  });
+  const run = async (command: string) => {
+    const proc = Bun.spawn({ cmd: ["sh", "-c", command], stdout: "pipe" });
+    const stdout = await new Response(proc.stdout).text();
+    expect(await proc.exited).toBe(0);
+    return stdout;
+  };
+  expect(
+    await run(
+      `${config(cursor).beforeShellExecution?.[0]?.command ?? ""}`.replace(
+        "'printf' hook-gate",
+        "'printf' '%s\n' hook-gate",
+      ),
+    ),
+  ).toBe(
+    [
+      "hook-gate",
+      "--adapter",
+      "cursor",
+      "--event",
+      "beforeShellExecution",
+      "--classes",
+      "shell",
+      "--matcher",
+      matcher,
+      "--",
+      handler,
+      "",
+    ].join("\n"),
+  );
+  expect(
+    await run(claude.config.hooks.PreToolUse?.[0]?.hooks[0]?.command ?? ""),
+  ).toBe(
+    [
+      "hook-gate",
+      "--adapter",
+      "claude",
+      "--event",
+      "PreToolUse",
+      "--classes",
+      "shell,mcp,edit",
+      "--matcher",
+      matcher,
+      "--",
+      handler,
+      "",
+    ].join("\n"),
+  );
+});
+
+function config(generated: { readonly config: { readonly hooks: object } }) {
+  return generated.config.hooks as Record<
+    string,
+    ReadonlyArray<{ readonly command: string }> | undefined
+  >;
+}
+
+test("each distinct gate command is offered once for the start-up probe (ADR 0028 decision 7)", () => {
+  const hooks: HooksSpec = {
+    pre_tool_call: [{ command: "/h/a.sh", appliesTo: ["shell"] }],
+    post_tool_call: [{ command: "/h/b.sh", matcher: "Write" }],
+  };
+  const claude = generateClaudeHooksConfig({ hooks, agentsCli: ["/b", "/e"] });
+  expect(claude.gateProbes).toEqual([
+    "'/b' '/e' hook-gate --probe --adapter 'claude' --event 'PreToolUse' --classes 'shell' -- '/h/a.sh'",
+    "'/b' '/e' hook-gate --probe --adapter 'claude' --event 'PostToolUse' --classes 'shell,mcp,edit' --matcher 'Write' -- '/h/b.sh'",
+  ]);
+  const cursor = generateCursorHooksConfig({ hooks, userHookEvents: true });
+  expect(cursor.gateProbes).toHaveLength(4);
+  expect(
+    cursor.gateProbes.every((probe) =>
+      probe.startsWith("'agents' hook-gate --probe "),
+    ),
+  ).toBe(true);
+  // Withheld events are not probed: nothing would run them.
+  expect(generateCursorHooksConfig({ hooks }).gateProbes).toHaveLength(2);
+});
+
+test("lifecycle handlers are not gated; their matcher is single-quoted (ADR 0028 decision 1, JC-5)", () => {
+  const { config } = generateCursorHooksConfig({
+    hooks: { role_stop: [{ command: "/h/stop.sh", matcher: "$(x)" }] },
+  });
+  expect(config.hooks.stop).toEqual([
+    { command: "HOOK_MATCHER='$(x)' /h/stop.sh" },
+  ]);
+});
+
+test("every native tool-call event has a row in the gate's table (ADR 0028 decision 3)", () => {
+  for (const caps of ADAPTER_HOOK_CAPABILITIES) {
+    const natives = [
+      ...caps.nativeEvents.pre_tool_call,
+      ...caps.nativeEvents.post_tool_call,
+    ];
+    expect([caps.adapter, Object.keys(caps.toolEvents).sort()]).toEqual([
+      caps.adapter,
+      [...new Set(natives)].sort(),
+    ]);
+  }
+  const cursor = ADAPTER_HOOK_CAPABILITIES.find((c) => c.adapter === "cursor");
+  expect(
+    Object.entries(cursor?.toolEvents ?? {})
+      .filter(([, row]) => row.userHooksOnly === true)
+      .map(([event]) => event)
+      .sort(),
+  ).toEqual(["afterMCPExecution", "afterShellExecution", "preToolUse"]);
 });
