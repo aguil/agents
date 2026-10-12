@@ -468,6 +468,22 @@ export async function loadKnowledgeStore(
  * truncation marker when one is needed. The shared truncateArtifactContent
  * helper can overshoot by the marker length; aggregate admission cannot.
  */
+/**
+ * The longest prefix of `content` whose UTF-8 encoding fits in `maxBytes`,
+ * cut at a character boundary. Slicing mid-character would decode the partial
+ * bytes as U+FFFD, three bytes each, which both corrupts the kept text and can
+ * make the result larger than the budget it was cut to.
+ */
+function utf8Prefix(content: string, maxBytes: number): string {
+  const bytes = Buffer.from(content, "utf8");
+  let end = Math.min(maxBytes, bytes.length);
+  // A byte of the form 0b10xxxxxx continues the character before it.
+  while (end > 0 && end < bytes.length && ((bytes[end] ?? 0) & 0xc0) === 0x80) {
+    end -= 1;
+  }
+  return bytes.subarray(0, end).toString("utf8");
+}
+
 function truncateWithinBudget(
   content: string,
   maxBytes: number,
@@ -484,9 +500,7 @@ function truncateWithinBudget(
     const marker = truncationMarker(cut);
     const markerBytes = Buffer.byteLength(marker, "utf8");
     const headBudget = Math.max(0, maxBytes - markerBytes);
-    const head = Buffer.from(content, "utf8")
-      .subarray(0, headBudget)
-      .toString("utf8");
+    const head = utf8Prefix(content, headBudget);
     const actualCut = Buffer.byteLength(head, "utf8");
     const result = `${head}${truncationMarker(actualCut)}`;
     if (Buffer.byteLength(result, "utf8") <= maxBytes) {

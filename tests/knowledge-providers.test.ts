@@ -681,3 +681,37 @@ test("at the minimum max_bytes the top-ranked note is admitted as a marker (ADR 
     );
   });
 });
+
+test("a truncated note is cut at a character boundary at every budget from the floor up (ADR 0022 §7)", async () => {
+  await withWorkspace(async (workspacePath) => {
+    // One-, two-, three- and four-byte characters, so some budget lands
+    // inside each width.
+    const body = "aé中😀".repeat(20);
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/leader.md",
+      ["---", "id: leader", "context: auto", "---", body].join("\n"),
+    );
+    for (
+      let maxBytes = KNOWLEDGE_MIN_MAX_BYTES;
+      maxBytes <= 60;
+      maxBytes += 1
+    ) {
+      const artifacts = await new KnowledgeProvider({ maxBytes }).collect({
+        workspacePath,
+        scratchpadPath: join(workspacePath, ".scratch"),
+      });
+      const content = artifacts.find(
+        (artifact) => artifact.id === "knowledge:leader",
+      )?.content;
+      expect(content, `max_bytes ${maxBytes}`).toBeDefined();
+      const kept = (content ?? "").replace(/\n\[truncated at \d+ bytes\]$/, "");
+      expect(kept, `max_bytes ${maxBytes}`).not.toContain("�");
+      expect(body.startsWith(kept), `max_bytes ${maxBytes}`).toBe(true);
+      expect(
+        Buffer.byteLength(content ?? "", "utf8"),
+        `max_bytes ${maxBytes}`,
+      ).toBeLessThanOrEqual(maxBytes);
+    }
+  });
+});
