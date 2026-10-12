@@ -40,3 +40,8 @@ own reports, emitted as `<provider>:_meta:skipped` and
 `knowledge-search` params: `tags` (AND, case-insensitive), `limit` (default 5),
 `provenance` (`any` \| `machine` \| `human`), `machine_id_prefix` (default
 `harness:`), `path`, `max_bytes`.
+
+For both providers, `max_bytes` must be at least 23, the size of the shortest
+truncation marker (`KNOWLEDGE_MIN_MAX_BYTES`), so the top-ranked note can always
+be truncated into the budget and admitted. A smaller value fails when the config
+is resolved.

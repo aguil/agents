@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   compareKnowledgeNotesForAdmission,
+  KNOWLEDGE_MIN_MAX_BYTES,
   type KnowledgeNote,
   KnowledgeProvider,
   KnowledgeSearchProvider,
@@ -653,5 +654,28 @@ test("KnowledgeProvider stops admitting at the first note the bytes left cannot 
     expect(artifacts.map((artifact) => artifact.id)).not.toContain(
       "knowledge:third",
     );
+  });
+});
+
+test("at the minimum max_bytes the top-ranked note is still admitted (ADR 0022 §7)", async () => {
+  await withWorkspace(async (workspacePath) => {
+    await writeNote(
+      workspacePath,
+      ".agents/knowledge/leader.md",
+      ["---", "id: leader", "context: auto", "---", "L".repeat(200)].join("\n"),
+    );
+    const artifacts = await new KnowledgeProvider({
+      maxBytes: KNOWLEDGE_MIN_MAX_BYTES,
+    }).collect({
+      workspacePath,
+      scratchpadPath: join(workspacePath, ".scratch"),
+    });
+    const leader = artifacts.find(
+      (artifact) => artifact.id === "knowledge:leader",
+    );
+    expect(leader?.content).toContain("[truncated at");
+    expect(
+      Buffer.byteLength(leader?.content ?? "", "utf8"),
+    ).toBeLessThanOrEqual(KNOWLEDGE_MIN_MAX_BYTES);
   });
 });

@@ -39,6 +39,22 @@ export const DEFAULT_KNOWLEDGE_MAX_SCANNED = 10_000;
  */
 export const DEFAULT_KNOWLEDGE_READ_BYTES = DEFAULT_KNOWLEDGE_MAX_BYTES;
 
+/** The marker appended to a note truncated into the admission budget. */
+function truncationMarker(keptBytes: number): string {
+  return `\n[truncated at ${keptBytes} bytes]`;
+}
+
+/**
+ * The smallest `max_bytes` a knowledge provider accepts: the shortest
+ * truncation marker. Below it the top-ranked note could not be truncated into
+ * the budget and admitted, which ADR 0022 §7 guarantees, so a smaller budget is
+ * malformed configuration and fails at resolution (ADR 0022 §4).
+ */
+export const KNOWLEDGE_MIN_MAX_BYTES = Buffer.byteLength(
+  truncationMarker(0),
+  "utf8",
+);
+
 export type KnowledgeContextMode = "auto" | "search-only";
 
 export type KnowledgeProvenanceFilter = "any" | "machine" | "human";
@@ -462,18 +478,17 @@ function truncateWithinBudget(
   if (Buffer.byteLength(content, "utf8") <= maxBytes) {
     return content;
   }
-  const markerFor = (n: number): string => `\n[truncated at ${n} bytes]`;
   // Worst-case marker length for this budget (digits grow slowly with n).
   let cut = maxBytes;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const marker = markerFor(cut);
+    const marker = truncationMarker(cut);
     const markerBytes = Buffer.byteLength(marker, "utf8");
     const headBudget = Math.max(0, maxBytes - markerBytes);
     const head = Buffer.from(content, "utf8")
       .subarray(0, headBudget)
       .toString("utf8");
     const actualCut = Buffer.byteLength(head, "utf8");
-    const result = `${head}${markerFor(actualCut)}`;
+    const result = `${head}${truncationMarker(actualCut)}`;
     if (Buffer.byteLength(result, "utf8") <= maxBytes) {
       return result;
     }
