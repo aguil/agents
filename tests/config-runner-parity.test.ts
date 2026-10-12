@@ -687,3 +687,24 @@ test("config harness resolver precedence is workspace over global over package",
     await rm(homePath, { recursive: true, force: true });
   }
 });
+
+test("agents code-review asks every role for the code-review envelope (#211)", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "config-envelope-"));
+  try {
+    const contextBundlePath = await writeBundle(workspacePath, "full");
+    const envelopes: Array<AgentRunRequest["envelope"]> = [];
+    const scripted = scriptedAdapter({});
+    const adapter: AgentAdapter = {
+      ...scripted,
+      run(request) {
+        envelopes.push(request.envelope);
+        return scripted.run(request);
+      },
+    };
+    await runConfigured(workspacePath, contextBundlePath, adapter);
+    expect(envelopes.length).toBeGreaterThan(0);
+    expect(new Set(envelopes)).toEqual(new Set(["code-review"]));
+  } finally {
+    await rm(workspacePath, { recursive: true, force: true });
+  }
+});
