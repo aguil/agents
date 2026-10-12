@@ -60,7 +60,7 @@ so it is upheld in review.
   0006: harness governance Phase 1 — `.agents/` loader (`harness.yaml` spec
   v0.1), native policy evaluation (ACS 5-verdict, fail-closed), Cursor hook
   config generation with policy-eval bridge first. Partially superseded by ADR
-  0026 on how exec rules match.
+  0026 on how exec rules match, and by ADR 0028 on Cursor's user-hook mapping.
 - [0007-harness-governance-phase-2.md](0007-harness-governance-phase-2.md) — ADR
   0007: harness governance Phase 2 — spec extensions from the proof harness
   (per-role `policy:`, `{"outcome":...}` envelopes, unconditional per-role hook
@@ -167,3 +167,16 @@ so it is upheld in review.
   `scan-incomplete`, `no-notes`, `all-skipped` or `none-eligible`); the store's
   state is determined, not inferred from an empty listing; never a failure.
   Partially supersedes ADR 0022 §4 on what an absent or empty store yields.
+- [0028-user-hook-scope-applied-at-call-time.md](0028-user-hook-scope-applied-at-call-time.md)
+  — ADR 0028: a harness-declared tool-call hook runs behind an
+  `agents hook-gate` that applies its `matcher` and `applies_to` at call time on
+  Cursor and Claude Code, from one table of each native event's classes and one
+  set of tool names per class; `matcher` matches the whole name; a gate that
+  skips prints nothing and one that cannot read a call runs the handler and
+  reports; Cursor user hooks gain `preToolUse` (edit), `afterShellExecution` and
+  `afterMCPExecution` on measured `cursor-agent` versions only; Claude Code's
+  native matcher is the `applies_to` projection; each gate is probed with
+  `--probe` before any role runs; a `matcher` that can match no shell or edit
+  name warns at load, and an invalid one fails it. Partially supersedes ADR 0006
+  §4; an exception to ADR 0006 §3, ADR 0009 decision 1 and ADR 0023 decision 9
+  for the added Cursor events; no `spec_version` increment.
