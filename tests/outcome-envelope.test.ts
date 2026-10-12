@@ -30,14 +30,20 @@ test("parses a valid outcome envelope into an outcome event", () => {
   expect(events[0]?.data).toEqual(outcome);
 });
 
-test("a malformed outcome envelope becomes an error event, not a silent drop", () => {
-  const events = normalizeAgentOutputLine(
-    request,
-    JSON.stringify({ outcome: { id: "x", kind: "diagnosis" } }),
-  );
+test("a malformed outcome envelope becomes an unaccepted-line warning, not a silent drop", () => {
+  const line = JSON.stringify({ outcome: { id: "x", kind: "diagnosis" } });
+  const events = normalizeAgentOutputLine(request, line);
   expect(events).toHaveLength(1);
-  expect(events[0]?.type).toBe("error");
-  expect(events[0]?.message).toBe("invalid outcome envelope");
+  expect(events[0]?.type).toBe("warning");
+  expect(events[0]?.message).toBe(
+    "unaccepted output line: invalid outcome envelope",
+  );
+  expect(events[0]?.data).toEqual({
+    kind: "unaccepted_line",
+    reason: "invalid_outcome",
+    line,
+    nested: false,
+  });
 });
 
 test("extracts an outcome envelope nested in stream-json assistant text", () => {

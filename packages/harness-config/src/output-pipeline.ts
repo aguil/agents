@@ -1,4 +1,8 @@
-import type { Finding, HarnessOutcome } from "@aguil/agents-core";
+import type {
+  Finding,
+  HarnessOutcome,
+  OutputSchemaShape,
+} from "@aguil/agents-core";
 import {
   FINDING_OUTCOME_KIND,
   harnessOutcomeToFinding,
@@ -51,6 +55,42 @@ export function validateOutcomesAgainstSchemas(
   }
 
   return violations;
+}
+
+/** The fields `validateFinding` requires of every finding. */
+const BUILTIN_FINDING_KEYS: readonly string[] = [
+  "id",
+  "severity",
+  "title",
+  "description",
+  "evidence",
+  "sourceRole",
+  "validation",
+];
+
+/**
+ * Each declared schema as the key sets that mark a bare JSON object as meant
+ * for it (JC-8): a record schema's `required` fields, and separately its
+ * `data_required` keys, since an agent that drops the envelope often emits
+ * only the data object (#238); `builtin:finding` the fields every finding
+ * needs.
+ */
+export function outputSchemaShapes(
+  schemas: OutputSchemas,
+): readonly OutputSchemaShape[] {
+  const shapes: OutputSchemaShape[] = [];
+  for (const [kind, schema] of Object.entries(schemas)) {
+    if (schema === "builtin:finding") {
+      shapes.push({ kind, keys: BUILTIN_FINDING_KEYS });
+      continue;
+    }
+    for (const keys of [schema.required, schema.dataRequired]) {
+      if (keys !== undefined && keys.length > 0) {
+        shapes.push({ kind, keys });
+      }
+    }
+  }
+  return shapes;
 }
 
 export function applyFindingPipelines(

@@ -19,6 +19,7 @@ export type {
 } from "./output-pipeline";
 export {
   applyFindingPipelines,
+  outputSchemaShapes,
   validateOutcomesAgainstSchemas,
 } from "./output-pipeline";
 export { makePassGate } from "./pass-gate";

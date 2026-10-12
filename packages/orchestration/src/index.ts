@@ -1,19 +1,26 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
+  AgentEvent,
   Finding,
   HarnessOutcome,
   HarnessRunRequest,
   HarnessRunResult,
+  OutputSchemaShape,
 } from "@aguil/agents-core";
 import {
   createAgentEvent,
   ensureDirectory,
   findingToHarnessOutcome,
   isHarnessOutcome,
+  isUnacceptedLineWarning,
   writeJsonFile,
 } from "@aguil/agents-core";
-import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
+import type {
+  AgentAdapter,
+  AgentRunRequest,
+  PromptEnvelope,
+} from "@aguil/agents-execution";
 import { isFinding } from "@aguil/agents-execution";
 import type { EventSink } from "@aguil/agents-telemetry";
 
@@ -177,6 +184,19 @@ export interface NativeBunOrchestratorOptions {
   readonly eventSink?: EventSink;
   readonly contextBundlePath: string;
   readonly embeddedPrompts?: Readonly<Record<string, string>>;
+  /**
+   * The harness's declared output schemas as shapes, passed on each role's
+   * request so a JSON object carrying one outside an envelope is reported as
+   * an unaccepted line (JC-8). Injected, like validateRoleOutcomes, so the
+   * spec stays out of orchestration.
+   */
+  readonly outputSchemaShapes?: readonly OutputSchemaShape[];
+  /**
+   * The envelope adapters append to each role's prompt, named by the command
+   * that runs the harness (#211). Absent means the adapter's default,
+   * `code-review`.
+   */
+  readonly promptEnvelope?: PromptEnvelope;
   /**
    * Invoked immediately before each role runs. Lets the caller apply
    * role-scoped setup — notably regenerating adapter hook config with the
@@ -530,6 +550,12 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
         this.options.definition.defaultAllowedCommands ??
         [],
       metadata: request.metadata,
+      ...(this.options.outputSchemaShapes === undefined
+        ? {}
+        : { outputSchemaShapes: this.options.outputSchemaShapes }),
+      ...(this.options.promptEnvelope === undefined
+        ? {}
+        : { envelope: this.options.promptEnvelope }),
       ...(env === undefined ? {} : { env }),
     };
 
@@ -539,7 +565,19 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     // scan captures it twice (#75). The outcome `id` is its identity:
     // first occurrence wins, per role run.
     const seenOutcomeIds = new Set<string>();
+    // The same echo that duplicates envelopes duplicates unaccepted lines:
+    // record each once per role run.
+    const seenUnacceptedLines = new Set<string>();
+    let firstUnaccepted: AgentEvent | undefined;
     for await (const event of this.options.adapter.run(agentRequest)) {
+      if (event.type === "warning" && isUnacceptedLineWarning(event.data)) {
+        const key = `${event.data.reason}\u0000${event.data.line}`;
+        if (seenUnacceptedLines.has(key)) {
+          continue;
+        }
+        seenUnacceptedLines.add(key);
+        firstUnaccepted ??= event;
+      }
       await this.options.eventSink?.write(event);
       if (event.type === "finding" && isFinding(event.data)) {
         findings.push(withoutSuppliedMarker(event.data));
@@ -558,6 +596,28 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
       if (event.type === "error") {
         outcome = hasTimedOut(event.data) ? "timed_out" : "failed";
       }
+    }
+
+    // An unaccepted line warns and the role continues; under --strict it
+    // fails the role (JC-3, JC-5), with the line named in the record.
+    if (
+      outcome === "completed" &&
+      request.strictMode === true &&
+      firstUnaccepted !== undefined
+    ) {
+      outcome = "failed";
+      await this.options.eventSink?.write(
+        createAgentEvent({
+          runId: request.runId,
+          roleId: role.id,
+          type: "error",
+          message: `--strict: ${firstUnaccepted.message ?? "unaccepted output line"}`,
+          data: {
+            reason: "strict_unaccepted_line",
+            warning: firstUnaccepted.data,
+          },
+        }),
+      );
     }
 
     if (outcome === "completed" && this.options.validateRoleOutcomes) {

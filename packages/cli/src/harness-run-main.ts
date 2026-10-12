@@ -4,6 +4,7 @@ import {
   conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,
+  detectWorkspaceVcsMode,
 } from "@aguil/agents-code-review";
 import type { ContextArtifact } from "@aguil/agents-context";
 import {
@@ -17,6 +18,7 @@ import type { HarnessOutcome } from "@aguil/agents-core";
 import {
   createRunId,
   isReviewTriageTier,
+  isUnacceptedLineWarning,
   writeJsonFile,
 } from "@aguil/agents-core";
 import type {
@@ -38,6 +40,7 @@ import {
   harnessDeclaresPolicy,
   loadHarness,
   makePassGate,
+  outputSchemaShapes,
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
 import {
@@ -61,6 +64,8 @@ import {
   resolveReportRenderer,
   statusAfterFindingPipelines,
 } from "@aguil/agents-reporting";
+import type { EventSink } from "@aguil/agents-telemetry";
+import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import { parseRoleModels } from "./role-models";
 
 export { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
@@ -107,7 +112,10 @@ Optional:
                            A role's entry beats --model; unmapped roles fall back
   --agents-cli <cmd>       agents CLI used by generated hooks (default: agents;
                            under claude, this CLI itself)
-  --strict                 Fail the run on schema / enablement violations
+  --strict                 Fail the run on a timed-out role, and fail a role on
+                           an unaccepted output line (an invalid finding or
+                           outcome envelope, or bare JSON carrying a declared
+                           output schema's fields). Without it these warn.
   --allow-unenforced-policy
                            Permit adapters that cannot enforce a declared policy
   --force-tool-calls       Pass Cursor --force (auto-allow unless denied).
@@ -700,6 +708,9 @@ export async function runHarnessRunCli(
 
   const passGate = makePassGate(loaded.definition.execution, workspacePath);
   const validateRoleOutcomes = roleOutcomeValidator(loaded);
+  // The run's events go to events.jsonl beside result.raw.json, as under
+  // `agents code-review`, so a failed role's reason is in the record (JC-7).
+  const record = runEventRecord(join(scratchpadPath, "events.jsonl"));
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
@@ -714,6 +725,13 @@ export async function runHarnessRunCli(
           },
     ),
     contextBundlePath,
+    eventSink: record.sink,
+    ...(loaded.outputSchemas === undefined
+      ? {}
+      : { outputSchemaShapes: outputSchemaShapes(loaded.outputSchemas) }),
+    // Not the reviewer envelope: a harness role is told only what its harness
+    // and policy say (#211).
+    promptEnvelope: "harness-run",
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),
     ...(passGate === undefined ? {} : { passGate }),
@@ -741,6 +759,8 @@ export async function runHarnessRunCli(
     criteria: acceptanceCriteriaFromArtifacts(collectedArtifacts),
   });
   const runMetadata = {
+    // The harness-run envelope's VCS guidance reads this, as code-review's does.
+    vcs_mode: await detectWorkspaceVcsMode(workspacePath),
     ...conformanceMetadata,
     ...(cursorApproval === undefined
       ? {}
@@ -826,6 +846,16 @@ export async function runHarnessRunCli(
   );
   if ((result.metadata?.failed_roles ?? "") !== "") {
     console.log(`roles failed: ${result.metadata?.failed_roles}`);
+    for (const roleId of result.metadata?.failed_roles?.split(",") ?? []) {
+      console.log(
+        `- ${roleId}: ${record.firstErrors.get(roleId) ?? "(no error event recorded)"}`,
+      );
+    }
+  }
+  if (record.unacceptedLines() > 0) {
+    console.log(
+      `unaccepted output lines: ${record.unacceptedLines()} (warnings in events.jsonl)`,
+    );
   }
   if (hasPipelines) {
     console.log(
@@ -862,6 +892,36 @@ export async function runHarnessRunCli(
   }
   console.log(`artifacts: ${scratchpadPath}`);
   return status === "passed" ? 0 : 1;
+}
+
+/**
+ * The run's event sink: every event to `events.jsonl`, and, for the summary,
+ * each role's first error line and the count of unaccepted-line warnings.
+ */
+export function runEventRecord(path: string): {
+  readonly sink: EventSink;
+  readonly firstErrors: ReadonlyMap<string, string>;
+  readonly unacceptedLines: () => number;
+} {
+  const file = new JsonlFileEventSink(path);
+  const firstErrors = new Map<string, string>();
+  let unaccepted = 0;
+  return {
+    sink: {
+      async write(event) {
+        await file.write(event);
+        if (event.type === "error" && !firstErrors.has(event.roleId)) {
+          const firstLine = (event.message ?? "").split("\n")[0]?.trim();
+          firstErrors.set(event.roleId, firstLine || "error (no message)");
+        }
+        if (event.type === "warning" && isUnacceptedLineWarning(event.data)) {
+          unaccepted += 1;
+        }
+      },
+    },
+    firstErrors,
+    unacceptedLines: () => unaccepted,
+  };
 }
 
 /**

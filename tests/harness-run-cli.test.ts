@@ -1720,3 +1720,72 @@ test("harness run warns once per policy allowlisting an interpreter (ADR 0026)",
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("harness run sends the harness-run envelope, not the code-review one, on every adapter (#211)", async () => {
+  for (const adapter of ["cursor", "claude", "opencode"] as const) {
+    const root = await mkdtemp(join(tmpdir(), "harness-envelope-"));
+    try {
+      const workspace = join(root, "workspace");
+      const agentsDir = join(root, "agents");
+      const binDir = join(root, "bin");
+      const harnessDir = join(agentsDir, "harnesses", "envelope-check");
+      // A jj workspace, so the envelope's VCS guidance has something to say.
+      await mkdir(join(workspace, ".jj"), { recursive: true });
+      await mkdir(harnessDir, { recursive: true });
+      await mkdir(binDir, { recursive: true });
+      const argvLog = join(root, "argv.log");
+      for (const name of ["agent", "claude", "opencode"]) {
+        await writeFile(
+          join(binDir, name),
+          `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done >> '${argvLog}'\nexit 0\n`,
+          { mode: 0o755 },
+        );
+      }
+      await writeFile(
+        join(harnessDir, "harness.yaml"),
+        [
+          'spec_version: "0.2"',
+          "kind: harness",
+          "harness:",
+          "  id: envelope-check",
+          "roles:",
+          "  writer:",
+          "    description: a role that is meant to write",
+          "    prompt: |",
+          "      Write report.md in the workspace.",
+          "",
+        ].join("\n"),
+      );
+      const cli = await runHarnessCli(
+        [
+          "envelope-check",
+          "--agents-dir",
+          agentsDir,
+          "--workspace",
+          workspace,
+          "--adapter",
+          adapter,
+        ],
+        { PATH: `${binDir}:${process.env.PATH ?? ""}` },
+      );
+      const artifacts = /^artifacts: (.+)$/m.exec(cli.stdout)?.[1];
+      if (artifacts === undefined) {
+        throw new Error(`no artifacts line:\n${cli.stdout}\n${cli.stderr}`);
+      }
+      const request = await Bun.file(
+        join(artifacts, "roles", "writer", "writer.request.json"),
+      ).json();
+      expect(request.envelope, adapter).toBe("harness-run");
+
+      const prompt = await Bun.file(argvLog).text();
+      expect(prompt, adapter).toContain("Write report.md in the workspace.");
+      expect(prompt, adapter).toContain("Inputs attached to this run:");
+      expect(prompt, adapter).toContain("This workspace uses jujutsu.");
+      expect(prompt, adapter).not.toMatch(/read-only/i);
+      expect(prompt, adapter).not.toContain("Do not edit");
+      expect(prompt, adapter).not.toMatch(/code-review|finding/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});

@@ -21,6 +21,11 @@ HITL boundaries:
 `--strict` changes timeout and role-error behavior to fail-fast. Any role
 timeout or role error produces overall `error` status.
 
+It also fails a role on an unaccepted output line: an invalid finding or outcome
+envelope (an echoed template finding is one), or a bare JSON object carrying a
+declared output schema's fields outside an envelope. Without `--strict`, such a
+line is a `warning` event in `events.jsonl` and the run continues.
+
 ### PR comment template
 
 Use this when posting manual HITL output to a pull request:

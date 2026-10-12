@@ -29,6 +29,7 @@ import {
   type LoadedHarness,
   loadHarness,
   makePassGate,
+  outputSchemaShapes,
   validateOutcomesAgainstSchemas,
 } from "@aguil/agents-harness-config";
 import {
@@ -463,6 +464,7 @@ export async function runCodeReviewFromConfig(
   const orchestrator = new NativeBunOrchestrator({
     definition,
     adapter,
+    promptEnvelope: "code-review",
     eventSink:
       options.onEvent === undefined
         ? fileEventSink
@@ -473,6 +475,9 @@ export async function runCodeReviewFromConfig(
             },
           },
     contextBundlePath: writtenContext.jsonPath,
+    ...(outputSchemas === undefined
+      ? {}
+      : { outputSchemaShapes: outputSchemaShapes(outputSchemas) }),
     ...(passGate === undefined ? {} : { passGate }),
     validateRoleOutcomes: (input: {
       readonly roleId: string;
