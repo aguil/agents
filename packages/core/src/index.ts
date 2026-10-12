@@ -184,7 +184,56 @@ export type AgentEventType =
   | "finding"
   | "outcome"
   | "completed"
-  | "error";
+  | "error"
+  | "warning";
+
+/**
+ * Why a line of role output was not accepted (JC-8, #238): an invalid finding
+ * or outcome envelope, or a JSON object that matches no envelope but carries a
+ * declared output schema's required fields.
+ */
+export type UnacceptedLineReason =
+  | "invalid_finding"
+  | "invalid_outcome"
+  | "schema_shaped_json";
+
+/**
+ * `data` of a `warning` event for an unaccepted line. The run continues and
+ * records it; under `--strict` it fails the role (JC-3, JC-5).
+ */
+export interface UnacceptedLineWarning {
+  readonly kind: "unaccepted_line";
+  readonly reason: UnacceptedLineReason;
+  /** The line as the role emitted it; for a nested line, the inner text line. */
+  readonly line: string;
+  /** True when the line was found inside an agent stream record's text. */
+  readonly nested: boolean;
+  readonly errors?: readonly string[];
+  /** For `schema_shaped_json`, the declared outcome kind whose fields it carries. */
+  readonly schemaKind?: string;
+}
+
+export function isUnacceptedLineWarning(
+  data: unknown,
+): data is UnacceptedLineWarning {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { readonly kind?: unknown }).kind === "unaccepted_line" &&
+    typeof (data as { readonly reason?: unknown }).reason === "string" &&
+    typeof (data as { readonly line?: unknown }).line === "string"
+  );
+}
+
+/**
+ * Keys that mark a JSON object as meant for a declared output schema: an
+ * object carrying every one of them, outside any envelope, is unaccepted
+ * output of that kind (JC-8).
+ */
+export interface OutputSchemaShape {
+  readonly kind: string;
+  readonly keys: readonly string[];
+}
 
 /** Structural guard for generic outcomes arriving as event data. */
 export function isHarnessOutcome(value: unknown): value is HarnessOutcome {

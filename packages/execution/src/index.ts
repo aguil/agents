@@ -1,6 +1,12 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentEvent, Finding, HarnessOutcome } from "@aguil/agents-core";
+import type {
+  AgentEvent,
+  Finding,
+  HarnessOutcome,
+  OutputSchemaShape,
+  UnacceptedLineWarning,
+} from "@aguil/agents-core";
 import {
   createAgentEvent,
   ensureDirectory,
@@ -26,6 +32,12 @@ export interface AgentRunRequest {
   readonly timeoutMs: number;
   readonly allowedCommands: readonly string[];
   readonly metadata?: Readonly<Record<string, string>>;
+  /**
+   * The harness's declared output schemas, as the keys that mark a JSON
+   * object as meant for one. An object carrying them outside any envelope is
+   * reported as an unaccepted line rather than passed through as stdout (JC-8).
+   */
+  readonly outputSchemaShapes?: readonly OutputSchemaShape[];
   /**
    * Merged into the subprocess environment at spawn time. Per-role policy
    * enforcement identity travels here so hook processes spawned by the agent
@@ -682,122 +694,9 @@ export function normalizeAgentOutputLine(
   request: AgentRunRequest,
   line: string,
 ): readonly AgentEvent[] {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(line) as unknown;
-    const findingEnvelope = readFindingEnvelope(parsed);
-    if (findingEnvelope !== undefined) {
-      if (!findingEnvelope.validation.valid) {
-        return [
-          createAgentEvent({
-            runId: request.runId,
-            roleId: request.roleId,
-            type: "error",
-            message: "invalid finding envelope",
-            data: {
-              errors: findingEnvelope.validation.errors,
-              finding: findingEnvelope.value,
-            },
-          }),
-        ];
-      }
-      return [
-        createAgentEvent({
-          runId: request.runId,
-          roleId: request.roleId,
-          type: "finding",
-          message: findingEnvelope.value.title,
-          data: findingEnvelope.value,
-        }),
-      ];
-    }
-    const outcomeEnvelope = readOutcomeEnvelope(parsed);
-    if (outcomeEnvelope !== undefined) {
-      if ("invalid" in outcomeEnvelope) {
-        return [
-          createAgentEvent({
-            runId: request.runId,
-            roleId: request.roleId,
-            type: "error",
-            message: "invalid outcome envelope",
-            data: { raw: parsed },
-          }),
-        ];
-      }
-      return [
-        createAgentEvent({
-          runId: request.runId,
-          roleId: request.roleId,
-          type: "outcome",
-          message: outcomeEnvelope.value.title,
-          data: outcomeEnvelope.value,
-        }),
-      ];
-    }
-    if (isAgentEventEnvelope(parsed)) {
-      return [
-        createAgentEvent({
-          runId: parsed.runId ?? request.runId,
-          roleId: parsed.roleId ?? request.roleId,
-          type: parsed.type,
-          message: parsed.message,
-          data: parsed.data,
-        }),
-      ];
-    }
-
-    const {
-      findings: nestedFindingEnvelopes,
-      outcomes: nestedOutcomeEnvelopes,
-    } = extractNestedEnvelopes(parsed);
-    const nestedFindings = nestedFindingEnvelopes.map((envelope) => {
-      if (!envelope.validation.valid) {
-        return createAgentEvent({
-          runId: request.runId,
-          roleId: request.roleId,
-          type: "error",
-          message: "invalid nested finding envelope",
-          data: { errors: envelope.validation.errors, finding: envelope.value },
-        });
-      }
-      return createAgentEvent({
-        runId: request.runId,
-        roleId: request.roleId,
-        type: "finding",
-        message: envelope.value.title,
-        data: envelope.value,
-      });
-    });
-    const nestedOutcomes = nestedOutcomeEnvelopes.map((envelope) => {
-      if ("invalid" in envelope) {
-        return createAgentEvent({
-          runId: request.runId,
-          roleId: request.roleId,
-          type: "error",
-          message: "invalid nested outcome envelope",
-        });
-      }
-      return createAgentEvent({
-        runId: request.runId,
-        roleId: request.roleId,
-        type: "outcome",
-        message: envelope.value.title,
-        data: envelope.value,
-      });
-    });
-    const nested = [...nestedFindings, ...nestedOutcomes];
-    if (nested.length > 0) {
-      return nested;
-    }
-
-    return [
-      createAgentEvent({
-        runId: request.runId,
-        roleId: request.roleId,
-        type: "stdout",
-        message: line,
-        data: parsed,
-      }),
-    ];
+    parsed = JSON.parse(line) as unknown;
   } catch {
     return [
       createAgentEvent({
@@ -808,12 +707,178 @@ export function normalizeAgentOutputLine(
       }),
     ];
   }
+  const shapes = request.outputSchemaShapes ?? [];
+
+  const findingEnvelope = readFindingEnvelope(parsed);
+  if (findingEnvelope !== undefined) {
+    if (!findingEnvelope.validation.valid) {
+      return [
+        unacceptedLineEvent(request, "invalid finding envelope", {
+          reason: "invalid_finding",
+          line,
+          nested: false,
+          errors: findingEnvelope.validation.errors,
+        }),
+      ];
+    }
+    return [
+      createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "finding",
+        message: findingEnvelope.value.title,
+        data: findingEnvelope.value,
+      }),
+    ];
+  }
+  const outcomeEnvelope = readOutcomeEnvelope(parsed);
+  if (outcomeEnvelope !== undefined) {
+    if ("invalid" in outcomeEnvelope) {
+      return [
+        unacceptedLineEvent(request, "invalid outcome envelope", {
+          reason: "invalid_outcome",
+          line,
+          nested: false,
+        }),
+      ];
+    }
+    return [
+      createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "outcome",
+        message: outcomeEnvelope.value.title,
+        data: outcomeEnvelope.value,
+      }),
+    ];
+  }
+  if (isAgentEventEnvelope(parsed)) {
+    return [
+      createAgentEvent({
+        runId: parsed.runId ?? request.runId,
+        roleId: parsed.roleId ?? request.roleId,
+        type: parsed.type,
+        message: parsed.message,
+        data: parsed.data,
+      }),
+    ];
+  }
+
+  const nested = extractNestedEnvelopes(parsed, shapes);
+  const nestedEvents = [
+    ...nested.findings.map((envelope) => {
+      if (!envelope.validation.valid) {
+        return unacceptedLineEvent(request, "invalid nested finding envelope", {
+          reason: "invalid_finding",
+          line: envelope.line,
+          nested: true,
+          errors: envelope.validation.errors,
+        });
+      }
+      return createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "finding",
+        message: envelope.value.title,
+        data: envelope.value,
+      });
+    }),
+    ...nested.outcomes.map((envelope) => {
+      if ("invalid" in envelope) {
+        return unacceptedLineEvent(request, "invalid nested outcome envelope", {
+          reason: "invalid_outcome",
+          line: envelope.line,
+          nested: true,
+        });
+      }
+      return createAgentEvent({
+        runId: request.runId,
+        roleId: request.roleId,
+        type: "outcome",
+        message: envelope.value.title,
+        data: envelope.value,
+      });
+    }),
+    ...nested.schemaShaped.map((match) =>
+      schemaShapedLineEvent(request, match.kind, match.line, true),
+    ),
+  ];
+  if (nestedEvents.length > 0) {
+    return nestedEvents;
+  }
+
+  // A stream record of the agent CLI's own (an assistant message, a result)
+  // is not role output to match against schemas; its text was scanned above.
+  if (!isAgentStreamRecord(parsed)) {
+    const kind = schemaShapedKind(parsed, shapes);
+    if (kind !== undefined) {
+      return [schemaShapedLineEvent(request, kind, line, false)];
+    }
+  }
+
+  return [
+    createAgentEvent({
+      runId: request.runId,
+      roleId: request.roleId,
+      type: "stdout",
+      message: line,
+      data: parsed,
+    }),
+  ];
+}
+
+function unacceptedLineEvent(
+  request: AgentRunRequest,
+  what: string,
+  warning: Omit<UnacceptedLineWarning, "kind">,
+): AgentEvent {
+  const data: UnacceptedLineWarning = { kind: "unaccepted_line", ...warning };
+  return createAgentEvent({
+    runId: request.runId,
+    roleId: request.roleId,
+    type: "warning",
+    message: `unaccepted output line: ${what}`,
+    data,
+  });
+}
+
+function schemaShapedLineEvent(
+  request: AgentRunRequest,
+  kind: string,
+  line: string,
+  nested: boolean,
+): AgentEvent {
+  return unacceptedLineEvent(
+    request,
+    `JSON with the ${kind} schema's fields, outside an envelope`,
+    { reason: "schema_shaped_json", line, nested, schemaKind: kind },
+  );
+}
+
+/**
+ * The declared kind whose shape a bare JSON object carries in full, if any.
+ * Arrays and scalars are never schema-shaped.
+ */
+function schemaShapedKind(
+  value: unknown,
+  shapes: readonly OutputSchemaShape[],
+): string | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  return shapes.find(
+    (shape) =>
+      shape.keys.length > 0 &&
+      shape.keys.every((key) => Object.hasOwn(value, key)),
+  )?.kind;
 }
 
 interface ParsedFindingEnvelope {
   readonly value: Finding;
   readonly validation: FindingValidationResult;
 }
+
+type Lined<T> = T & { readonly line: string };
 
 function readFindingEnvelope(
   value: unknown,
@@ -858,8 +923,13 @@ type NestedOutcome =
   | { readonly invalid: true };
 
 interface NestedEnvelopes {
-  readonly findings: readonly ParsedFindingEnvelope[];
-  readonly outcomes: readonly NestedOutcome[];
+  readonly findings: readonly Lined<ParsedFindingEnvelope>[];
+  readonly outcomes: readonly Lined<NestedOutcome>[];
+  /** JSON object lines matching no envelope but carrying a declared shape. */
+  readonly schemaShaped: readonly {
+    readonly kind: string;
+    readonly line: string;
+  }[];
 }
 
 /**
@@ -871,9 +941,13 @@ interface NestedEnvelopes {
  * Both envelope types share a single tree walk + line parse to avoid
  * scanning and JSON-parsing the same blob twice.
  */
-function extractNestedEnvelopes(value: unknown): NestedEnvelopes {
-  const findings: ParsedFindingEnvelope[] = [];
-  const outcomes: NestedOutcome[] = [];
+function extractNestedEnvelopes(
+  value: unknown,
+  shapes: readonly OutputSchemaShape[],
+): NestedEnvelopes {
+  const findings: Lined<ParsedFindingEnvelope>[] = [];
+  const outcomes: Lined<NestedOutcome>[] = [];
+  const schemaShaped: { kind: string; line: string }[] = [];
   for (const text of extractTextCandidates(value)) {
     for (const line of text.split(/\r?\n/).filter(Boolean)) {
       let parsed: unknown;
@@ -885,16 +959,21 @@ function extractNestedEnvelopes(value: unknown): NestedEnvelopes {
       }
       const finding = readFindingEnvelope(parsed);
       if (finding !== undefined) {
-        findings.push(finding);
+        findings.push({ ...finding, line });
         continue;
       }
       const outcome = readOutcomeEnvelope(parsed);
       if (outcome !== undefined) {
-        outcomes.push(outcome);
+        outcomes.push({ ...outcome, line });
+        continue;
+      }
+      const kind = schemaShapedKind(parsed, shapes);
+      if (kind !== undefined) {
+        schemaShaped.push({ kind, line });
       }
     }
   }
-  return { findings, outcomes };
+  return { findings, outcomes, schemaShaped };
 }
 
 /**
@@ -918,6 +997,30 @@ const NON_AGENT_OUTPUT_KEYS: ReadonlySet<string> = new Set([
   "tool_use_result",
   "tool_call",
 ]);
+
+/**
+ * Top-level record types the agent CLIs stream around the model's text:
+ * Claude Code and Cursor `assistant`/`result`/`thinking`, OpenCode
+ * `text`/`step_start`/`step_finish`, plus the non-agent types above.
+ */
+const AGENT_STREAM_RECORD_TYPES: ReadonlySet<string> = new Set([
+  ...NON_AGENT_OUTPUT_TYPES,
+  "assistant",
+  "result",
+  "thinking",
+  "text",
+  "reasoning",
+  "step_start",
+  "step_finish",
+]);
+
+function isAgentStreamRecord(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const type = (value as { readonly type?: unknown }).type;
+  return typeof type === "string" && AGENT_STREAM_RECORD_TYPES.has(type);
+}
 
 function isNonAgentOutput(node: object): boolean {
   const type = (node as { readonly type?: unknown }).type;

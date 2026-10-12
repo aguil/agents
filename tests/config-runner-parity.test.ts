@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,9 +7,10 @@ import {
   runCodeReviewFromConfig,
 } from "@aguil/agents-code-review/config-runner";
 import type { ContextBundle } from "@aguil/agents-context";
-import type { Finding } from "@aguil/agents-core";
+import type { AgentEvent, Finding } from "@aguil/agents-core";
 import { createAgentEvent } from "@aguil/agents-core";
 import type { AgentAdapter, AgentRunRequest } from "@aguil/agents-execution";
+import { normalizeAgentOutputLine } from "@aguil/agents-execution";
 
 const AGENTS_DIR = join(import.meta.dir, "..", ".agents");
 
@@ -685,5 +686,71 @@ test("config harness resolver precedence is workspace over global over package",
     }
     await rm(workspacePath, { recursive: true, force: true });
     await rm(homePath, { recursive: true, force: true });
+  }
+});
+
+test("agents code-review warns on an echoed template finding, and fails on it under --strict (JC-6, #93)", async () => {
+  // The finding's id is the prompt's template, echoed back unfilled.
+  const echoed = JSON.stringify({
+    finding: finding(`${"$"}{request.roleId}-duplicate-calls`),
+  });
+  const echoingAdapter: AgentAdapter = {
+    ...scriptedAdapter({}),
+    async *run(request: AgentRunRequest) {
+      if (request.roleId === "quality") {
+        yield* normalizeAgentOutputLine(request, echoed);
+      }
+    },
+  };
+  for (const strict of [false, true]) {
+    const workspacePath = await mkdtemp(join(tmpdir(), "config-unaccepted-"));
+    try {
+      const contextBundlePath = await writeBundle(workspacePath, "full");
+      const result = await runConfigured(
+        workspacePath,
+        contextBundlePath,
+        echoingAdapter,
+        strict,
+      );
+      const events = (
+        await readFile(
+          join(
+            workspacePath,
+            "configured",
+            "code-review-parity",
+            "events.jsonl",
+          ),
+          "utf8",
+        )
+      )
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as AgentEvent);
+      const quality = events.filter((event) => event.roleId === "quality");
+      expect(
+        quality.filter((event) => event.type === "warning").map((e) => e.data),
+      ).toEqual([
+        {
+          kind: "unaccepted_line",
+          reason: "invalid_finding",
+          line: echoed,
+          nested: false,
+          errors: ["id looks like an echoed prompt template"],
+        },
+      ]);
+      expect(result.findings).toHaveLength(0);
+      if (strict) {
+        expect(result.status).toBe("error");
+        expect(result.metadata?.failed_roles).toBe("quality");
+        expect(
+          quality.find((event) => event.type === "error")?.message,
+        ).toStartWith("--strict: unaccepted output line: invalid finding");
+      } else {
+        expect(result.status).toBe("passed");
+        expect(quality.some((event) => event.type === "error")).toBe(false);
+      }
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
   }
 });
