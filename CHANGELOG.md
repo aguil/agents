@@ -10,6 +10,20 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.10](https://github.com/aguil/agents/compare/v0.8.9...v0.8.10) (2026-10-12)
+
+
+### Added
+
+* **cli:** record harness run events and each failed role's reason ([5472ad9](https://github.com/aguil/agents/commit/5472ad908df11a26243b3d4c2e6bcdbb39636991))
+* **cli:** warn when a chain run passes having emitted nothing ([6fa8e23](https://github.com/aguil/agents/commit/6fa8e23ad3dabcbb50ccbd8bd784744feb2393dd))
+
+
+### Fixed
+
+* **execution:** stop sending the code-review envelope to harness run roles ([ddf06fb](https://github.com/aguil/agents/commit/ddf06fb58586408dddaf51f8ae9a1f91683f6c56)), closes [#211](https://github.com/aguil/agents/issues/211)
+* **execution:** warn on an unaccepted output line; fail its role only under --strict ([47347aa](https://github.com/aguil/agents/commit/47347aa2a794e125257dab037af57653b7fa53f5)), closes [#93](https://github.com/aguil/agents/issues/93)
+
 ## [0.8.9](https://github.com/aguil/agents/compare/v0.8.8...v0.8.9) (2026-10-11)
 
 
