@@ -64,11 +64,13 @@ to hold even the truncation marker admits no note at all. Clause 8 then records
 the eligible notes as omitted. So the report has to tell "nothing qualified"
 apart from "notes qualified but the budget admitted none".
 
-It also has to know whether the notes it read were all of them. The scan stops
-after a fixed number of Markdown paths (10,000 by default,
-`DEFAULT_KNOWLEDGE_MAX_SCANNED` in `packages/context/src/knowledge.ts`) and
-records a `scan-truncated` skip. Past that point the store is unread, so a
-truncated scan that admitted nothing cannot say the store held nothing eligible.
+It also has to know whether the notes it read were all of them. Two things leave
+part of a store unread. The scan stops after a fixed number of Markdown paths
+(10,000 by default, `DEFAULT_KNOWLEDGE_MAX_SCANNED` in
+`packages/context/src/knowledge.ts`) and records a `scan-truncated` skip. And a
+directory inside the store may not be listable, which the scan today passes over
+without a word. Either way, a scan that admitted nothing cannot say the store
+held nothing eligible.
 
 **Decision:**
 
@@ -101,8 +103,11 @@ truncated scan that admitted nothing cannot say the store held nothing eligible.
      - `absent`: nothing exists at the path.
      - `unreadable`: something exists at the path but cannot be listed as a
        directory.
-     - `scan-truncated`: the scan stopped at its path limit, so part of the
-       store was never read. The states below would claim more than is known, so
+     - `scan-incomplete`: part of the store was never read, because the scan
+       stopped at its path limit or a directory inside the store could not be
+       listed, and the part that was read held no eligible note. The
+       `<provider>:_meta:skipped` report says which, with a `scan-truncated` or
+       `unreadable` entry. The states below would claim more than is known, so
        this one takes precedence over them.
      - `no-notes`: the directory was listed and holds no Markdown file.
      - `all-skipped`: Markdown files exist, but ADR 0022 clause 4 skipped every
@@ -125,7 +130,7 @@ truncated scan that admitted nothing cannot say the store held nothing eligible.
    listing as an empty one. For the same reason, a subdirectory inside the store
    that cannot be listed is reported in `<provider>:_meta:skipped` with the
    reason `unreadable`, as an unreadable note file already is. It is not passed
-   over silently.
+   over silently, and it makes the scan incomplete under clause 3.
 
 5. **The report is a record, not a verdict.** It does not fail the role or the
    run, does not change run status (which stays gate-owned, per ADR 0021), and

@@ -163,7 +163,7 @@ so it is upheld in review.
   — ADR 0027: a `knowledge` or `knowledge-search` provider that admits no note
   adds one `<provider>:_meta:nothing-admitted` report to the bundle, naming the
   request and the store's state (`outside-workspace`, `absent`, `unreadable`,
-  `scan-truncated`, `no-notes`, `all-skipped`, `none-eligible` or
+  `scan-incomplete`, `no-notes`, `all-skipped`, `none-eligible` or
   `over-budget`); the store's state is determined, not inferred from an empty
   listing; never a failure. Partially supersedes ADR 0022 §4 on what an absent
   or empty store yields. Proposed.
