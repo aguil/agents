@@ -98,3 +98,28 @@ Two precedence rules, both deliberate:
 Role files are repo-scoped and shared; the per-harness `harnesses/<id>/prompts/`
 convention is unchanged and remains the right home for a prompt used by exactly
 one harness.
+
+## Checking for a deliverable
+
+A chain run's status belongs to its `execution.pass_check` (ADR 0021): the
+runtime runs the command in the workspace after the last role, and the run
+passes only if it exits 0. Role output never decides it. So when a harness
+exists to produce something, such as a report file, say so in `pass_check`.
+Otherwise a run whose roles wrote nothing still passes.
+
+```yaml
+execution:
+  mode: chain
+  order: [probe, report]
+  pass_check: ["test", "-e", "reports/claim-verify.md"]
+```
+
+`pass_check` is an argv array run without a shell, so it takes one command. To
+check several things, point it at a script that does, for example
+`["sh", "-c", "test -s reports/out.md && grep -q '^## Verdict' reports/out.md"]`.
+`test -s` also fails on an empty file, which `test -e` does not.
+
+`agents harness run` prints a warning when a chain run passes with no outcomes
+and no findings, because that is what a run that skipped its work looks like.
+The warning does not change the status. A harness that checks for its
+deliverable in `pass_check` fails instead.
