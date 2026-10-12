@@ -61,6 +61,8 @@ import {
   resolveReportRenderer,
   statusAfterFindingPipelines,
 } from "@aguil/agents-reporting";
+import type { EventSink } from "@aguil/agents-telemetry";
+import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import { parseRoleModels } from "./role-models";
 
 export { POLICY_NONE_TOKEN } from "@aguil/agents-policy";
@@ -700,6 +702,9 @@ export async function runHarnessRunCli(
 
   const passGate = makePassGate(loaded.definition.execution, workspacePath);
   const validateRoleOutcomes = roleOutcomeValidator(loaded);
+  // The run's events go to events.jsonl beside result.raw.json, as under
+  // `agents code-review`, so a failed role's reason is in the record (JC-7).
+  const record = runEventRecord(join(scratchpadPath, "events.jsonl"));
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
@@ -714,6 +719,7 @@ export async function runHarnessRunCli(
           },
     ),
     contextBundlePath,
+    eventSink: record.sink,
     ...(onRoleStart === undefined ? {} : { onRoleStart }),
     ...(roleEnv === undefined ? {} : { roleEnv }),
     ...(passGate === undefined ? {} : { passGate }),
@@ -814,6 +820,11 @@ export async function runHarnessRunCli(
   );
   if ((result.metadata?.failed_roles ?? "") !== "") {
     console.log(`roles failed: ${result.metadata?.failed_roles}`);
+    for (const roleId of result.metadata?.failed_roles?.split(",") ?? []) {
+      console.log(
+        `- ${roleId}: ${record.firstErrors.get(roleId) ?? "(no error event recorded)"}`,
+      );
+    }
   }
   if (hasPipelines) {
     console.log(
@@ -850,6 +861,30 @@ export async function runHarnessRunCli(
   }
   console.log(`artifacts: ${scratchpadPath}`);
   return status === "passed" ? 0 : 1;
+}
+
+/**
+ * The run's event sink: every event to `events.jsonl`, and, for the summary,
+ * each role's first error line.
+ */
+export function runEventRecord(path: string): {
+  readonly sink: EventSink;
+  readonly firstErrors: ReadonlyMap<string, string>;
+} {
+  const file = new JsonlFileEventSink(path);
+  const firstErrors = new Map<string, string>();
+  return {
+    sink: {
+      async write(event) {
+        await file.write(event);
+        if (event.type === "error" && !firstErrors.has(event.roleId)) {
+          const firstLine = (event.message ?? "").split("\n")[0]?.trim();
+          firstErrors.set(event.roleId, firstLine || "error (no message)");
+        }
+      },
+    },
+    firstErrors,
+  };
 }
 
 /**
