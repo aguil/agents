@@ -657,7 +657,7 @@ test("KnowledgeProvider stops admitting at the first note the bytes left cannot 
   });
 });
 
-test("at the minimum max_bytes the top-ranked note is still admitted (ADR 0022 §7)", async () => {
+test("at the minimum max_bytes the top-ranked note is admitted as a marker (ADR 0022 §7)", async () => {
   await withWorkspace(async (workspacePath) => {
     await writeNote(
       workspacePath,
@@ -673,9 +673,11 @@ test("at the minimum max_bytes the top-ranked note is still admitted (ADR 0022 �
     const leader = artifacts.find(
       (artifact) => artifact.id === "knowledge:leader",
     );
-    expect(leader?.content).toContain("[truncated at");
-    expect(
-      Buffer.byteLength(leader?.content ?? "", "utf8"),
-    ).toBeLessThanOrEqual(KNOWLEDGE_MIN_MAX_BYTES);
+    // The whole budget is the marker: the note is admitted with no content
+    // bytes, and the truncation is marked, as clause 7 promises.
+    expect(leader?.content).toBe("\n[truncated at 0 bytes]");
+    expect(Buffer.byteLength(leader?.content ?? "", "utf8")).toBe(
+      KNOWLEDGE_MIN_MAX_BYTES,
+    );
   });
 });
