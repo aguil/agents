@@ -1411,8 +1411,16 @@ export function buildClaudeCodeCommand(
   const model = resolveModelForRole(request.roleId, options);
   const defaultTemplate: readonly string[] =
     options.settingsPath === undefined
-      ? ["-p", "{prompt}"]
-      : ["-p", "{prompt}", "--settings", "{settings}"];
+      ? ["-p", "{prompt}", "--output-format", "stream-json", "--verbose"]
+      : [
+          "-p",
+          "{prompt}",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--settings",
+          "{settings}",
+        ];
   const template = options.argsTemplate ?? defaultTemplate;
   assertClaudeHookEnforcementArgs(template, options);
   const args = template.map((arg) => substituteTemplateArg(arg, substitutions));

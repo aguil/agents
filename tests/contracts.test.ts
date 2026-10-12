@@ -2880,6 +2880,52 @@ test("builds claude command behind the adapter boundary", () => {
   expect(command[2]).toContain("quality specialist");
 });
 
+test("claude default command asks for stream JSON, with and without --settings (#252)", () => {
+  const request = {
+    runId: "run-1",
+    roleId: "quality",
+    prompt: "Review.",
+    workspacePath: "/repo",
+    contextBundlePath: "/scratch/context.json",
+    scratchpadPath: "/scratch",
+    timeoutMs: 1_000,
+    allowedCommands: [] as string[],
+  };
+
+  const plain = buildClaudeCodeCommand(request, "/scratch/req.json", {
+    model: "claude-sonnet",
+  });
+  expect([plain[0], plain[1], ...plain.slice(3)]).toEqual([
+    "claude",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "claude-sonnet",
+  ]);
+  expect(plain[2]).toContain("quality");
+
+  // Under a policy the generated settings must load, and the default must
+  // pass the hook-enforcement check it is held to.
+  const enforced = buildClaudeCodeCommand(request, "/scratch/req.json", {
+    model: "claude-sonnet",
+    settingsPath: "/scratch/claude-settings.json",
+    requireHookEnforcement: true,
+  });
+  expect([enforced[0], enforced[1], ...enforced.slice(3)]).toEqual([
+    "claude",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--settings",
+    "/scratch/claude-settings.json",
+    "--model",
+    "claude-sonnet",
+  ]);
+});
+
 test("claude command passes --settings and refuses bare/safe under policy (ADR 0023)", () => {
   const request = {
     runId: "run-1",

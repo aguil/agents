@@ -101,13 +101,13 @@ adapters:
 
 Current real adapters and their subprocess entry points:
 
-| Adapter               | Subprocess                                                 |
-| --------------------- | ---------------------------------------------------------- |
-| `OpenCodeAdapter`     | `opencode run --format json`                               |
-| `ClaudeCodeAdapter`   | `claude` (configurable argv template)                      |
-| `CursorAdapter`       | `agent --print --output-format stream-json` (configurable) |
-| `SessionAgentAdapter` | Cursor app_server via `json_rpc_session_v1` protocol       |
-| `FakeAgentAdapter`    | In-process deterministic output (no subprocess)            |
+| Adapter               | Subprocess                                                       |
+| --------------------- | ---------------------------------------------------------------- |
+| `OpenCodeAdapter`     | `opencode run --format json`                                     |
+| `ClaudeCodeAdapter`   | `claude -p --output-format stream-json --verbose` (configurable) |
+| `CursorAdapter`       | `agent --print --output-format stream-json` (configurable)       |
+| `SessionAgentAdapter` | Cursor app_server via `json_rpc_session_v1` protocol             |
+| `FakeAgentAdapter`    | In-process deterministic output (no subprocess)                  |
 
 `SessionAgentAdapter` communicates over a JSON-RPC session with a running Cursor
 agent server. The underlying transport is `JsonRpcAgentSessionClient` (wraps

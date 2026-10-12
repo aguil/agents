@@ -24,7 +24,7 @@ Discover models with `opencode models` (or `opencode models <provider>`).
 bun run agents code-review --adapter claude --model claude-sonnet-4
 bun run agents code-review --adapter claude --model claude-opus-4
 bun run agents code-review --adapter claude --model claude-haiku-4
-bun run agents code-review --adapter claude --claude-args "-p,{prompt},--model,claude-sonnet-4"
+bun run agents code-review --adapter claude --claude-args "-p,{prompt},--output-format,stream-json,--verbose,--model,claude-sonnet-4"
 ```
 
 Common model IDs:
@@ -77,8 +77,10 @@ Enabled by default. Emits deterministic metadata in `result.json`.
 
 - **OpenCode:** defaults enable `--pure`; use `--variant <id>` to pin a
   provider-specific effort profile.
-- **Claude:** conservative defaults; no extra CLI args unless `--claude-args` is
-  set.
+- **Claude:** defaults use `-p {prompt} --output-format stream-json --verbose`,
+  plus `--settings` under a policy, so `stdout.log` records each tool call and
+  denial. A `--claude-args` template replaces the defaults; one without
+  `--output-format stream-json` records only Claude's final text.
 - **Cursor:** defaults use
   `--print --output-format stream-json --trust --sandbox enabled` (no `--force`;
   see ADR 0020).

@@ -152,6 +152,48 @@ test("a Claude stream run through a role yields one outcome per envelope and not
   }
 });
 
+test("a text-mode argsTemplate still yields its envelopes, as before stream JSON", async () => {
+  const scratchpadPath = await mkdtemp(join(tmpdir(), "claude-text-"));
+  try {
+    // Stand-in for `claude -p` in text mode: record argv, print plain text
+    // with an envelope on a line of its own.
+    const argvPath = join(scratchpadPath, "argv.txt");
+    const executable = join(scratchpadPath, "claude-text.sh");
+    await writeFile(
+      executable,
+      `#!/bin/sh\nprintf '%s\\n' "$@" > '${argvPath}'\n` +
+        `echo 'Checked the claim.'\n` +
+        `echo '{"outcome":{"id":"text-1","kind":"claim","sourceRole":"probe","title":"text mode","data":{"number":1,"result":"ok"}}}'\n`,
+    );
+    await chmod(executable, 0o755);
+
+    const adapter = new ClaudeCodeAdapter({
+      executable,
+      argsTemplate: ["-p", "{prompt}"],
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of adapter.run(request(scratchpadPath))) {
+      events.push(event);
+    }
+
+    const argv = (await readFile(argvPath, "utf8")).split("\n");
+    expect(argv[0]).toBe("-p");
+    expect(argv).not.toContain("--output-format");
+    expect(argv).not.toContain("stream-json");
+    const outcomes = events.filter((event) => event.type === "outcome");
+    expect(outcomes.map((event) => event.message)).toEqual(["text mode"]);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "stdout" && event.message === "Checked the claim.",
+      ),
+    ).toBe(true);
+    expect(events.filter((event) => event.type === "warning")).toEqual([]);
+  } finally {
+    await rm(scratchpadPath, { recursive: true, force: true });
+  }
+});
+
 test("an envelope only in result.permission_denials yields nothing", async () => {
   const resultLine = (await fixtureLines()).find(
     (line) => (JSON.parse(line) as { type?: unknown }).type === "result",
