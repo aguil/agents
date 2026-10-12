@@ -1005,10 +1005,16 @@ const NON_AGENT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
   "system",
 ]);
 
-/** Object keys that hold tool I/O outside a typed block. */
+/**
+ * Object keys that hold tool I/O outside a typed block. Claude Code's stream
+ * repeats each call's input in an assistant record's `wire_tool_inputs`, and
+ * each denied call's input in its `result` record's `permission_denials`.
+ */
 const NON_AGENT_OUTPUT_KEYS: ReadonlySet<string> = new Set([
   "tool_use_result",
   "tool_call",
+  "wire_tool_inputs",
+  "permission_denials",
 ]);
 
 /**
