@@ -167,3 +167,14 @@ so it is upheld in review.
   `scan-incomplete`, `no-notes`, `all-skipped` or `none-eligible`); the store's
   state is determined, not inferred from an empty listing; never a failure.
   Partially supersedes ADR 0022 §4 on what an absent or empty store yields.
+- [0028-user-hook-scope-applied-at-call-time.md](0028-user-hook-scope-applied-at-call-time.md)
+  — ADR 0028: a harness-declared tool-call hook runs behind an
+  `agents hook-gate` that applies its `matcher` and `applies_to` at call time on
+  every adapter, from one table of each native event's classes and tool-name
+  field; a gate that skips prints nothing; Cursor user hooks gain `preToolUse`
+  (edit), `afterShellExecution` and `afterMCPExecution` on measured
+  `cursor-agent` versions only; Claude Code's native matcher is the `applies_to`
+  projection; the gate is probed before any role runs; a `matcher` that can
+  match none of an adapter's shell or edit tool names warns at load. Partially
+  supersedes ADR 0006 §4 and ADR 0023 decision 1, and is an exception to ADR
+  0006 §3 and ADR 0009 decision 1 for the added Cursor events.
