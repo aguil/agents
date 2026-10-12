@@ -806,6 +806,18 @@ export async function runHarnessRunCli(
       })
     : result.status;
 
+  // A chain run that passes having emitted nothing is what a skipped
+  // deliverable looks like (#238 item 1). Warn, never decide status (JC-4).
+  if (
+    status === "passed" &&
+    loaded.definition.execution?.mode === "chain" &&
+    (result.outcomes ?? []).length === 0 &&
+    result.findings.length === 0
+  ) {
+    console.warn(
+      'harness run: the chain run passed with no outcomes and no findings. If it must produce a deliverable, check for it in execution.pass_check, for example ["test", "-e", "<path>"].',
+    );
+  }
   console.log(`run: ${result.runId}`);
   console.log(`status: ${status}`);
   console.log(`execution: ${result.metadata?.execution_mode ?? "parallel"}`);
