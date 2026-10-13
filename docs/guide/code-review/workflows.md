@@ -26,6 +26,10 @@ envelope (an echoed template finding is one), or a bare JSON object carrying a
 declared output schema's fields outside an envelope. Without `--strict`, such a
 line is a `warning` event in `events.jsonl` and the run continues.
 
+It also fails the `conformance` role when any acceptance-criteria row gets no
+verdict. Without `--strict`, the Plan Conformance section lists such a row as
+"no result" and the run can still pass.
+
 ### PR comment template
 
 Use this when posting manual HITL output to a pull request:
@@ -207,8 +211,9 @@ bun run agents code-review --pr 42
 
 `report.md` gains a Plan Conformance section listing each row as satisfied,
 unsatisfied, or unverifiable. Unsatisfied and unverifiable rows are also
-findings, titled `[<row id>] …`. Without criteria the role does not run, and the
-section says why.
+findings, titled `[<row id>] …`. A row the role never answered shows as "no
+result"; under `--strict` it fails the role. Without criteria the role does not
+run, and the section says why.
 
 ## Consensus mode (`--consensus <n>`)
 

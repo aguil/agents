@@ -2901,6 +2901,7 @@ test("claude default command asks for stream JSON, with and without --settings (
     "--output-format",
     "stream-json",
     "--verbose",
+    "--add-dir=/scratch",
     "--model",
     "claude-sonnet",
   ]);
@@ -2921,9 +2922,63 @@ test("claude default command asks for stream JSON, with and without --settings (
     "--verbose",
     "--settings",
     "/scratch/claude-settings.json",
+    "--add-dir=/scratch",
     "--model",
     "claude-sonnet",
   ]);
+});
+
+test("claude command grants the run directory when it is outside the workspace (#277)", () => {
+  // code-review --pr: the role runs in a detached worktree, and the run
+  // directory stays under the anchor workspace.
+  const pr = {
+    runId: "run-1",
+    roleId: "conformance",
+    prompt: "Review.",
+    workspacePath: "/anchor/.agents-code-review/worktrees/abc",
+    contextBundlePath:
+      "/anchor/.agents-code-review/runs/r1/context/bundle.json",
+    scratchpadPath: "/anchor/.agents-code-review/runs/r1/roles/conformance",
+    timeoutMs: 1_000,
+    allowedCommands: [] as string[],
+  };
+  const requestPath = `${pr.scratchpadPath}/conformance.request.json`;
+  const granted = buildClaudeCodeCommand(pr, requestPath).filter((arg) =>
+    arg.startsWith("--add-dir"),
+  );
+  expect(granted).toEqual([
+    "--add-dir=/anchor/.agents-code-review/runs/r1/context",
+    "--add-dir=/anchor/.agents-code-review/runs/r1/roles/conformance",
+  ]);
+
+  // A custom template without {prompt} gets the prompt appended last; the
+  // `=` form keeps the variadic flag from taking it as a directory.
+  const custom = buildClaudeCodeCommand(pr, requestPath, {
+    argsTemplate: ["-p", "--output-format", "stream-json"],
+  });
+  expect(custom.at(-1)).toContain("conformance specialist");
+  expect(custom).not.toContain("--add-dir");
+
+  // Without --pr the run directory is inside the workspace: nothing to grant.
+  const local = {
+    ...pr,
+    workspacePath: "/anchor",
+  };
+  expect(
+    buildClaudeCodeCommand(local, requestPath).some((arg) =>
+      arg.startsWith("--add-dir"),
+    ),
+  ).toBe(false);
+
+  // A sibling whose name merely starts with ".." is still inside.
+  const dotted = {
+    ...pr,
+    workspacePath: "/w",
+    contextBundlePath: "/w/..cache/bundle.json",
+  };
+  expect(buildClaudeCodeCommand(dotted, "/w/..cache/req.json")).not.toContain(
+    "--add-dir=/w/..cache",
+  );
 });
 
 test("claude command passes --settings and refuses bare/safe under policy (ADR 0023)", () => {

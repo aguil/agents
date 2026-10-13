@@ -103,5 +103,6 @@ verdict that arrives without its finding fails the role, so the run cannot pass
 under a failing row.
 
 `report.md` gets a **Plan Conformance** section listing every row with its
-status. A row the role never reported is listed as having no result. When the
-role did not run, the section says why.
+status. A row the role never reported is listed as having no result, and does
+not move run status. Under `--strict` it fails the conformance role, so the run
+ends in `error` (ADR 0029). When the role did not run, the section says why.

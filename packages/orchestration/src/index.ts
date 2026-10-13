@@ -238,11 +238,15 @@ export interface NativeBunOrchestratorOptions {
    * outcomes included). Non-empty violations fail the role — an outcome
    * that breaks its declared contract is a protocol violation, same class
    * as a malformed envelope. Injected (like passGate/roleEnv) so the spec
-   * evaluation dependency stays out of orchestration.
+   * evaluation dependency stays out of orchestration. The run's strict mode
+   * and metadata are passed so a check can depend on what the run scheduled
+   * (the conformance criteria, ADR 0025).
    */
   readonly validateRoleOutcomes?: (input: {
     readonly roleId: string;
     readonly outcomes: readonly HarnessOutcome[];
+    readonly strictMode?: boolean;
+    readonly metadata?: Readonly<Record<string, string>>;
   }) => readonly RoleOutcomeViolation[];
 }
 
@@ -630,6 +634,10 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
           artifacts: [],
           outcome,
         }),
+        strictMode: request.strictMode === true,
+        ...(request.metadata === undefined
+          ? {}
+          : { metadata: request.metadata }),
       });
       if (violations.length > 0) {
         outcome = "failed";

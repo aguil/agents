@@ -1,6 +1,7 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
+  conformanceCoverageViolations,
   conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,
@@ -115,7 +116,10 @@ Optional:
   --strict                 Fail the run on a timed-out role, and fail a role on
                            an unaccepted output line (an invalid finding or
                            outcome envelope, or bare JSON carrying a declared
-                           output schema's fields). Without it these warn.
+                           output schema's fields). In a harness that collects
+                           acceptance criteria, also fail the conformance role
+                           when a criterion gets no verdict. Without it these
+                           warn.
   --allow-unenforced-policy
                            Permit adapters that cannot enforce a declared policy
   --force-tool-calls       Pass Cursor --force (auto-allow unless denied).
@@ -935,6 +939,8 @@ export function roleOutcomeValidator(
 ): (input: {
   readonly roleId: string;
   readonly outcomes: readonly HarnessOutcome[];
+  readonly strictMode?: boolean;
+  readonly metadata?: Readonly<Record<string, string>>;
 }) => readonly {
   readonly outcomeId: string;
   readonly kind: string;
@@ -948,6 +954,11 @@ export function roleOutcomeValidator(
     ...(outputSchemas === undefined
       ? []
       : validateOutcomesAgainstSchemas(input.outcomes, outputSchemas)),
-    ...(checksConformance ? conformanceOutcomeViolations(input) : []),
+    ...(checksConformance
+      ? [
+          ...conformanceOutcomeViolations(input),
+          ...conformanceCoverageViolations(input),
+        ]
+      : []),
   ];
 }

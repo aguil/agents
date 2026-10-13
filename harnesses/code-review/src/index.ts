@@ -304,6 +304,7 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 export {
+  conformanceCoverageViolations,
   conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,

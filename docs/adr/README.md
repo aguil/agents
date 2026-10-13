@@ -153,7 +153,8 @@ so it is upheld in review.
   acceptance-criteria rows; one row format meant to be shared with an
   author-side self-review trace; an `acceptance-criteria` provider that records
   why rows are absent; an always-bound `acceptance_criteria` CEL count; per-row
-  outcomes plus findings for rows that are not satisfied.
+  outcomes plus findings for rows that are not satisfied. Partially superseded
+  by ADR 0029 on unreported rows under `--strict`.
 - [0026-exec-rules-match-program-and-subcommand.md](0026-exec-rules-match-program-and-subcommand.md)
   — ADR 0026: exec deny rules match the resolved program and subcommand,
   skipping options, assignments and paths; allow rules stay a word prefix; an
@@ -180,3 +181,9 @@ so it is upheld in review.
   name warns at load, and an invalid one fails it. Partially supersedes ADR 0006
   §4; an exception to ADR 0006 §3, ADR 0009 decision 1 and ADR 0023 decision 9
   for the added Cursor events; no `spec_version` increment.
+- [0029-strict-counts-unreported-conformance-rows.md](0029-strict-counts-unreported-conformance-rows.md)
+  — ADR 0029: under `--strict`, a scheduled acceptance-criteria row the
+  `conformance` role leaves without a verdict fails that role, so the run ends
+  in `error`; without `--strict` it stays "no result" and status is unchanged.
+  Partially supersedes ADR 0025's consequence that unreported rows do not move
+  run status.

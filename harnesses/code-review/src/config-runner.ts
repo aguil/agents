@@ -42,6 +42,7 @@ import {
 } from "@aguil/agents-reporting";
 import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import {
+  conformanceCoverageViolations,
   conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,
@@ -482,11 +483,14 @@ export async function runCodeReviewFromConfig(
     validateRoleOutcomes: (input: {
       readonly roleId: string;
       readonly outcomes: readonly import("@aguil/agents-core").HarnessOutcome[];
+      readonly strictMode?: boolean;
+      readonly metadata?: Readonly<Record<string, string>>;
     }) => [
       ...(outputSchemas === undefined
         ? []
         : validateOutcomesAgainstSchemas(input.outcomes, outputSchemas)),
       ...conformanceOutcomeViolations(input),
+      ...conformanceCoverageViolations(input),
     ],
   });
 

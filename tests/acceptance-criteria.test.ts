@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  conformanceCoverageViolations,
   conformanceOutcomeViolations,
   conformanceReportedMetadata,
   conformanceRunMetadata,
@@ -779,6 +780,93 @@ test("an unsatisfied verdict without its finding fails the conformance role", as
       "The conformance role failed",
     );
   });
+});
+
+test("under --strict, a criterion left without a verdict fails the conformance role (#277)", async () => {
+  const metadata = {
+    conformance: "scheduled",
+    conformance_criteria: "AC-1,AC-2",
+  };
+  const verdicts = [
+    conformanceOutcome("AC-1", "satisfied", "src/hash.ts:4 sorts keys."),
+  ];
+  expect(
+    conformanceCoverageViolations({
+      roleId: "conformance",
+      outcomes: verdicts,
+      strictMode: true,
+      metadata,
+    }).flatMap((violation) => violation.errors),
+  ).toEqual([
+    "--strict: no conformance verdict for AC-2; every scheduled criterion needs one",
+  ]);
+  for (const input of [
+    // Not strict: the report marks the row unchecked instead.
+    { roleId: "conformance", outcomes: verdicts, metadata },
+    // Another role, or a run that did not schedule conformance.
+    { roleId: "quality", outcomes: [], strictMode: true, metadata },
+    {
+      roleId: "conformance",
+      outcomes: [],
+      strictMode: true,
+      metadata: { conformance: "not_run" },
+    },
+    // Every row answered.
+    {
+      roleId: "conformance",
+      outcomes: [
+        ...verdicts,
+        conformanceOutcome("AC-2", "satisfied", "src/fallback.ts:9 reads it."),
+      ],
+      strictMode: true,
+      metadata,
+    },
+  ]) {
+    expect(conformanceCoverageViolations(input)).toEqual([]);
+  }
+
+  // A role that reports nothing at all, as when it cannot read its request.
+  const silent: AgentAdapter = {
+    name: "silent",
+    capabilities: () => ({
+      streaming: false,
+      structuredOutput: true,
+      readOnlyMode: true,
+      mcp: false,
+      cancellation: false,
+    }),
+    async *run() {},
+  };
+  for (const strict of [false, true]) {
+    await withWorkspace(async (workspace) => {
+      const parsed = parseAcceptanceCriteria(JSON.stringify(CRITERIA));
+      const result = await runCodeReviewFromConfig({
+        agentsDir: AGENTS_DIR,
+        workspacePath: workspace,
+        runId: `code-review-silent-conformance-${strict}`,
+        contextBundlePath: await writeBundle(workspace, {
+          status: "loaded",
+          reason: "2 criteria from plan.json",
+          sources: ["plan.json"],
+          criteria: parsed.ok ? parsed.document.criteria : [],
+        }),
+        adapter: silent,
+        scratchpadRoot: join(workspace, "runs"),
+        strict,
+      });
+      expect(result.metadata?.conformance_reported).toBe("");
+      if (strict) {
+        expect(result.metadata?.failed_roles).toBe("conformance");
+        expect(result.status).toBe("error");
+        expect(await readFile(result.reportPath, "utf8")).toContain(
+          "The conformance role failed",
+        );
+      } else {
+        expect(result.metadata?.failed_roles).toBe("");
+        expect(result.status).toBe("passed");
+      }
+    });
+  }
 });
 
 test("a verdict without detail is not counted and fails the role", () => {
