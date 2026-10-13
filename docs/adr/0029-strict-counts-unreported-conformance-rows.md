@@ -1,10 +1,13 @@
 # ADR 0029: under `--strict`, a conformance row with no verdict fails the conformance role
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Status history:**
 
 - 2026-10-13 — Proposed.
+- 2026-10-13 — Accepted: by the operator, merged in #279 with its
+  implementation. From here this ADR is immutable except for these status
+  fields.
 
 **Context:** ADR 0025 added an optional `conformance` role that checks a change
 against acceptance-criteria rows. Decision 6 made sure a row the role never
