@@ -153,7 +153,8 @@ so it is upheld in review.
   acceptance-criteria rows; one row format meant to be shared with an
   author-side self-review trace; an `acceptance-criteria` provider that records
   why rows are absent; an always-bound `acceptance_criteria` CEL count; per-row
-  outcomes plus findings for rows that are not satisfied.
+  outcomes plus findings for rows that are not satisfied. Partially superseded
+  by ADR 0029 on unreported rows under `--strict`.
 - [0026-exec-rules-match-program-and-subcommand.md](0026-exec-rules-match-program-and-subcommand.md)
   — ADR 0026: exec deny rules match the resolved program and subcommand,
   skipping options, assignments and paths; allow rules stay a word prefix; an

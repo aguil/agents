@@ -1,6 +1,6 @@
 # ADR 0025: optional plan-conformance role gated on supplied acceptance criteria
 
-**Status:** Accepted
+**Status:** Partially superseded by ADR 0029
 
 **Status history:**
 
@@ -10,6 +10,10 @@
   re-adjudication did not apply: the replay referee compares findings, triage
   tier, and status, not `report.md`, and every corpus entry replayed with the
   same verdict and delta hash before and after the merge.
+- 2026-10-13 — Partially superseded by ADR 0029: the Consequences bullet that
+  rows the role leaves unreported do not move run status, for `--strict` runs
+  only. Under `--strict` such a row fails the conformance role. Every decision
+  in this ADR stands.
 
 **Context:** The code-review harness reviews a diff for defects. It has no idea
 what plan or design the change was written against. In one review round, two
