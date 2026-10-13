@@ -180,3 +180,9 @@ so it is upheld in review.
   name warns at load, and an invalid one fails it. Partially supersedes ADR 0006
   §4; an exception to ADR 0006 §3, ADR 0009 decision 1 and ADR 0023 decision 9
   for the added Cursor events; no `spec_version` increment.
+- [0029-strict-counts-unreported-conformance-rows.md](0029-strict-counts-unreported-conformance-rows.md)
+  — ADR 0029: under `--strict`, a scheduled acceptance-criteria row the
+  `conformance` role leaves without a verdict fails that role, so the run ends
+  in `error`; without `--strict` it stays "no result" and status is unchanged.
+  Partially supersedes ADR 0025's consequence that unreported rows do not move
+  run status.
