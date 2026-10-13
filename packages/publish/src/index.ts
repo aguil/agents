@@ -1,5 +1,9 @@
 import type { HarnessRunResult } from "@aguil/agents-core";
 import {
+  isPlaceholderAdapterRun,
+  PLACEHOLDER_ADAPTER,
+} from "@aguil/agents-reporting";
+import {
   isAgentsdPublishDisabled,
   type WorkflowPublishConfig,
 } from "@aguil/agents-workflow";
@@ -11,6 +15,7 @@ export type PublishSkipReason =
   | "status_failed"
   | "triage_items_nonzero"
   | "dry_run_artifact"
+  | "placeholder_adapter"
   | "pr_unresolved"
   | "stale_head"
   | "pending_review_exists"
@@ -57,6 +62,16 @@ export function evaluateCodeReviewPublish(
   }
   if (input.isDryRunPath) {
     return off("dry_run_artifact", input.resultPath, "code-review post");
+  }
+  // No override (#180): an unattended publish has nobody to ask, and a
+  // placeholder result on a pull request reads as a review that found nothing.
+  if (isPlaceholderAdapterRun(input.result.metadata)) {
+    return {
+      shouldPublish: false,
+      mode: "off",
+      skipReason: "placeholder_adapter",
+      operatorHint: `artifacts at ${input.resultPath}; the run used the placeholder '${PLACEHOLDER_ADAPTER}' adapter, so it is not a review. Set execution.implementation.adapter in WORKFLOW.md to claude, cursor or opencode`,
+    };
   }
   if (input.result.status === "error" || input.result.status === "failed") {
     return off(

@@ -131,3 +131,83 @@ test("executePrFeedbackSubmit returns before gh when responses.json missing", as
     await fsp.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("evaluateCodeReviewPublish refuses a placeholder-adapter result, with no override", () => {
+  const decision = evaluateCodeReviewPublish({
+    publish: {
+      ...publishOff,
+      codeReview: {
+        ...publishOff.codeReview,
+        mode: "pending",
+        staleHead: "post",
+        replacePending: true,
+        requireEmptyTriage: false,
+      },
+    },
+    result: {
+      runId: "r1",
+      status: "passed",
+      findings: [],
+      artifacts: [],
+      metadata: { adapter: "fake" },
+    },
+    resultPath: "/tmp/result.json",
+    triageItemCount: 0,
+    isDryRunPath: false,
+    prNumber: 1,
+  });
+  expect(decision.shouldPublish).toBe(false);
+  expect(decision.skipReason).toBe("placeholder_adapter");
+  expect(decision.operatorHint).toContain("execution.implementation.adapter");
+});
+
+test("evaluateCodeReviewPublish still publishes a real-adapter result", () => {
+  const decision = evaluateCodeReviewPublish({
+    publish: {
+      ...publishOff,
+      codeReview: { ...publishOff.codeReview, mode: "pending" },
+    },
+    result: {
+      runId: "r1",
+      status: "passed",
+      findings: [],
+      artifacts: [],
+      metadata: { adapter: "claude" },
+    },
+    resultPath: "/tmp/result.json",
+    triageItemCount: 0,
+    isDryRunPath: false,
+    prNumber: 1,
+  });
+  expect(decision).toEqual({ shouldPublish: true, mode: "pending" });
+});
+
+test("executeCodeReviewPublish refuses a placeholder-adapter result before gh", async () => {
+  const dir = await fsp.mkdtemp(join(tmpdir(), "agentsd-cr-placeholder-"));
+  try {
+    const resultPath = join(dir, "result.json");
+    await fsp.writeFile(resultPath, "{}", "utf8");
+    const outcome = await executeCodeReviewPublish({
+      publish: {
+        ...publishOff,
+        codeReview: { ...publishOff.codeReview, mode: "pending" },
+      },
+      result: {
+        runId: "run-1",
+        status: "passed",
+        findings: [],
+        artifacts: [],
+        metadata: { adapter: "fake" },
+      },
+      resultPath,
+      workspacePath: dir,
+      triageItemCount: 0,
+      prNumber: 1,
+      repository: "org/repo",
+    });
+    expect(outcome.executed).toBe(false);
+    expect(outcome.decision.skipReason).toBe("placeholder_adapter");
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
