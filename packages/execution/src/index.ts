@@ -1,5 +1,5 @@
 import { appendFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   AgentEvent,
   Finding,
@@ -1425,7 +1425,11 @@ export function buildClaudeCodeCommand(
   assertClaudeHookEnforcementArgs(template, options);
   const args = template.map((arg) => substituteTemplateArg(arg, substitutions));
   const hasPrompt = template.some((arg) => arg.includes("{prompt}"));
-  const cmd = [options.executable ?? "claude", ...args];
+  const cmd = [
+    options.executable ?? "claude",
+    ...args,
+    ...claudeRunInputDirArgs(request, requestPath),
+  ];
 
   if (model !== undefined) {
     cmd.push("--model", model);
@@ -1435,6 +1439,38 @@ export function buildClaudeCodeCommand(
   }
 
   return cmd;
+}
+
+/**
+ * Grant Claude Code read access to the run inputs the prompt names, when they
+ * sit outside the role's workspace. With `code-review --pr` the role runs in a
+ * detached worktree while the run directory stays under the anchor
+ * workspace, and Claude Code refuses to read outside its cwd; the conformance
+ * role then cannot see its criteria and reports nothing (#277).
+ *
+ * The `--add-dir=<dir>` form keeps the variadic flag from swallowing a
+ * trailing positional prompt.
+ */
+function claudeRunInputDirArgs(
+  request: AgentRunRequest,
+  requestPath: string,
+): readonly string[] {
+  const workspace = resolve(request.workspacePath);
+  const dirs = new Set(
+    [request.contextBundlePath, requestPath].map((path) =>
+      dirname(resolve(workspace, path)),
+    ),
+  );
+  return [...dirs]
+    .filter((dir) => {
+      const fromWorkspace = relative(workspace, dir);
+      return (
+        fromWorkspace === ".." ||
+        fromWorkspace.startsWith(`..${sep}`) ||
+        isAbsolute(fromWorkspace)
+      );
+    })
+    .map((dir) => `--add-dir=${dir}`);
 }
 
 /**
