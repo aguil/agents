@@ -7,7 +7,7 @@ through an agent-agnostic adapter and produces a structured `report.md` plus
 ## Quick start
 
 ```bash
-# Deterministic smoke test (no provider/API calls)
+# Placeholder smoke test: runs no model, so it is not a review
 bun run agents code-review --adapter fake
 
 # Real review with OpenCode
@@ -31,12 +31,12 @@ bun run agents code-review post --help
 
 ## Choosing an adapter
 
-| Adapter    | When to use                                           |
-| ---------- | ----------------------------------------------------- |
-| `fake`     | Local smoke tests and CI checks; deterministic output |
-| `opencode` | Multi-provider flexibility, variant pinning           |
-| `claude`   | Direct Claude Code CLI workflows                      |
-| `cursor`   | Direct Cursor CLI workflows with MCP support          |
+| Adapter    | When to use                                                |
+| ---------- | ---------------------------------------------------------- |
+| `fake`     | Smoke tests of the harness; runs no model, so not a review |
+| `opencode` | Multi-provider flexibility, variant pinning                |
+| `claude`   | Direct Claude Code CLI workflows                           |
+| `cursor`   | Direct Cursor CLI workflows with MCP support               |
 
 See [adapters.md](adapters.md) for command examples and model IDs.
 

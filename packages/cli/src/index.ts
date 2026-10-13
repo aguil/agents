@@ -33,9 +33,12 @@ import {
   agentsCodeReviewRunsRoot,
 } from "@aguil/agents-core";
 import { resolveCursorApprovalFlags } from "@aguil/agents-execution";
-import { severityEmoji } from "@aguil/agents-reporting";
+import { PLACEHOLDER_ADAPTER, severityEmoji } from "@aguil/agents-reporting";
 import type { CliOptions } from "./code-review-cli-models";
-import { stabilizeMergedWorkspace } from "./code-review-config";
+import {
+  resolveUserCodeReviewConfigPath,
+  stabilizeMergedWorkspace,
+} from "./code-review-config";
 import {
   codeReviewHelpStderrExtras,
   renderCodeReviewHelp,
@@ -336,6 +339,10 @@ export async function main(
         console.error(message);
         return 1;
       }
+    }
+
+    if (adapterName === PLACEHOLDER_ADAPTER) {
+      console.warn(placeholderAdapterRunWarning());
     }
 
     try {
@@ -768,6 +775,11 @@ function parseAdapterName(
     return value ?? CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT;
   }
   return undefined;
+}
+
+/** Printed on every run of the placeholder adapter, chosen or defaulted (#180). */
+export function placeholderAdapterRunWarning(): string {
+  return `Warning: adapter '${PLACEHOLDER_ADAPTER}' is a placeholder. No model runs, so this run's report and result are not a review. Set a real adapter (claude, cursor or opencode) with --adapter, AGENTS_CODE_REVIEW_ADAPTER, or "adapter" in ${resolveUserCodeReviewConfigPath()}.`;
 }
 
 function parseCursorMode(
