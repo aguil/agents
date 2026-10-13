@@ -12,6 +12,92 @@ export const REPORT_TEMPLATE_NAMES = [
 
 export type ReportTemplateName = (typeof REPORT_TEMPLATE_NAMES)[number];
 
+/**
+ * The adapter that runs no model. It emits no findings, so its result reads
+ * as a review that found nothing unless something says otherwise (#180).
+ */
+export const PLACEHOLDER_ADAPTER = "fake";
+
+function metadataString(
+  record: Readonly<Record<string, string>> | undefined,
+  key: string,
+): string | undefined {
+  const raw = record?.[key]?.trim() ?? "";
+  return raw.length > 0 ? raw : undefined;
+}
+
+/** True when run metadata records the placeholder adapter. */
+export function isPlaceholderAdapterRun(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): boolean {
+  return metadataString(runMetadata, "adapter") === PLACEHOLDER_ADAPTER;
+}
+
+/**
+ * Model attribution recorded for the active adapter in harness run metadata.
+ * When the run carried per-role overrides (`<adapter>_models`), they are
+ * appended so provenance does not attribute a role's findings to the global
+ * fallback it did not spawn under — and so a run configured with only
+ * per-role models still names them.
+ */
+export function resolveAdapterModelFromMetadata(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): string | undefined {
+  const attributionFor = (name: string): string | undefined => {
+    const model = metadataString(runMetadata, `${name}_model`);
+    const roleModels = metadataString(runMetadata, `${name}_models`);
+    if (roleModels === undefined) {
+      return model;
+    }
+    return model === undefined
+      ? `per-role ${roleModels}`
+      : `${model}; per-role ${roleModels}`;
+  };
+  const adapter = metadataString(runMetadata, "adapter");
+  if (adapter === "opencode" || adapter === "claude" || adapter === "cursor") {
+    return attributionFor(adapter);
+  }
+  return (
+    attributionFor("cursor") ??
+    attributionFor("claude") ??
+    attributionFor("opencode")
+  );
+}
+
+/**
+ * Which adapter wrote the report, and for the placeholder adapter a line
+ * opening the report that says it is not a review (#180). Read from the
+ * result's metadata, so a result that records no adapter renders as before.
+ */
+function renderAdapterIdentity(
+  metadata: Readonly<Record<string, string>> | undefined,
+): {
+  readonly opening: readonly string[];
+  readonly lines: readonly string[];
+} {
+  const adapter = metadataString(metadata, "adapter");
+  if (adapter === undefined) {
+    return { opening: [], lines: [] };
+  }
+  if (adapter === PLACEHOLDER_ADAPTER) {
+    return {
+      opening: [
+        `> **Not a review.** This run used the placeholder \`${PLACEHOLDER_ADAPTER}\` adapter: no model ran, so finding nothing here says nothing about the change.`,
+        "",
+      ],
+      lines: [`Adapter: ${adapter}`],
+    };
+  }
+  const model = resolveAdapterModelFromMetadata(metadata);
+  return {
+    opening: [],
+    lines: [
+      `Adapter: ${adapter}`,
+      ...(model === undefined ? [] : [`Model: ${model}`]),
+    ],
+  };
+}
+
 export interface ReportRenderer {
   render(result: HarnessRunResult): string | Promise<string>;
 }
@@ -222,12 +308,15 @@ export function renderMarkdownReport(result: HarnessRunResult): string {
   });
 
   const executionNotes = buildExecutionNotes(result.metadata);
+  const identity = renderAdapterIdentity(result.metadata);
 
   return [
     "# Code Review Report",
     "",
+    ...identity.opening,
     `Run: ${result.runId}`,
     `Status: ${result.status}`,
+    ...identity.lines,
     `Summary: ${summary}`,
     "",
     ...executionNotes,
@@ -390,11 +479,15 @@ export function renderOutcomesMarkdownReport(result: HarnessRunResult): string {
       ? "No outcomes emitted."
       : `${outcomes.length} outcome${outcomes.length === 1 ? "" : "s"} across ${outcomesByRole.size} role${outcomesByRole.size === 1 ? "" : "s"}.`;
 
+  const identity = renderAdapterIdentity(result.metadata);
+
   return [
     "# Harness Report",
     "",
+    ...identity.opening,
     `Run: ${result.runId}`,
     `Status: ${result.status}`,
+    ...identity.lines,
     `Summary: ${summary}`,
     "",
     ...roleSections,

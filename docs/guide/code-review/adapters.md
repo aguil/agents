@@ -68,8 +68,23 @@ stays enforceable.
 bun run agents code-review --adapter fake
 ```
 
-Deterministic output; no provider or API calls. Intended for local smoke tests
-and CI checks.
+A placeholder: no model runs and no provider or API is called, so it reports no
+findings. Intended for local smoke tests and CI checks of the harness itself,
+not for reviewing a change.
+
+`fake` is the packaged default, so a run with no adapter configured uses it.
+Every `fake` run says so:
+
+- It prints a warning to stderr before the run starts, naming where to set a
+  real adapter.
+- Its `report.md` opens with a line saying no model ran and the report is not a
+  review.
+- Its `result.json` records `metadata.adapter` as `fake`.
+- Its result is not posted to a pull request without `--allow-fake`, and agentsd
+  never posts it (see [workflows.md](workflows.md)).
+
+Every `report.md` names its adapter under the status line, and its model when
+the run recorded one.
 
 ## Deterministic mode
 

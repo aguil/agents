@@ -21,7 +21,9 @@ the merged CLI resolution already applies: harness defaults, then user
 **`~/.config/agents/code-review/config.json`** on Unix,
 **`%USERPROFILE%\.config\agents\code-review\config.json`** on Windows), optional
 copied **`agents-code-review.config.example.json`** →
-**`.agents-code-review/config.json`** (repo‑allowed knobs only),
+**`.agents-code-review/config.json`** (repo‑allowed knobs only), then the
+optional per-checkout **`.agents-code-review/config.local.json`** (the same
+repo‑allowed knobs), then a **`--preset`** the operator named, then
 **`AGENTS_CODE_REVIEW_*`**, and explicit flags **only if the user supplied
 them**. **Do **not** add **`--dry-run`** (or drop it) on your own**—mirror
 whatever the operator specified for this session (normal **`runs/`** output vs

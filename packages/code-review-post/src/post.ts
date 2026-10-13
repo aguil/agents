@@ -17,7 +17,13 @@ import {
   legacyAgentsCodeReviewDryRunRoot,
   resolveGitAwarePath,
 } from "@aguil/agents-core";
-import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
+import {
+  findingFingerprint,
+  isPlaceholderAdapterRun,
+  PLACEHOLDER_ADAPTER,
+  resolveAdapterModelFromMetadata,
+  severityEmoji,
+} from "@aguil/agents-reporting";
 
 export type ReviewSummaryStyle = "triage" | "impact" | "evidence";
 
@@ -402,6 +408,30 @@ export interface ReplacePendingPullRequestReviewInput {
    * automated publish path has no operator, so it takes the default.
    */
   readonly includeUnsubstantiated?: readonly string[] | "all";
+  /**
+   * Post a result from the placeholder adapter anyway. Absent means refuse
+   * (#180): that result ran no model, and on a pull request it reads as a
+   * review that found nothing. Only `--allow-fake` sets it; the automated
+   * publish path never does.
+   */
+  readonly allowPlaceholderAdapter?: boolean;
+}
+
+/**
+ * Why a result must not reach a pull request, or undefined when it may. The
+ * one guard every posting path applies, before any network call (#180).
+ */
+export function placeholderAdapterPostRefusal(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+  allowPlaceholderAdapter: boolean | undefined,
+): string | undefined {
+  if (
+    allowPlaceholderAdapter === true ||
+    !isPlaceholderAdapterRun(runMetadata)
+  ) {
+    return undefined;
+  }
+  return `Refusing to post: this result comes from the placeholder '${PLACEHOLDER_ADAPTER}' adapter, which runs no model, so it is not a review. Re-run with a real adapter (claude, cursor or opencode), or pass --allow-fake to post it anyway.`;
 }
 
 /**
@@ -480,6 +510,15 @@ function reportWithheldFindings(withheld: readonly Finding[]): void {
 export async function replacePendingPullRequestReview(
   input: ReplacePendingPullRequestReviewInput,
 ): Promise<PendingReviewPostResult> {
+  // Callers check first so they can refuse with their own exit path; this
+  // keeps a new caller from posting a placeholder result by omission.
+  const refusal = placeholderAdapterPostRefusal(
+    input.runMetadata,
+    input.allowPlaceholderAdapter,
+  );
+  if (refusal !== undefined) {
+    throw new Error(refusal);
+  }
   // Before any network call, so a mistyped promotion id fails immediately
   // rather than after several round trips.
   const { publishable, withheld } = partitionForPublication(
@@ -1413,37 +1452,6 @@ function metadataString(
 ): string | undefined {
   const raw = record?.[key]?.trim() ?? "";
   return raw.length > 0 ? raw : undefined;
-}
-
-/**
- * Model attribution recorded for the active adapter in harness run metadata.
- * When the run carried per-role overrides (`<adapter>_models`), they are
- * appended so provenance does not attribute a role's findings to the global
- * fallback it did not spawn under — and so a run configured with only
- * per-role models still names them.
- */
-export function resolveAdapterModelFromMetadata(
-  runMetadata: Readonly<Record<string, string>> | undefined,
-): string | undefined {
-  const attributionFor = (name: string): string | undefined => {
-    const model = metadataString(runMetadata, `${name}_model`);
-    const roleModels = metadataString(runMetadata, `${name}_models`);
-    if (roleModels === undefined) {
-      return model;
-    }
-    return model === undefined
-      ? `per-role ${roleModels}`
-      : `${model}; per-role ${roleModels}`;
-  };
-  const adapter = metadataString(runMetadata, "adapter");
-  if (adapter === "opencode" || adapter === "claude" || adapter === "cursor") {
-    return attributionFor(adapter);
-  }
-  return (
-    attributionFor("cursor") ??
-    attributionFor("claude") ??
-    attributionFor("opencode")
-  );
 }
 
 function formatAgentProviderLabel(

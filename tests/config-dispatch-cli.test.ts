@@ -39,6 +39,8 @@ async function runCodeReviewCli(
   return await runAgentsCli(["code-review", ...args], env);
 }
 
+const FAKE_ADAPTER_WARNING = "Warning: adapter 'fake' is a placeholder.";
+
 const bundleFixture = join(
   dirname(fileURLToPath(import.meta.url)),
   "fixtures",
@@ -90,6 +92,48 @@ test("code-review dispatches to the config-declared harness", async () => {
   expect(result.exitCode).toBe(0);
   expect(result.stdout).toContain("(config-declared harness)");
   expect(result.stdout).toContain("Code review passed.");
+  expect(result.stderr).toContain(FAKE_ADAPTER_WARNING);
+});
+
+test("a fake run warns on stderr, and its report and result name the adapter", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "agents-fake-identity-"));
+  try {
+    const result = await runCodeReviewCli(
+      [
+        "--adapter",
+        "fake",
+        "--dry-run",
+        "--workspace",
+        workspace,
+        "--context-bundle",
+        bundleFixture,
+      ],
+      { XDG_CONFIG_HOME: join(workspace, "xdg") },
+    );
+    expect(result.exitCode).toBe(0);
+    const warning = result.stderr
+      .split("\n")
+      .find((line) => line.startsWith(FAKE_ADAPTER_WARNING));
+    expect(warning).toBe(
+      `${FAKE_ADAPTER_WARNING} No model runs, so this run's report and result are not a review. Set a real adapter (claude, cursor or opencode) with --adapter, AGENTS_CODE_REVIEW_ADAPTER, or "adapter" in ${join(workspace, "xdg", "agents", "code-review", "config.json")}.`,
+    );
+
+    const reportPath = /Report: (\S+report\.md)/.exec(result.stdout)?.[1];
+    expect(reportPath).toBeDefined();
+    const report = await readFile(reportPath as string, "utf8");
+    expect(report).toContain("> **Not a review.**");
+    expect(report).toContain("\nAdapter: fake\n");
+
+    const stored = JSON.parse(
+      await readFile(
+        join(dirname(reportPath as string), "result.json"),
+        "utf8",
+      ),
+    ) as { readonly metadata?: Readonly<Record<string, string>> };
+    expect(stored.metadata?.adapter).toBe("fake");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("harness install materializes code-review for explicit --agents-dir runs", async () => {

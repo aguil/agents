@@ -1,3 +1,4 @@
+export { resolveAdapterModelFromMetadata } from "@aguil/agents-reporting";
 export type {
   PendingReviewCancelled,
   PendingReviewComment,
@@ -29,8 +30,8 @@ export {
   parsePrNumber,
   parseReviewSummaryStyle,
   partitionForPublication,
+  placeholderAdapterPostRefusal,
   replacePendingPullRequestReview,
-  resolveAdapterModelFromMetadata,
   resolvedResultPathIsUnderCodeReviewDryRunRoot,
   runCommand,
   updateRunResultMetadata,

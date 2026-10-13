@@ -20,6 +20,7 @@ import {
   parsePrNumber,
   parseReviewSummaryStyle,
   partitionForPublication,
+  placeholderAdapterPostRefusal,
   replacePendingPullRequestReview,
   resolvedResultPathIsUnderCodeReviewDryRunRoot,
   runCommand,
@@ -33,9 +34,12 @@ import {
   agentsCodeReviewRunsRoot,
 } from "@aguil/agents-core";
 import { resolveCursorApprovalFlags } from "@aguil/agents-execution";
-import { severityEmoji } from "@aguil/agents-reporting";
+import { PLACEHOLDER_ADAPTER, severityEmoji } from "@aguil/agents-reporting";
 import type { CliOptions } from "./code-review-cli-models";
-import { stabilizeMergedWorkspace } from "./code-review-config";
+import {
+  resolveUserCodeReviewConfigPath,
+  stabilizeMergedWorkspace,
+} from "./code-review-config";
 import {
   codeReviewHelpStderrExtras,
   renderCodeReviewHelp,
@@ -338,6 +342,10 @@ export async function main(
       }
     }
 
+    if (adapterName === PLACEHOLDER_ADAPTER) {
+      console.warn(placeholderAdapterRunWarning());
+    }
+
     try {
       if (logShowsSummary(logLevel)) {
         console.log(
@@ -502,6 +510,15 @@ export async function main(
           return 1;
         }
 
+        const placeholderRefusal = placeholderAdapterPostRefusal(
+          result.metadata,
+          options.allowFake,
+        );
+        if (placeholderRefusal !== undefined) {
+          console.error(placeholderRefusal);
+          return 1;
+        }
+
         // Fail on a mistyped promotion id before any posting work, and with a
         // message rather than a stack trace.
         try {
@@ -529,6 +546,7 @@ export async function main(
               : undefined,
           runMetadata: result.metadata,
           runId: result.runId,
+          allowPlaceholderAdapter: options.allowFake,
         });
         if (posted.cancelled === true) {
           await updateRunResultMetadata(result.artifacts, {
@@ -768,6 +786,11 @@ function parseAdapterName(
     return value ?? CODE_REVIEW_HARNESS_PACKAGE_ADAPTER_DEFAULT;
   }
   return undefined;
+}
+
+/** Printed on every run of the placeholder adapter, chosen or defaulted (#180). */
+export function placeholderAdapterRunWarning(): string {
+  return `Warning: adapter '${PLACEHOLDER_ADAPTER}' is a placeholder. No model runs, so this run's report and result are not a review. Set a real adapter (claude, cursor or opencode) with --adapter, AGENTS_CODE_REVIEW_ADAPTER, or "adapter" in ${resolveUserCodeReviewConfigPath()}.`;
 }
 
 function parseCursorMode(
@@ -1015,6 +1038,14 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     console.error(message);
     return 1;
   }
+  const placeholderRefusal = placeholderAdapterPostRefusal(
+    loaded.metadata,
+    options.allowFake,
+  );
+  if (placeholderRefusal !== undefined) {
+    console.error(placeholderRefusal);
+    return 1;
+  }
   // Before PR resolution, so a mistyped promotion id fails immediately and
   // with a message rather than a stack trace.
   try {
@@ -1088,6 +1119,7 @@ async function runPostOnly(options: CliOptions): Promise<number> {
     workspacePath,
     runMetadata: metadata,
     runId: loaded.runId,
+    allowPlaceholderAdapter: options.allowFake,
   });
   if (posted.cancelled === true) {
     return 0;

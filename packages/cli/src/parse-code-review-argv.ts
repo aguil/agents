@@ -39,6 +39,7 @@ const FLAG_TO_KEY: Readonly<Record<string, keyof CliOptions>> = {
   "pending-review": "pendingReview",
   pure: "pure",
   "print-logs": "printLogs",
+  "allow-fake": "allowFake",
 };
 
 /** Tokens like `--preset`/`--dry-run`, including `--preset=value`: not argv values for prior string options (`--cursor-args`). */
@@ -256,6 +257,7 @@ export function parseCodeReviewArgv(
     pendingReview: flags.has("pending-review"),
     pure: flags.has("pure"),
     printLogs: flags.has("print-logs"),
+    allowFake: flags.has("allow-fake"),
   };
 
   return { options, explicitKeys, presetName };

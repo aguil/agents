@@ -84,6 +84,13 @@ Creates an unsubmitted GitHub review on the target PR.
   `--include-unsubstantiated <id>[,<id>...]` — or
   `--include-unsubstantiated all` to publish every withheld finding. An id that
   matches no finding in the result is an error rather than a silent skip.
+- A result from the placeholder `fake` adapter is **not** posted: it ran no
+  model, so on a pull request it would read as a review that found nothing. Both
+  `--pending-review` and `agents code-review post` refuse it and exit non-zero,
+  before any GitHub call. Pass `--allow-fake` to post it anyway. The flag is
+  CLI-only, so no config file or environment variable can set it. agentsd's
+  publish step refuses such a result with no override, and logs the skip reason
+  `placeholder_adapter`.
 
 ### PR targeting
 
