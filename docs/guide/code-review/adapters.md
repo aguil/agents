@@ -80,6 +80,8 @@ Every `fake` run says so:
 - Its `report.md` opens with a line saying no model ran and the report is not a
   review.
 - Its `result.json` records `metadata.adapter` as `fake`.
+- Its result is not posted to a pull request without `--allow-fake`, and agentsd
+  never posts it (see [workflows.md](workflows.md)).
 
 Every `report.md` names its adapter under the status line, and its model when
 the run recorded one.

@@ -30,6 +30,7 @@ export {
   parsePrNumber,
   parseReviewSummaryStyle,
   partitionForPublication,
+  placeholderAdapterPostRefusal,
   replacePendingPullRequestReview,
   resolvedResultPathIsUnderCodeReviewDryRunRoot,
   runCommand,

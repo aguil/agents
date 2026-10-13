@@ -115,6 +115,7 @@ export function sharedConfigurationHelpBlock(): string {
   return `Configuration (later values override earlier ones: harness packaged defaults < user JSON <
 repo JSON < preset < env < CLI):
   Packaged harness default adapter is merged first (currently "fake", see @aguil/agents-code-review).
+  "fake" runs no model: every run on it warns, and its result is not posted without --allow-fake.
 
   Merge order then loads JSON defaults from:
     $XDG_CONFIG_HOME/agents/code-review/config.json (or ~/.config/... when unset),
@@ -258,6 +259,7 @@ Posting interaction flags (with --pending-review):
   --replace-pending-review Replace an existing pending review (explicit opt-in)
   --review-summary <id>  Summary body modes: triage | impact | evidence (default impact)
   --include-unsubstantiated <ids> Publish findings marked unsubstantiated: comma-separated ids, or all (default: withheld)
+  --allow-fake           Post a result from the placeholder "fake" adapter, which runs no model (refused by default; CLI only)
 
 Backend / adapters:
 
@@ -335,6 +337,7 @@ Posting flags:
   --pending-review       Accepted but ignored (post implies pending review semantics)
   --review-summary <id>  Summary body formatting: triage | impact | evidence (default impact)
   --include-unsubstantiated <ids> Publish findings marked unsubstantiated: comma-separated ids, or all (default: withheld)
+  --allow-fake           Post a result from the placeholder "fake" adapter, which runs no model (refused by default; CLI only)
   --no-confirm           Skip interactive stale/consent prompts (recommended for CI)
   --replace-pending-review Explicitly opt in when replacing pending reviews
 

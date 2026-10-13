@@ -51,6 +51,12 @@ export interface CliOptions {
   readonly pendingReview: boolean;
   readonly pure: boolean;
   readonly printLogs: boolean;
+  /**
+   * Post a result from the placeholder `fake` adapter (#180). CLI-only: a
+   * config file or environment variable standing in for it would
+   * pre-authorize the post this flag exists to make someone ask for.
+   */
+  readonly allowFake?: boolean;
 }
 
 export interface ParsedCodeReviewArgv {

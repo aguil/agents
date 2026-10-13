@@ -673,6 +673,8 @@ function applyExplicitCliOptions(
     pendingReview: boolOr("pendingReview", false),
     pure: boolOr("pure", false),
     printLogs: boolOr("printLogs", false),
+    // Deliberately CLI-only: see `CliOptions.allowFake`.
+    allowFake: ex.has("allowFake") ? o.allowFake === true : false,
   };
 }
 

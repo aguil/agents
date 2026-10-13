@@ -106,7 +106,7 @@ agents code-review inbox show --pr <n> [--repo owner/name] [--workspace <path>] 
 
 ```text
 agents code-review --pr <n> [--workspace <path>] [--repos-root <path>] [harness flags…]
-agents code-review post [--pr <n>] [--result <path>] [--workspace <path>] [--review-summary triage|impact|evidence] [--include-unsubstantiated <ids>|all] [--no-confirm]
+agents code-review post [--pr <n>] [--result <path>] [--workspace <path>] [--review-summary triage|impact|evidence] [--include-unsubstantiated <ids>|all] [--no-confirm] [--allow-fake]
 ```
 
 See **`agents code-review --help`** and **`agents code-review post --help`** for
