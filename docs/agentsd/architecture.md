@@ -37,8 +37,10 @@ provider-agnostic `implementation` runtime.
 Publish defaults are **`off`**. When enabled:
 
 - **`pending`** (code review): posts an unsubmitted GitHub review in-process.
-  Never submits it. Requires empty triage, passing status, non-stale PR head,
-  and `AGENTSD_PUBLISH != disabled`.
+  Never submits it. Requires empty triage, passing status, non-stale PR head, a
+  real adapter, and `AGENTSD_PUBLISH != disabled`. A result from the placeholder
+  `fake` adapter, which agentsd uses when the WORKFLOW names none, is never
+  posted: the decision is skipped as `placeholder_adapter`, with no override.
 - **`submit`** (PR feedback): requires an operator-authored `responses.json`.
   Only runs after `collect → triage → fix` and re-triage confirm readiness.
 
