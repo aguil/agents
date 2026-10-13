@@ -154,3 +154,54 @@ export function conformanceOutcomeViolations(input: {
         ];
   });
 }
+
+/**
+ * Under `--strict`, a scheduled conformance role must give every criterion a
+ * verdict. A role that reported nothing otherwise left every row "no result"
+ * in a passing run that read like a clean review (#277). Outside `--strict`
+ * the report still marks each missing row unchecked.
+ */
+export function conformanceCoverageViolations(input: {
+  readonly roleId: string;
+  readonly outcomes: readonly HarnessOutcome[];
+  readonly strictMode?: boolean;
+  readonly metadata?: Readonly<Record<string, string>>;
+}): readonly {
+  readonly outcomeId: string;
+  readonly kind: string;
+  readonly errors: readonly string[];
+}[] {
+  if (
+    input.roleId !== CODE_REVIEW_CONFORMANCE_ROLE_ID ||
+    input.strictMode !== true ||
+    input.metadata === undefined
+  ) {
+    return [];
+  }
+  const keys = CODE_REVIEW_RUN_METADATA_KEYS;
+  const reported = (
+    conformanceReportedMetadata({
+      metadata: input.metadata,
+      outcomes: input.outcomes.map((outcome) => ({
+        ...outcome,
+        sourceRole: input.roleId,
+      })),
+    })[keys.conformanceReported] ?? ""
+  ).split(",");
+  const missing = (input.metadata[keys.conformanceCriteria] ?? "")
+    .split(",")
+    .filter(
+      (criterion) => criterion.length > 0 && !reported.includes(criterion),
+    );
+  return missing.length === 0
+    ? []
+    : [
+        {
+          outcomeId: CODE_REVIEW_CONFORMANCE_ROLE_ID,
+          kind: CONFORMANCE_OUTCOME_KIND,
+          errors: [
+            `--strict: no conformance verdict for ${missing.join(", ")}; every scheduled criterion needs one`,
+          ],
+        },
+      ];
+}

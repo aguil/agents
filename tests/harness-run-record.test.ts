@@ -345,7 +345,10 @@ test("both --strict help texts say what strict fails on (JC-5, JC-6)", () => {
   expect(harnessRun).not.toContain("schema / enablement violations");
   const codeReview = help(["code-review", "--help"]);
   expect(codeReview).toContain(
-    "--strict Fail on a timed-out reviewer, and fail a reviewer on an unaccepted output line",
+    "--strict Fail on a timed-out reviewer, fail a reviewer on an unaccepted output line",
+  );
+  expect(codeReview).toContain(
+    "fail the conformance reviewer when a criterion gets no verdict",
   );
   expect(codeReview).not.toContain("Fail fast on reviewer errors/timeouts");
 });

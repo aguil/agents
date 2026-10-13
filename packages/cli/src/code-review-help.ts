@@ -278,9 +278,11 @@ Backend / adapters:
   --pure                 Run OpenCode without external plugins
   --print-logs           Ask OpenCode to stream logs on stderr
   --no-deterministic     Disable deterministic adapter defaults
-  --strict               Fail on a timed-out reviewer, and fail a reviewer on an
+  --strict               Fail on a timed-out reviewer, fail a reviewer on an
                          unaccepted output line (e.g. an invalid finding
-                         envelope); without it these are warnings
+                         envelope), and fail the conformance reviewer when a
+                         criterion gets no verdict; without it these are
+                         warnings
 
 Diagnostics:
 

@@ -1563,6 +1563,25 @@ test("harness run leaves an unrelated conformance role alone", async () => {
         outputSchemas: undefined,
       })({ roleId: "conformance", outcomes: [ownOutcome] }),
     ).toHaveLength(1);
+    // Under --strict, a scheduled row with no verdict fails the role only
+    // in a harness that opted into the contract (#277).
+    const strictSilent = {
+      roleId: "conformance",
+      outcomes: [],
+      strictMode: true,
+      metadata: { conformance: "scheduled", conformance_criteria: "AC-1" },
+    };
+    expect(
+      roleOutcomeValidator({ contextProviders: [], outputSchemas: undefined })(
+        strictSilent,
+      ),
+    ).toEqual([]);
+    expect(
+      roleOutcomeValidator({
+        contextProviders: [{ use: "acceptance-criteria", params: {} }],
+        outputSchemas: undefined,
+      })(strictSilent),
+    ).toHaveLength(1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
     await rm(agentsDir, { recursive: true, force: true });
