@@ -36,14 +36,16 @@ see **[Harness provenance](#harness-provenance)**.
 
 **Agents following this skill:** Do **not** invent or override adapter or model
 settings (`--adapter`, `--model`, binary paths, argv templates). Use whatever
-the merged CLI resolution already applies (harness defaults, user
-**`~/.config/agents/code-review/config.json`**, optional repo
-**`.agents-code-review/config.json`**, **`AGENTS_CODE_REVIEW_*`**, and flags the
-operator supplied). Do **not** add or drop **`--dry-run`** on your own. Do
-**not** pass **`--impl`** or set **`AGENTS_CODE_REVIEW_IMPL`** (removed in
-**0.5.0**; the harness is always config-declared). Do **not** pass
-**`--agents-dir`** or set **`AGENTS_CODE_REVIEW_AGENTS_DIR`** unless the
-operator asked for a specific harness tree.
+the merged CLI resolution already applies, in this order, later winning: harness
+defaults, user **`~/.config/agents/code-review/config.json`**, optional repo
+**`.agents-code-review/config.json`**, optional per-checkout
+**`.agents-code-review/config.local.json`**, a **`--preset`** the operator
+named, **`AGENTS_CODE_REVIEW_*`**, and flags the operator supplied. Do **not**
+add or drop **`--dry-run`** on your own. Do **not** pass **`--impl`** or set
+**`AGENTS_CODE_REVIEW_IMPL`** (removed in **0.5.0**; the harness is always
+config-declared). Do **not** pass **`--agents-dir`** or set
+**`AGENTS_CODE_REVIEW_AGENTS_DIR`** unless the operator asked for a specific
+harness tree.
 
 ## PR selection (required before harness)
 

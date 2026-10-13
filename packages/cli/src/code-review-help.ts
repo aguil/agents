@@ -113,14 +113,16 @@ export function resolveCodeReviewHelp(
 
 export function sharedConfigurationHelpBlock(): string {
   return `Configuration (later values override earlier ones: harness packaged defaults < user JSON <
-repo JSON < preset < env < CLI):
+repo JSON < local JSON < preset < env < CLI):
   Packaged harness default adapter is merged first (currently "fake", see @aguil/agents-code-review).
   "fake" runs no model: every run on it warns, and its result is not posted without --allow-fake.
 
   Merge order then loads JSON defaults from:
     $XDG_CONFIG_HOME/agents/code-review/config.json (or ~/.config/... when unset),
-    then <workspace>/.agents-code-review/config.json (workspace = cwd or --workspace before merge).
-    Each file may declare a top-level "presets" object.
+    then <workspace>/.agents-code-review/config.json (workspace = cwd or --workspace before merge),
+    then <workspace>/.agents-code-review/config.local.json (per-checkout; keep it untracked).
+    Repo and local JSON cannot set adapter, workspace, reposRoot, scratchpad, binary paths or argv
+    templates. Each file may declare a top-level "presets" object.
 
   Environment: AGENTS_CODE_REVIEW_* (see harness README); booleans accept true/false/1/0/yes/no.
 

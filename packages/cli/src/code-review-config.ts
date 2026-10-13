@@ -228,6 +228,17 @@ export function resolveRepoCodeReviewConfigPath(workspacePath: string): string {
   return join(workspacePath, AGENTS_CODE_REVIEW_DIR, "config.json");
 }
 
+/**
+ * Per-checkout overrides beside the repo file (#179). A repository can commit
+ * this file whatever its `.gitignore` says, so it gets the repo filter: it may
+ * set exactly what repo JSON may set, and nothing more.
+ */
+export function resolveLocalCodeReviewConfigPath(
+  workspacePath: string,
+): string {
+  return join(workspacePath, AGENTS_CODE_REVIEW_DIR, "config.local.json");
+}
+
 /** Host-binary paths plus argv templates must not originate from repo `.agents-code-review` JSON alone. */
 const REPO_BLOCKED_ADAPTER_LAUNCH_KEYS = [
   "claude",
@@ -683,10 +694,12 @@ export type ResolveCodeReviewCliResult =
   | { readonly ok: false; readonly error: string };
 
 /**
- * Merge order: harness package defaults < user config < repo config < named `--preset`
- * < environment < explicit CLI flags.
- * Repo config is read from `<workspace>/.agents-code-review/config.json` where workspace is
- * `resolve(parsed.options.workspace ?? cwd)` before merge (see README).
+ * Merge order: harness package defaults < user config < repo config < local config
+ * < named `--preset` < environment < explicit CLI flags.
+ * Repo config is read from `<workspace>/.agents-code-review/config.json`, and local config
+ * from `config.local.json` beside it, where workspace is
+ * `resolve(parsed.options.workspace ?? cwd)` before merge (see README). Both get the repo
+ * filter.
  */
 export async function resolveCodeReviewCliOptions(
   workspacePath: string,
@@ -709,16 +722,33 @@ export async function resolveCodeReviewCliOptions(
     repo.path,
   );
 
+  const localPath = resolveLocalCodeReviewConfigPath(workspacePath);
+  const local = await loadConfigAt(localPath);
+  if (!local.ok) {
+    return { ok: false, error: `${local.path}: ${local.error}` };
+  }
+  const localSanitized = sanitizeRepoConfigDocument(
+    local.flat,
+    local.presets,
+    local.path,
+  );
+
   let merged = mergeFlatConfigLayers(
     mergeFlatConfigLayers(
-      { ...codeReviewHarnessPackageCliDefaults } as CodeReviewMergedPartial,
-      user.flat,
+      mergeFlatConfigLayers(
+        { ...codeReviewHarnessPackageCliDefaults } as CodeReviewMergedPartial,
+        user.flat,
+      ),
+      repoSanitized.flat,
     ),
-    repoSanitized.flat,
+    localSanitized.flat,
   );
 
   if (parsed.presetName !== undefined) {
-    const presets = mergePresetMaps(user.presets, repoSanitized.presets);
+    const presets = mergePresetMaps(
+      mergePresetMaps(user.presets, repoSanitized.presets),
+      localSanitized.presets,
+    );
     const name = parsed.presetName.trim();
     if (name.length === 0) {
       return { ok: false, error: "Invalid --preset value (empty name)." };
@@ -728,7 +758,7 @@ export async function resolveCodeReviewCliOptions(
       const known = Object.keys(presets);
       const hint =
         known.length === 0
-          ? "No presets are defined in merged user/repo config files."
+          ? "No presets are defined in merged user/repo/local config files."
           : `Known presets: ${known.sort().join(", ")}`;
       return { ok: false, error: `Unknown preset '${name}'. ${hint}` };
     }

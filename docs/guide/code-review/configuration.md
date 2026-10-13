@@ -8,9 +8,13 @@ Later sources win:
    `@aguil/agents-code-review`)
 2. **User config file** (see path below)
 3. **Repo config file** (`.agents-code-review/config.json` in workspace)
-4. **`--preset <name>`** entry (when passed)
-5. **`AGENTS_CODE_REVIEW_*` environment variables**
-6. **Explicit CLI flags**
+4. **Local config file** (`.agents-code-review/config.local.json` in workspace)
+5. **`--preset <name>`** entry (when passed)
+6. **`AGENTS_CODE_REVIEW_*` environment variables**
+7. **Explicit CLI flags**
+
+A named preset is merged the same way: the user file's body, then the repo
+file's, then the local file's, each overriding only the keys it sets.
 
 ## Config file locations
 
@@ -31,14 +35,30 @@ $XDG_CONFIG_HOME/agents/code-review/config.json
 > **Breaking change:** older releases read `.review-agent/config.json`. Current
 > releases use `.agents-code-review/config.json`.
 
+**Local file** (your overrides for one checkout; the same keys and shape as the
+repo file, `presets` included):
+
+```
+<workspace>/.agents-code-review/config.local.json
+```
+
+Use it when a committed repo value does not suit you in this checkout, for
+example a repo-pinned `model` for an adapter you are not running. It overrides
+the repo file and applies to every run in the checkout. **Keep it out of version
+control:** add `.agents-code-review/config.local.json` (or the whole
+`.agents-code-review/` directory) to your `.gitignore` or `.git/info/exclude`.
+Because a repository could commit this file, it gets the same restrictions as
+the repo file; for the adapter, binary paths and the other restricted keys, use
+the user file, the environment or CLI flags.
+
 ## Repo JSON restrictions
 
 Repo-managed JSON **cannot steer where or how reviewers run**. The following
-keys are stripped with a `console.warn` when present in the repo file:
-`workspace`, `reposRoot`, `scratchpad`, `adapter`, adapter host-binary paths
-(`cursor`, `claude`, `opencode`), and argv templates (`cursorArgs`,
-`claudeArgs`) — including inside `presets`. Set these only via the user config
-file, `AGENTS_CODE_REVIEW_*` env vars, or CLI flags.
+keys are stripped with a `console.warn` when present in the repo file or the
+local file: `workspace`, `reposRoot`, `scratchpad`, `adapter`, adapter
+host-binary paths (`cursor`, `claude`, `opencode`), and argv templates
+(`cursorArgs`, `claudeArgs`) — including inside `presets`. Set these only via
+the user config file, `AGENTS_CODE_REVIEW_*` env vars, or CLI flags.
 
 Set `AGENTS_CODE_REVIEW_CONFIG_STRICT=true` to make unknown keys a fatal error
 instead of a warning.
