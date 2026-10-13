@@ -99,3 +99,86 @@ test("unknown report templates list supported names", () => {
     'unknown report template "builtin:unknown" (supported: builtin:code-review-markdown, builtin:outcomes-markdown)',
   );
 });
+
+const PLACEHOLDER_OPENING =
+  "> **Not a review.** This run used the placeholder `fake` adapter: no model ran, so finding nothing here says nothing about the change.";
+
+function emptyResult(metadata?: Record<string, string>): HarnessRunResult {
+  return {
+    runId: "review-adapter",
+    status: "passed",
+    findings: [],
+    artifacts: [],
+    ...(metadata === undefined ? {} : { metadata }),
+  };
+}
+
+test("a fake report opens by saying it is not a review and names its adapter", () => {
+  const report = renderMarkdownReport(emptyResult({ adapter: "fake" }));
+  const lines = report.split("\n");
+
+  expect(lines.slice(0, 3)).toEqual([
+    "# Code Review Report",
+    "",
+    PLACEHOLDER_OPENING,
+  ]);
+  const status = lines.indexOf("Status: passed");
+  expect(lines[status + 1]).toBe("Adapter: fake");
+  expect(report).not.toContain("Model:");
+});
+
+test("a real-adapter report names its adapter and model, without the placeholder line", () => {
+  const report = renderMarkdownReport(
+    emptyResult({
+      adapter: "cursor",
+      cursor_model: "grok-4.7-medium",
+      cursor_models: "security=gpt-5.6-sol-high",
+    }),
+  );
+  const lines = report.split("\n");
+
+  const status = lines.indexOf("Status: passed");
+  expect(lines.slice(status + 1, status + 3)).toEqual([
+    "Adapter: cursor",
+    "Model: grok-4.7-medium; per-role security=gpt-5.6-sol-high",
+  ]);
+  expect(report).not.toContain("Not a review");
+});
+
+test("a real-adapter report with no recorded model names only the adapter", () => {
+  const report = renderMarkdownReport(emptyResult({ adapter: "claude" }));
+
+  expect(report).toContain("Status: passed\nAdapter: claude\nSummary:");
+  expect(report).not.toContain("Model:");
+});
+
+test("a result that records no adapter renders as before", () => {
+  const report = renderMarkdownReport(emptyResult());
+
+  expect(report).not.toContain("Adapter:");
+  expect(report).not.toContain("Not a review");
+  expect(report).toContain("Status: passed\nSummary:");
+});
+
+test("the outcomes template identifies the adapter the same way", () => {
+  const fakeReport = renderOutcomesMarkdownReport(
+    emptyResult({ adapter: "fake" }),
+  );
+  expect(fakeReport.split("\n").slice(0, 3)).toEqual([
+    "# Harness Report",
+    "",
+    PLACEHOLDER_OPENING,
+  ]);
+  expect(fakeReport).toContain("Status: passed\nAdapter: fake\nSummary:");
+
+  const realReport = renderOutcomesMarkdownReport(
+    emptyResult({ adapter: "opencode", opencode_model: "kimi-k3" }),
+  );
+  expect(realReport).toContain(
+    "Status: passed\nAdapter: opencode\nModel: kimi-k3\nSummary:",
+  );
+  expect(realReport).not.toContain("Not a review");
+
+  const unrecorded = renderOutcomesMarkdownReport(emptyResult());
+  expect(unrecorded).not.toContain("Adapter:");
+});

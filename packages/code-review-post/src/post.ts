@@ -17,7 +17,11 @@ import {
   legacyAgentsCodeReviewDryRunRoot,
   resolveGitAwarePath,
 } from "@aguil/agents-core";
-import { findingFingerprint, severityEmoji } from "@aguil/agents-reporting";
+import {
+  findingFingerprint,
+  resolveAdapterModelFromMetadata,
+  severityEmoji,
+} from "@aguil/agents-reporting";
 
 export type ReviewSummaryStyle = "triage" | "impact" | "evidence";
 
@@ -1413,37 +1417,6 @@ function metadataString(
 ): string | undefined {
   const raw = record?.[key]?.trim() ?? "";
   return raw.length > 0 ? raw : undefined;
-}
-
-/**
- * Model attribution recorded for the active adapter in harness run metadata.
- * When the run carried per-role overrides (`<adapter>_models`), they are
- * appended so provenance does not attribute a role's findings to the global
- * fallback it did not spawn under — and so a run configured with only
- * per-role models still names them.
- */
-export function resolveAdapterModelFromMetadata(
-  runMetadata: Readonly<Record<string, string>> | undefined,
-): string | undefined {
-  const attributionFor = (name: string): string | undefined => {
-    const model = metadataString(runMetadata, `${name}_model`);
-    const roleModels = metadataString(runMetadata, `${name}_models`);
-    if (roleModels === undefined) {
-      return model;
-    }
-    return model === undefined
-      ? `per-role ${roleModels}`
-      : `${model}; per-role ${roleModels}`;
-  };
-  const adapter = metadataString(runMetadata, "adapter");
-  if (adapter === "opencode" || adapter === "claude" || adapter === "cursor") {
-    return attributionFor(adapter);
-  }
-  return (
-    attributionFor("cursor") ??
-    attributionFor("claude") ??
-    attributionFor("opencode")
-  );
 }
 
 function formatAgentProviderLabel(
