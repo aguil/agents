@@ -1,4 +1,5 @@
 import {
+  HOOK_EVENT_CLASSES,
   HOOK_EVENTS,
   type HookEvent,
   type HookEventClass,
@@ -10,8 +11,9 @@ import {
   adapterDispatchableEvents,
   adapterHookCapabilities,
   bridgeRunsOn,
+  HOOK_CLASS_TOOL_NAMES,
 } from "./adapter-table";
-import { hookGateCommand, shellWord } from "./gate";
+import { compileHookMatcher, hookGateCommand, shellWord } from "./gate";
 
 export {
   ADAPTER_HOOK_CAPABILITIES,
@@ -217,6 +219,81 @@ export function undispatchableLifecycleHookWarnings(
     (event) =>
       `hooks.${event}: declared handler cannot fire — ${LIFECYCLE_REASON[event]} (ADR 0024)`,
   );
+}
+
+/**
+ * Warnings for tool-call handlers whose `matcher` can never select a shell or
+ * edit call on this adapter (ADR 0028 decision 8, #220). Each handler is
+ * checked against the shell and edit names of the classes it registers on,
+ * tested whole as the gate tests them. MCP names are an open set, so a
+ * handler whose only class is mcp is not checked, and one that also
+ * registers on mcp is told it runs only on matching MCP calls. An adapter
+ * with no gated events (`opencode`, `fake`) gets none.
+ */
+export function unmatchableMatcherWarnings(
+  hooks: HooksSpec,
+  adapter: string = "cursor",
+): readonly string[] {
+  const row = adapterHookCapabilities(adapter);
+  if (row === undefined) {
+    return [];
+  }
+  const warnings: string[] = [];
+  for (const event of ["pre_tool_call", "post_tool_call"] as const) {
+    for (const [index, handler] of (hooks[event] ?? []).entries()) {
+      if (handler.matcher === undefined) {
+        continue;
+      }
+      const classes = new Set<HookEventClass>();
+      for (const native of row.nativeEvents[event]) {
+        const toolEvent = row.toolEvents[native];
+        for (const eventClass of toolEvent === undefined
+          ? []
+          : registrationClasses(handler, toolEvent.classes)) {
+          classes.add(eventClass);
+        }
+      }
+      const named = HOOK_EVENT_CLASSES.filter(
+        (eventClass): eventClass is "shell" | "edit" =>
+          eventClass !== "mcp" && classes.has(eventClass),
+      );
+      if (named.length === 0) {
+        continue;
+      }
+      const names = named.flatMap((eventClass) => [
+        ...HOOK_CLASS_TOOL_NAMES[eventClass],
+      ]);
+      let regex: RegExp;
+      try {
+        regex = compileHookMatcher(handler.matcher);
+      } catch {
+        // The loader rejects it first; nothing to add here.
+        continue;
+      }
+      if (names.some((name) => regex.test(name))) {
+        continue;
+      }
+      const scope =
+        handler.appliesTo === undefined
+          ? "no applies_to (every class)"
+          : `applies_to [${handler.appliesTo.join(", ")}]`;
+      const listed = named
+        .map(
+          (eventClass) =>
+            `${eventClass}: ${HOOK_CLASS_TOOL_NAMES[eventClass].join(", ")}`,
+        )
+        .join("; ");
+      const outcome = classes.has("mcp")
+        ? "so it never runs on a shell or edit call, and runs only on MCP calls whose mcp__<server>__<tool> name it matches"
+        : "so it never runs";
+      warnings.push(
+        `hooks.${event}[${index}]: matcher ${JSON.stringify(handler.matcher)} ` +
+          `matches no ${named.join(" or ")} tool name on adapter ${adapter} ` +
+          `(${listed}) with ${scope}, ${outcome} (ADR 0028)`,
+      );
+    }
+  }
+  return warnings;
 }
 
 /** Whether Cursor generation maps this canonical event onto at least one native event. */

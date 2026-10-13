@@ -58,6 +58,7 @@ import {
   renderCursorHooksConfig,
   undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
+  unmatchableMatcherWarnings,
 } from "@aguil/agents-hooks";
 import {
   harnessStatusIsFindingsBlind,
@@ -518,6 +519,14 @@ export async function setUpHookEnforcement(
   // ADR 0024: tell the author when a declared lifecycle handler cannot fire
   // under the active adapter's generator.
   for (const warning of undispatchableLifecycleHookWarnings(
+    loaded.hooks,
+    args.adapter,
+  )) {
+    console.warn(`harness run: ${warning}`);
+  }
+  // ADR 0028 decision 8 (#220): a matcher that can select no shell or edit
+  // call on this adapter is named, with the handler's applies_to.
+  for (const warning of unmatchableMatcherWarnings(
     loaded.hooks,
     args.adapter,
   )) {

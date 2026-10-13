@@ -116,6 +116,18 @@ only when `userHookEvents` is set, which `agents harness run` does only on a
 returned in `withheldEvents`, warned about, and recorded in
 `undeliverable_hooks`.
 
+## A `matcher` that cannot match (ADR 0028 decision 8, #220)
+
+`unmatchableMatcherWarnings(hooks, adapter)` names each tool-call handler whose
+`matcher` matches none of the shell and edit names of the classes it registers
+on, tested whole as the gate tests them. The warning names the handler, the
+adapter and its `applies_to`. MCP names are an open set chosen by each MCP
+server, so they are not checked: a handler whose only class is `mcp` gets no
+warning, and one that also registers on `mcp` is told it runs only on MCP calls
+whose `mcp__<server>__<tool>` name matches. `agents harness run` prints each
+warning once, beside ADR 0024's. `matcher: "Execute"`, a name no adapter
+carries, warns on both adapters.
+
 ## Lifecycle honesty (ADR 0024)
 
 `LIFECYCLE_HOOK_EVENTS` is the checklist of lifecycle events that _may_ be inert

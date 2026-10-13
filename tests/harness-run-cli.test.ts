@@ -1720,6 +1720,48 @@ test("cursor reads its version for user hooks alone, and withholds the added eve
   expect(measured.result.metadata).not.toHaveProperty("undeliverable_hooks");
 });
 
+test("harness run prints each unmatchable-matcher warning once, on both adapters (ADR 0028 decision 8, #220)", async () => {
+  for (const adapter of ["cursor", "claude"] as const) {
+    const run = await runLifecycleHarness({
+      adapter,
+      yaml: [
+        "hooks:",
+        "  pre_tool_call:",
+        "    - command: echo pre",
+        '      matcher: "Execute"',
+        "      applies_to: [shell]",
+        "    - command: echo mcp-only",
+        '      matcher: "Execute"',
+        "      applies_to: [mcp]",
+      ],
+      agentVersion: "2026.10.01-14929f9",
+    });
+    expect(run.exitCode).toBe(0);
+    const warning =
+      `harness run: hooks.pre_tool_call[0]: matcher "Execute" matches no shell tool name on adapter ${adapter} ` +
+      "(shell: Bash, Shell) with applies_to [shell], so it never runs (ADR 0028)";
+    expect(run.stderr.split(warning)).toHaveLength(2);
+    expect(run.stderr).not.toContain("hooks.pre_tool_call[1]: matcher");
+  }
+});
+
+test("the triage-demo fixture's matcher warns on both adapters (ADR 0028 decision 8, #220)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { unmatchableMatcherWarnings } = await import("@aguil/agents-hooks");
+  const loaded = await loadHarness({
+    agentsDir: join(repoRoot, "tests", "fixtures", "agents-dir"),
+    harnessId: "triage-demo",
+  });
+  for (const adapter of ["cursor", "claude"]) {
+    expect(unmatchableMatcherWarnings(loaded.hooks, adapter)).toEqual([
+      `hooks.pre_tool_call[0]: matcher "Execute" matches no shell or edit tool name on adapter ${adapter} ` +
+        "(shell: Bash, Shell; edit: Write, Edit, NotebookEdit, Delete) with no applies_to (every class), " +
+        "so it never runs on a shell or edit call, and runs only on MCP calls whose " +
+        "mcp__<server>__<tool> name it matches (ADR 0028)",
+    ]);
+  }
+});
+
 /** Load a one-role harness with these hook lines from a fresh agents dir. */
 async function loadHookedHarness(hookLines: readonly string[]) {
   const { loadHarness } = await import("@aguil/agents-harness-config");

@@ -23,6 +23,7 @@ import {
   renderCursorHooksConfig,
   undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
+  unmatchableMatcherWarnings,
 } from "@aguil/agents-hooks";
 
 /**
@@ -857,4 +858,41 @@ test("every native tool-call event has a row in the gate's table (ADR 0028 decis
       .map(([event]) => event)
       .sort(),
   ).toEqual(["afterMCPExecution", "afterShellExecution", "preToolUse"]);
+});
+
+test("a matcher that matches no shell or edit name warns, naming the handler, adapter and applies_to (ADR 0028 decision 8, #220)", () => {
+  const hooks: HooksSpec = {
+    pre_tool_call: [
+      { command: "/h/a.sh", matcher: "Execute" },
+      { command: "/h/b.sh", matcher: "Execute", appliesTo: ["shell"] },
+      // MCP names are an open set: an mcp-only handler is not checked.
+      { command: "/h/c.sh", matcher: "Execute", appliesTo: ["mcp"] },
+      // Names that match, whole, on every adapter.
+      { command: "/h/d.sh", matcher: "Bash" },
+      { command: "/h/e.sh", matcher: "Shell|Write", appliesTo: ["shell"] },
+      { command: "/h/f.sh", appliesTo: ["edit"] },
+    ],
+    post_tool_call: [
+      // Edit matches part of NotebookEdit, but not whole, and Read is no
+      // edit name.
+      { command: "/h/g.sh", matcher: "Notebook|Read", appliesTo: ["edit"] },
+      { command: "/h/h.sh", matcher: ".*Edit", appliesTo: ["edit"] },
+    ],
+    role_stop: [{ command: "/h/stop.sh", matcher: "Execute" }],
+  };
+  for (const adapter of ["cursor", "claude"]) {
+    expect(unmatchableMatcherWarnings(hooks, adapter)).toEqual([
+      `hooks.pre_tool_call[0]: matcher "Execute" matches no shell or edit tool name on adapter ${adapter} ` +
+        "(shell: Bash, Shell; edit: Write, Edit, NotebookEdit, Delete) with no applies_to (every class), " +
+        "so it never runs on a shell or edit call, and runs only on MCP calls whose " +
+        "mcp__<server>__<tool> name it matches (ADR 0028)",
+      `hooks.pre_tool_call[1]: matcher "Execute" matches no shell tool name on adapter ${adapter} ` +
+        "(shell: Bash, Shell) with applies_to [shell], so it never runs (ADR 0028)",
+      `hooks.post_tool_call[0]: matcher "Notebook|Read" matches no edit tool name on adapter ${adapter} ` +
+        "(edit: Write, Edit, NotebookEdit, Delete) with applies_to [edit], so it never runs (ADR 0028)",
+    ]);
+  }
+  // No generator, no gate: nothing to say.
+  expect(unmatchableMatcherWarnings(hooks, "opencode")).toEqual([]);
+  expect(unmatchableMatcherWarnings({})).toEqual([]);
 });

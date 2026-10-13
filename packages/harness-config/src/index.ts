@@ -131,7 +131,14 @@ export type HookEventClass = (typeof HOOK_EVENT_CLASSES)[number];
 /** Command handler — the only handler type in spec v0.1/v0.2. */
 export interface HookHandlerSpec {
   readonly command: string;
-  /** Regex over tool names (e.g. "Execute", "Create|Edit"). */
+  /**
+   * JavaScript regex that must match the whole tool name, as if written
+   * `^(?:<matcher>)$` (ADR 0028). The names are the same on every adapter:
+   * shell `Bash`, `Shell`; edit `Write`, `Edit`, `NotebookEdit`, `Delete`;
+   * mcp `mcp__<server>__<tool>`. A call whose event names no tool matches
+   * when any name in its class does. Must compile, or the harness fails to
+   * load.
+   */
   readonly matcher?: string;
   readonly timeoutS?: number;
   /**

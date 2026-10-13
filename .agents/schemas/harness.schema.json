@@ -254,7 +254,7 @@
       "$ref": "#/definitions/nonEmptyString"
     },
     "hookMatcher": {
-      "description": "Regular expression over tool names; absent matches all.",
+      "description": "JavaScript regular expression that must match the whole tool name (as ^(?:matcher)$); absent matches every name. Names are the same on every adapter: shell Bash, Shell; edit Write, Edit, NotebookEdit, Delete; mcp mcp__<server>__<tool>. On a tool-call event the agents hook gate applies it at call time (ADR 0028).",
       "$ref": "#/definitions/nonEmptyString"
     },
     "hookTimeoutSeconds": {
