@@ -20,9 +20,11 @@ worktree. Claude Code refused to read it, the role emitted no verdict, and every
 row showed "no result". Across three PRs and two rounds each, every run passed.
 `result.json` showed `conformance: scheduled`, an empty `conformance_reported`
 and an empty `failed_roles`. The only signal was one stdout line pointing at the
-coverage section. The read failure itself is an adapter bug, fixed separately.
-The status rule is the part that let it pass unnoticed: a role that checked
-nothing looked the same as a clean review to anything that reads status.
+coverage section. The read failure itself is an adapter bug: the change that
+proposes this ADR also passes Claude Code `--add-dir` for run inputs outside the
+role's worktree. That fix is not a decision recorded here. The status rule is
+the part that let it pass unnoticed: a role that checked nothing looked the same
+as a clean review to anything that reads status.
 
 `--strict` already turns role-execution problems that are warnings by default
 into failures: a timed-out role, and an output line the run could not accept. An
