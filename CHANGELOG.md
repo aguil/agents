@@ -10,6 +10,14 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.8.13](https://github.com/aguil/agents/compare/v0.8.12...v0.8.13) (2026-10-13)
+
+
+### Fixed
+
+* **code-review:** fail a silent conformance role under --strict ([eb4986d](https://github.com/aguil/agents/commit/eb4986dc318fe623963083bb24097865f0af753a)), closes [#277](https://github.com/aguil/agents/issues/277)
+* **execution:** let Claude roles read a run directory outside their worktree ([e121ded](https://github.com/aguil/agents/commit/e121ded7e2fa3c603cebaeaf64033887f2923df8)), closes [#277](https://github.com/aguil/agents/issues/277)
+
 ## [0.8.12](https://github.com/aguil/agents/compare/v0.8.11...v0.8.12) (2026-10-12)
 
 
