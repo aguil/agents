@@ -10,6 +10,39 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.9.0](https://github.com/aguil/agents/compare/v0.8.13...v0.9.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **hooks:** harness-declared pre_tool_call and post_tool_call hooks now run behind `agents hook-gate`, which changes what authors see:
+    - On Claude Code, an unscoped handler, or one whose matcher names a tool
+      outside shell, edit and MCP (such as Read, Grep, WebFetch or Agent), no
+      longer runs on reads, searches and other non-class tools.
+    - matcher must match the whole tool name: `Edit` no longer matches
+      NotebookEdit; write `.*Edit` for that.
+    - A matcher that is not a valid regular expression now fails the harness
+      load, on every spec version.
+    - On Cursor 2026.10.01-14929f9, unscoped handlers now also receive
+      preToolUse payloads for pre-edit calls and afterShellExecution and
+      afterMCPExecution payloads for post-call shell and MCP calls.
+    - Every gated hook adds one agents process per invocation.
+
+### Added
+
+* **code-review:** read per-checkout overrides from .agents-code-review/config.local.json ([ef044b9](https://github.com/aguil/agents/commit/ef044b9914684468cbfd14aa004e036c09695c05))
+* **hooks:** add agents hook-gate, which runs a tool-call handler only in its scope ([e99b5dd](https://github.com/aguil/agents/commit/e99b5ddc51a3819238566e35fe4d68690b5c368b)), closes [#235](https://github.com/aguil/agents/issues/235)
+* **hooks:** run every harness-declared tool-call hook behind agents hook-gate ([064738c](https://github.com/aguil/agents/commit/064738c7d83fe7de039656ba4395f3174a1eb866))
+* **hooks:** warn at load when a hook's matcher can match no shell or edit tool ([da39e01](https://github.com/aguil/agents/commit/da39e013624cc049a2dfd343bbb650b0873b486d)), closes [#220](https://github.com/aguil/agents/issues/220)
+
+
+### Fixed
+
+* **agentsd:** never publish a fake-adapter code-review result ([ea9a815](https://github.com/aguil/agents/commit/ea9a8158955285a824df6b2125e3563d605195d3))
+* **cli:** warn when a code-review run uses the placeholder fake adapter ([ceb2bf6](https://github.com/aguil/agents/commit/ceb2bf6b745bc0fb30faa65b2a54e3b276e17d58))
+* **code-review:** refuse to post a fake-adapter result unless --allow-fake is passed ([13ad064](https://github.com/aguil/agents/commit/13ad06439da62e175a5f9f8d50284fe4a044fd0d))
+* **reporting:** name the adapter in every code-review report ([48e54fc](https://github.com/aguil/agents/commit/48e54fcdf7b451ba9449177de2615f17e9db285c))
+
 ## [0.8.13](https://github.com/aguil/agents/compare/v0.8.12...v0.8.13) (2026-10-13)
 
 
