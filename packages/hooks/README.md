@@ -31,14 +31,17 @@ When `policyBridge: true`, the generator registers `agents policy-eval` first on
 every mapped tool event except Cursor's user-hook events (see below). Claude is
 the exception: there the bridge is a `PreToolUse` hook only, and
 harness-declared `post_tool_call` handlers still map to `PostToolUse` (ADR 0023
-decision 9). Claude's bridge passes `--format claude` so the response encoding
-matches what the CLI expects (`hookSpecificOutput.permissionDecision`). Cursor
-keeps the default `{ permission }` shape. Given `workspaceRoot`, Claude's bridge
-also passes `--workspace <root>`. Claude Code sends absolute file paths, so the
-bridge rewrites the ones inside the root as workspace-relative before filesystem
-rules see them. A path outside the root stays absolute and stays denied.
-Cursor's bridge is given `workspaceRoot` the same way, since a native read's
-path is absolute too.
+decision 9). On Cursor, "first" means merge precedence, not run order: Cursor
+runs every hook on an event at once and a deny wins, so a user hook can run on a
+call the bridge then denies. Claude's bridge passes `--format claude` so the
+response encoding matches what the CLI expects
+(`hookSpecificOutput.permissionDecision`). Cursor keeps the default
+`{ permission }` shape. Given `workspaceRoot`, Claude's bridge also passes
+`--workspace <root>`. Claude Code sends absolute file paths, so the bridge
+rewrites the ones inside the root as workspace-relative before filesystem rules
+see them. A path outside the root stays absolute and stays denied. Cursor's
+bridge is given `workspaceRoot` the same way, since a native read's path is
+absolute too.
 
 ## Cursor reads (#198)
 
