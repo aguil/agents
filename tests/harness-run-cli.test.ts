@@ -694,6 +694,13 @@ async function runLifecycleHarness(options: {
     await mkdir(workspace, { recursive: true });
     await mkdir(harnessDir, { recursive: true });
     await mkdir(binDir, { recursive: true });
+    // Cursor's generated hooks name a bare `agents`, which setup probes:
+    // this one is the repo's.
+    await writeFile(
+      join(binDir, "agents"),
+      `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(repoRoot, "packages", "cli", "src", "index.ts"))} "$@"\n`,
+      { mode: 0o755 },
+    );
     for (const name of ["agent", "claude"]) {
       const version =
         name === "agent" && options.agentVersion !== undefined
@@ -1677,6 +1684,237 @@ test("cursor registers beforeReadFile for the bridge alone on a measured cursor-
   expect(unmeasured.warnings.join("\n")).toContain(
     "beforeReadFile withheld — the installed cursor-agent's version could not be read",
   );
+});
+
+const TOOL_CALL_HOOKS = [
+  "hooks:",
+  "  pre_tool_call:",
+  "    - command: echo pre",
+  "  post_tool_call:",
+  "    - command: echo post",
+] as const;
+
+test("cursor reads its version for user hooks alone, and withholds the added events on an unmeasured one (ADR 0028 decision 5)", async () => {
+  const run = await runLifecycleHarness({
+    adapter: "cursor",
+    yaml: TOOL_CALL_HOOKS,
+    agentVersion: "2026.10.02-0000000",
+  });
+  expect(run.exitCode).toBe(0);
+  expect(run.stderr).toContain(
+    "harness run: hooks: preToolUse, afterShellExecution, afterMCPExecution withheld — " +
+      "cursor-agent 2026.10.02-0000000 is not a version measured to fire them",
+  );
+  expect(run.result.metadata.undeliverable_hooks).toBe(
+    "preToolUse,afterShellExecution,afterMCPExecution",
+  );
+  // No policy, so no read hook to withhold.
+  expect(run.stderr).not.toContain("beforeReadFile");
+  const measured = await runLifecycleHarness({
+    adapter: "cursor",
+    yaml: TOOL_CALL_HOOKS,
+    agentVersion: "2026.10.01-14929f9",
+  });
+  expect(measured.exitCode).toBe(0);
+  expect(measured.stderr).not.toContain("withheld");
+  expect(measured.result.metadata).not.toHaveProperty("undeliverable_hooks");
+});
+
+test("harness run prints each unmatchable-matcher warning once, on both adapters (ADR 0028 decision 8, #220)", async () => {
+  for (const adapter of ["cursor", "claude"] as const) {
+    const run = await runLifecycleHarness({
+      adapter,
+      yaml: [
+        "hooks:",
+        "  pre_tool_call:",
+        "    - command: echo pre",
+        '      matcher: "Execute"',
+        "      applies_to: [shell]",
+        "    - command: echo mcp-only",
+        '      matcher: "Execute"',
+        "      applies_to: [mcp]",
+      ],
+      agentVersion: "2026.10.01-14929f9",
+    });
+    expect(run.exitCode).toBe(0);
+    const warning =
+      `harness run: hooks.pre_tool_call[0]: matcher "Execute" matches no shell tool name on adapter ${adapter} ` +
+      "(shell: Bash, Shell) with applies_to [shell], so it never runs (ADR 0028)";
+    expect(run.stderr.split(warning)).toHaveLength(2);
+    expect(run.stderr).not.toContain("hooks.pre_tool_call[1]: matcher");
+  }
+});
+
+test("the triage-demo fixture's matcher warns on both adapters (ADR 0028 decision 8, #220)", async () => {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const { unmatchableMatcherWarnings } = await import("@aguil/agents-hooks");
+  const loaded = await loadHarness({
+    agentsDir: join(repoRoot, "tests", "fixtures", "agents-dir"),
+    harnessId: "triage-demo",
+  });
+  for (const adapter of ["cursor", "claude"]) {
+    expect(unmatchableMatcherWarnings(loaded.hooks, adapter)).toEqual([
+      `hooks.pre_tool_call[0]: matcher "Execute" matches no shell or edit tool name on adapter ${adapter} ` +
+        "(shell: Bash, Shell; edit: Write, Edit, NotebookEdit, Delete) with no applies_to (every class), " +
+        "so it never runs on a shell or edit call, and runs only on MCP calls whose " +
+        "mcp__<server>__<tool> name it matches (ADR 0028)",
+    ]);
+  }
+});
+
+/** Load a one-role harness with these hook lines from a fresh agents dir. */
+async function loadHookedHarness(hookLines: readonly string[]) {
+  const { loadHarness } = await import("@aguil/agents-harness-config");
+  const root = await mkdtemp(join(tmpdir(), "harness-gate-"));
+  const agentsDir = join(root, "agents");
+  const workspace = join(root, "workspace");
+  await mkdir(join(agentsDir, "harnesses", "gated"), { recursive: true });
+  await mkdir(workspace);
+  await writeFile(
+    join(agentsDir, "harnesses", "gated", "harness.yaml"),
+    [
+      'spec_version: "0.2"',
+      "kind: harness",
+      "harness: { id: gated }",
+      "roles: { a: { description: A } }",
+      ...hookLines,
+      "",
+    ].join("\n"),
+  );
+  const loaded = await loadHarness({ agentsDir, harnessId: "gated" });
+  return { root, agentsDir, workspace, loaded };
+}
+
+test("setup fails before any role when a generated gate fails its probe (ADR 0028 decision 7)", async () => {
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const { root, agentsDir, workspace, loaded } =
+    await loadHookedHarness(TOOL_CALL_HOOKS);
+  // An agents release that predates hook-gate, and one that answers chattily.
+  const shims = {
+    stale: `#!/bin/sh\necho 'Unknown command: hook-gate' >&2\nexit 1\n`,
+    chatty: "#!/bin/sh\necho 'agents 0.0.0'\n",
+  };
+  try {
+    for (const adapter of ["cursor", "claude"] as const) {
+      for (const [name, script] of Object.entries(shims)) {
+        const agentsCli = join(root, `${adapter}-${name}`);
+        await writeFile(agentsCli, script, { mode: 0o755 });
+        const scratchpadPath = join(root, `scratch-${adapter}-${name}`);
+        await mkdir(scratchpadPath);
+        const enforcement = await setUpHookEnforcement(loaded, {
+          adapter,
+          agentsDir,
+          workspace,
+          scratchpadPath,
+          agentsCli,
+          allowUnenforcedPolicy: false,
+          detectCursorVersion: async () => "2026.10.01-14929f9",
+        });
+        expect("error" in enforcement).toBe(true);
+        const error = "error" in enforcement ? enforcement.error : "";
+        expect(error).toContain(
+          name === "stale"
+            ? "harness run: a generated hook gate failed its probe (exit 1: Unknown command: hook-gate)"
+            : 'harness run: a generated hook gate failed its probe (exit 0 with output: "agents 0.0.0")',
+        );
+        expect(error).toContain(`Gate: '${agentsCli}' hook-gate --probe `);
+        expect(error).toContain("(ADR 0028 decision 7)");
+      }
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("claude gates user hooks through the running CLI, probed before any role (ADR 0028 decisions 6 and 7)", async () => {
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const { root, agentsDir, workspace, loaded } = await loadHookedHarness([
+    "hooks:",
+    "  pre_tool_call:",
+    "    - command: echo pre",
+    "      matcher: Bash",
+    "      applies_to: [shell]",
+  ]);
+  try {
+    const scratchpadPath = join(root, "scratch");
+    await mkdir(scratchpadPath);
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "claude",
+      agentsDir,
+      workspace,
+      scratchpadPath,
+      allowUnenforcedPolicy: false,
+    });
+    if ("error" in enforcement) {
+      throw new Error(enforcement.error);
+    }
+    const settings = await Bun.file(
+      enforcement.claudeSettingsPath ?? "",
+    ).json();
+    expect(settings.hooks.PreToolUse).toEqual([
+      {
+        matcher: "Bash",
+        hooks: [
+          {
+            type: "command",
+            command:
+              `'${process.execPath}' '${join(repoRoot, "packages", "cli", "src", "index.ts")}' ` +
+              "hook-gate --adapter 'claude' --event 'PreToolUse' --classes 'shell' --matcher 'Bash' -- 'echo pre'",
+          },
+        ],
+      },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cursor gates user hooks through agents on the hook's PATH, or --agents-cli (ADR 0028 decision 7)", async () => {
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const { root, agentsDir, workspace, loaded } = await loadHookedHarness([
+    "hooks:",
+    "  pre_tool_call:",
+    "    - command: echo pre",
+    "      applies_to: [edit]",
+  ]);
+  const agentsCli = join(root, "my agents");
+  await writeFile(
+    agentsCli,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(repoRoot, "packages", "cli", "src", "index.ts"))} "$@"\n`,
+    { mode: 0o755 },
+  );
+  try {
+    const enforcement = await setUpHookEnforcement(loaded, {
+      adapter: "cursor",
+      agentsDir,
+      workspace,
+      scratchpadPath: root,
+      agentsCli,
+      allowUnenforcedPolicy: false,
+      detectCursorVersion: async () => "2026.10.01-14929f9",
+    });
+    if ("error" in enforcement) {
+      throw new Error(enforcement.error);
+    }
+    const config = await Bun.file(
+      join(workspace, ".cursor", "hooks.json"),
+    ).json();
+    expect(config.hooks).toEqual({
+      preToolUse: [
+        {
+          command: `'${agentsCli}' hook-gate --adapter 'cursor' --event 'preToolUse' --classes 'edit' -- 'echo pre'`,
+        },
+      ],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("harness run warns once per policy allowlisting an interpreter (ADR 0026)", async () => {

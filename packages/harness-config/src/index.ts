@@ -131,7 +131,14 @@ export type HookEventClass = (typeof HOOK_EVENT_CLASSES)[number];
 /** Command handler — the only handler type in spec v0.1/v0.2. */
 export interface HookHandlerSpec {
   readonly command: string;
-  /** Regex over tool names (e.g. "Execute", "Create|Edit"). */
+  /**
+   * JavaScript regex that must match the whole tool name, as if written
+   * `^(?:<matcher>)$` (ADR 0028). The names are the same on every adapter:
+   * shell `Bash`, `Shell`; edit `Write`, `Edit`, `NotebookEdit`, `Delete`;
+   * mcp `mcp__<server>__<tool>`. A call whose event names no tool matches
+   * when any name in its class does. Must compile, or the harness fails to
+   * load.
+   */
   readonly matcher?: string;
   readonly timeoutS?: number;
   /**
@@ -907,6 +914,23 @@ function parseAppliesTo(
   return { appliesTo: classes };
 }
 
+/**
+ * A handler's `matcher` must compile as a JavaScript regular expression: it
+ * is applied to tool names at call time, and one that does not compile would
+ * never match (ADR 0028 decision 8).
+ */
+function parseMatcher(value: unknown, label: string): string {
+  const matcher = requiredString(value, label);
+  try {
+    new RegExp(matcher);
+  } catch (error) {
+    fail(
+      `${label} is not a valid regular expression: ${(error as Error).message}`,
+    );
+  }
+  return matcher;
+}
+
 function parseHooks(value: unknown, harnessDir: string): HooksSpec {
   if (value === undefined) {
     return {};
@@ -941,7 +965,7 @@ function parseHooks(value: unknown, harnessDir: string): HooksSpec {
         ...(handler.matcher === undefined
           ? {}
           : {
-              matcher: requiredString(
+              matcher: parseMatcher(
                 handler.matcher,
                 `hooks.${event}[${index}].matcher`,
               ),

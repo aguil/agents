@@ -1,0 +1,6 @@
+id: hp-no-rm
+description: Hook-parity live check — allows echo and touch, denies rm
+capabilities:
+  exec:
+    allow: ["echo", "touch", "cat", "ls"]
+    deny: ["rm"]

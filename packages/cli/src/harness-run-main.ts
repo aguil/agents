@@ -49,12 +49,16 @@ import {
   adapterHookCapabilities,
   cursorReadHookWithheldWarning,
   cursorSupportsReadHook,
+  cursorSupportsUserHookEvents,
+  cursorUserHookEventsWithheldWarning,
+  type GeneratedCursorHooks,
   generateClaudeHooksConfig,
   generateCursorHooksConfig,
   renderClaudeSettingsConfig,
   renderCursorHooksConfig,
   undeliverableLifecycleHookEvents,
   undispatchableLifecycleHookWarnings,
+  unmatchableMatcherWarnings,
 } from "@aguil/agents-hooks";
 import {
   harnessStatusIsFindingsBlind,
@@ -231,8 +235,9 @@ type EnforcementArgs = Pick<
   readonly scratchpadPath: string;
   /**
    * The installed `cursor-agent`'s `--version` line, which decides whether
-   * `beforeReadFile` is registered (#198). Defaults to running the CLI the
-   * Cursor adapter spawns; tests pass a fixed version.
+   * `beforeReadFile` (#198) and ADR 0028's user-hook events are registered.
+   * Defaults to running the CLI the Cursor adapter spawns; tests pass a
+   * fixed version.
    */
   readonly detectCursorVersion?: () => Promise<string>;
 };
@@ -280,8 +285,9 @@ async function writeCanonicalCursorHooks(
   loaded: LoadedHarness,
   args: EnforcementArgs,
   readHook: boolean,
-): Promise<void> {
-  const { config } = generateCursorHooksConfig({
+  userHookEvents: boolean,
+): Promise<GeneratedCursorHooks> {
+  const generated = generateCursorHooksConfig({
     hooks: loaded.hooks,
     policyBridge: harnessDeclaresPolicy(loaded),
     agentsCli: args.agentsCli,
@@ -289,6 +295,7 @@ async function writeCanonicalCursorHooks(
     // does (#198): a native read's `file_path` is always absolute.
     workspaceRoot: resolve(args.workspace),
     readHook,
+    userHookEvents,
   });
   const cursorDir = join(resolve(args.workspace), ".cursor");
   await mkdir(cursorDir, { recursive: true });
@@ -297,8 +304,9 @@ async function writeCanonicalCursorHooks(
   // onRoleStart callbacks share both), so a random component is required for
   // the rename source to survive until its own rename.
   const tempPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
-  await writeFile(tempPath, renderCursorHooksConfig(config));
+  await writeFile(tempPath, renderCursorHooksConfig(generated.config));
   await rename(tempPath, finalPath);
+  return generated;
 }
 
 /**
@@ -320,7 +328,11 @@ export function selfAgentsCommand(): readonly string[] {
 async function writeCanonicalClaudeSettings(
   loaded: LoadedHarness,
   args: EnforcementArgs,
-): Promise<{ readonly path: string; readonly bridge?: string }> {
+): Promise<{
+  readonly path: string;
+  readonly bridge?: string;
+  readonly gateProbes: readonly string[];
+}> {
   const policyBridge = harnessDeclaresPolicy(loaded);
   const generated = generateClaudeHooksConfig({
     hooks: loaded.hooks,
@@ -338,7 +350,11 @@ async function writeCanonicalClaudeSettings(
   const bridge = policyBridge
     ? generated.config.hooks.PreToolUse?.[0]?.hooks[0]?.command
     : undefined;
-  return { path: finalPath, ...(bridge === undefined ? {} : { bridge }) };
+  return {
+    path: finalPath,
+    ...(bridge === undefined ? {} : { bridge }),
+    gateProbes: generated.gateProbes,
+  };
 }
 
 /**
@@ -400,6 +416,57 @@ export async function probeClaudePolicyBridge(
     : `answered ${JSON.stringify(permissionDecision ?? null)} where a deny was required`;
 }
 
+/**
+ * Run one generated hook-gate command with `--probe`, as `sh -c` from the
+ * workspace (ADR 0028 decision 7). It must exit 0 and print nothing: an
+ * `agents` without `hook-gate`, or a matcher that does not compile, would
+ * leave every gated hook inert. Returns why the probe failed, or undefined.
+ */
+export async function probeHookGate(
+  command: string,
+  workspace: string,
+): Promise<string | undefined> {
+  const proc = Bun.spawn({
+    cmd: ["sh", "-c", command],
+    cwd: workspace,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 30_000,
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  const detail = Bun.stripANSI(`${stderr}${stdout}`).trim().split("\n")[0];
+  if (exitCode !== 0) {
+    return `exit ${exitCode}${detail === undefined || detail === "" ? "" : `: ${detail}`}`;
+  }
+  return stdout === "" && stderr === ""
+    ? undefined
+    : `exit 0 with output: ${JSON.stringify(detail)}`;
+}
+
+/** Probe each distinct gate command; the run's error for the first failure. */
+async function probeHookGates(
+  commands: readonly string[],
+  workspace: string,
+): Promise<string | undefined> {
+  for (const command of commands) {
+    const failure = await probeHookGate(command, workspace);
+    if (failure !== undefined) {
+      return (
+        `harness run: a generated hook gate failed its probe (${failure}), ` +
+        "so the harness's tool-call hooks would not run (ADR 0028 decision 7). " +
+        `Gate: ${command}. Pass --agents-cli naming an agents CLI that ` +
+        'supports "hook-gate".'
+      );
+    }
+  }
+  return undefined;
+}
+
 /** Load warnings for each distinct policy the harness or its roles name. */
 function harnessPolicyLoadWarnings(loaded: LoadedHarness): readonly string[] {
   const policies = new Map<string, PolicySpec>();
@@ -419,10 +486,19 @@ export interface HookEnforcementSetup {
   readonly claudeSettingsPath?: string;
   /**
    * Native events withheld from this run, recorded in the result's
-   * `undeliverable_hooks` beside ADR 0024's lifecycle events: today
-   * `beforeReadFile` on a `cursor-agent` not measured to support it (#198).
+   * `undeliverable_hooks` beside ADR 0024's lifecycle events: `beforeReadFile`
+   * (#198) and ADR 0028's user-hook events, on a `cursor-agent` not measured
+   * to support them.
    */
   readonly undeliverableHooks?: readonly string[];
+}
+
+/** Whether the harness declares any pre- or post-tool-call handler. */
+function declaresToolCallHooks(loaded: LoadedHarness): boolean {
+  return (
+    (loaded.hooks.pre_tool_call?.length ?? 0) > 0 ||
+    (loaded.hooks.post_tool_call?.length ?? 0) > 0
+  );
 }
 
 /**
@@ -443,6 +519,14 @@ export async function setUpHookEnforcement(
   // ADR 0024: tell the author when a declared lifecycle handler cannot fire
   // under the active adapter's generator.
   for (const warning of undispatchableLifecycleHookWarnings(
+    loaded.hooks,
+    args.adapter,
+  )) {
+    console.warn(`harness run: ${warning}`);
+  }
+  // ADR 0028 decision 8 (#220): a matcher that can select no shell or edit
+  // call on this adapter is named, with the handler's applies_to.
+  for (const warning of unmatchableMatcherWarnings(
     loaded.hooks,
     args.adapter,
   )) {
@@ -488,28 +572,48 @@ export async function setUpHookEnforcement(
     : undefined;
 
   if (args.adapter === "cursor") {
-    // Register the read hook only on a CLI measured to support it: an event
-    // the CLI does not know turns off every other hook in the file, the shell
-    // bridge included (#239). Withheld, reads stay unchecked, as before (#198).
-    let readHook = false;
-    if (hasAnyPolicy) {
-      const version = await (
-        args.detectCursorVersion ?? detectCursorAgentVersion
-      )();
-      readHook = cursorSupportsReadHook(version);
-      if (!readHook) {
-        console.warn(
-          `harness run: ${cursorReadHookWithheldWarning(version)} (#198)`,
-        );
-      }
+    // Register the read hook and ADR 0028's user-hook events only on a CLI
+    // measured to support them: an event the CLI does not know turns off
+    // every other hook in the file, the shell bridge included (#239).
+    // Withheld, reads stay unchecked, as before (#198), and user hooks miss
+    // those events' calls.
+    let version = "";
+    if (hasAnyPolicy || declaresToolCallHooks(loaded)) {
+      version = await (args.detectCursorVersion ?? detectCursorAgentVersion)();
     }
-    await writeCanonicalCursorHooks(loaded, args, readHook);
+    const readHook = hasAnyPolicy && cursorSupportsReadHook(version);
+    if (hasAnyPolicy && !readHook) {
+      console.warn(
+        `harness run: ${cursorReadHookWithheldWarning(version)} (#198)`,
+      );
+    }
+    const userHookEvents = cursorSupportsUserHookEvents(version);
+    const generated = await writeCanonicalCursorHooks(
+      loaded,
+      args,
+      readHook,
+      userHookEvents,
+    );
+    if (generated.withheldEvents.length > 0) {
+      console.warn(
+        `harness run: ${cursorUserHookEventsWithheldWarning(version, generated.withheldEvents)}`,
+      );
+    }
+    const gateFailure = await probeHookGates(
+      generated.gateProbes,
+      resolve(args.workspace),
+    );
+    if (gateFailure !== undefined) {
+      return { error: gateFailure };
+    }
+    const undeliverableHooks = [
+      ...(hasAnyPolicy && !readHook ? ["beforeReadFile"] : []),
+      ...generated.withheldEvents,
+    ];
     return {
-      ...(hasAnyPolicy && !readHook
-        ? { undeliverableHooks: ["beforeReadFile"] }
-        : {}),
+      ...(undeliverableHooks.length === 0 ? {} : { undeliverableHooks }),
       onRoleStart: async (roleId: string) => {
-        await writeCanonicalCursorHooks(loaded, args, readHook);
+        await writeCanonicalCursorHooks(loaded, args, readHook, userHookEvents);
         console.warn(
           `harness run: role "${roleId}" enforced under policy "${roleEffectivePolicyId(loaded, roleId) ?? "(none)"}"`,
         );
@@ -534,6 +638,13 @@ export async function setUpHookEnforcement(
             'that supports "policy-eval --format claude --workspace".',
         };
       }
+    }
+    const gateFailure = await probeHookGates(
+      settings.gateProbes,
+      resolve(args.workspace),
+    );
+    if (gateFailure !== undefined) {
+      return { error: gateFailure };
     }
     return {
       claudeSettingsPath: settings.path,
