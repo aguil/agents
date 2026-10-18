@@ -73,6 +73,7 @@ export type CursorHookEvent =
  */
 export const CURSOR_READ_HOOK_VERSIONS: readonly string[] = [
   "2026.10.01-14929f9",
+  "2026.10.16-e3cb207",
 ];
 
 /** Whether `beforeReadFile` may be registered for this `cursor-agent --version`. */
@@ -106,6 +107,7 @@ export function cursorReadHookWithheldWarning(version: string): string {
  */
 export const CURSOR_USER_HOOK_EVENT_VERSIONS: readonly string[] = [
   "2026.10.01-14929f9",
+  "2026.10.16-e3cb207",
 ];
 
 /** Whether ADR 0028's added user-hook events may be written for this version. */

@@ -254,7 +254,8 @@ const DECISION_TO_PERMISSION: Readonly<
 
 /**
  * Encode a verdict for Cursor's hook response shape. The denial text goes
- * under both keys cursor-agent reads (JC-23, measured on 2026.10.01-14929f9):
+ * under both keys cursor-agent reads (JC-23, measured on 2026.10.01-14929f9;
+ * `user_message` measured again on 2026.10.16-e3cb207):
  * `user_message`, from which the events the bridge answers
  * (`beforeShellExecution`, `beforeReadFile`) build the error the agent sees,
  * and `agent_message`, which only `preToolUse` forwards. It ignores a

@@ -123,10 +123,10 @@ const CURSOR_TOOL_EVENTS: Readonly<Record<string, NativeToolEvent>> = {
 };
 
 /**
- * Tool names `cursor-agent` 2026.10.01-14929f9 puts in `preToolUse`
- * payloads outside every class, from its bundle: each local tool's wrapper
- * names itself. `Shell`, `Write` and `Delete` are class names, and MCP tools
- * arrive as `MCP:<tool>`.
+ * Tool names `cursor-agent` 2026.10.01-14929f9 and 2026.10.16-e3cb207 put
+ * in `preToolUse` payloads outside every class, from their bundles: each
+ * local tool's wrapper names itself. `Shell`, `Write` and `Delete` are class
+ * names, and MCP tools arrive as `MCP:<tool>`.
  */
 const CURSOR_OTHER_TOOL_NAMES: readonly string[] = [
   "WriteShellStdin",
