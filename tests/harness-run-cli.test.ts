@@ -1762,14 +1762,27 @@ test("the triage-demo fixture's matcher warns on both adapters (ADR 0028 decisio
   }
 });
 
-/** Load a one-role harness with these hook lines from a fresh agents dir. */
-async function loadHookedHarness(hookLines: readonly string[]) {
+/**
+ * Load a one-role harness with these hook lines from a fresh agents dir,
+ * writing `policy` as `policies/<id>.yaml` beside it when given.
+ */
+async function loadHookedHarness(
+  hookLines: readonly string[],
+  policy?: { readonly id: string; readonly yaml: readonly string[] },
+) {
   const { loadHarness } = await import("@aguil/agents-harness-config");
   const root = await mkdtemp(join(tmpdir(), "harness-gate-"));
   const agentsDir = join(root, "agents");
   const workspace = join(root, "workspace");
   await mkdir(join(agentsDir, "harnesses", "gated"), { recursive: true });
   await mkdir(workspace);
+  if (policy !== undefined) {
+    await mkdir(join(agentsDir, "policies"), { recursive: true });
+    await writeFile(
+      join(agentsDir, "policies", `${policy.id}.yaml`),
+      [...policy.yaml, ""].join("\n"),
+    );
+  }
   await writeFile(
     join(agentsDir, "harnesses", "gated", "harness.yaml"),
     [
@@ -1912,6 +1925,86 @@ test("cursor gates user hooks through agents on the hook's PATH, or --agents-cli
         },
       ],
     });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cursor writes the read hook and the added events on 2026.10.16-e3cb207, and withholds them on a release in neither list (#285)", async () => {
+  const { setUpHookEnforcement } = await import(
+    "../packages/cli/src/harness-run-main"
+  );
+  const { root, agentsDir, loaded } = await loadHookedHarness(
+    ["policy: read-guard", ...TOOL_CALL_HOOKS],
+    READ_POLICY,
+  );
+  const agentsCli = join(root, "agents-cli");
+  await writeFile(
+    agentsCli,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(repoRoot, "packages", "cli", "src", "index.ts"))} "$@"\n`,
+    { mode: 0o755 },
+  );
+  const setUp = async (version: string) => {
+    const workspace = await mkdtemp(join(root, "workspace-"));
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      const enforcement = await setUpHookEnforcement(loaded, {
+        adapter: "cursor",
+        agentsDir,
+        workspace,
+        scratchpadPath: workspace,
+        agentsCli,
+        allowUnenforcedPolicy: false,
+        detectCursorVersion: async () => version,
+      });
+      if ("error" in enforcement) {
+        throw new Error(enforcement.error);
+      }
+      const config = await Bun.file(
+        join(workspace, ".cursor", "hooks.json"),
+      ).json();
+      return { enforcement, events: Object.keys(config.hooks), warnings };
+    } finally {
+      console.warn = originalWarn;
+    }
+  };
+  const gated = [
+    "beforeReadFile",
+    "preToolUse",
+    "afterShellExecution",
+    "afterMCPExecution",
+  ];
+  try {
+    const measured = await setUp("2026.10.16-e3cb207");
+    expect(measured.events).toEqual(
+      expect.arrayContaining(["beforeShellExecution", ...gated]),
+    );
+    expect(measured.enforcement.undeliverableHooks).toBeUndefined();
+    expect(measured.warnings.join("\n")).not.toContain("withheld");
+
+    // Installed beside it when the plan was written, and never measured.
+    const unlisted = await setUp("2026.10.12-d47ca18");
+    expect(unlisted.events).toContain("beforeShellExecution");
+    for (const event of gated) {
+      expect(unlisted.events).not.toContain(event);
+    }
+    expect([...(unlisted.enforcement.undeliverableHooks ?? [])].sort()).toEqual(
+      [...gated].sort(),
+    );
+    const warned = unlisted.warnings.join("\n");
+    expect(warned).toContain(
+      "harness run: hooks: beforeReadFile withheld — cursor-agent 2026.10.12-d47ca18 " +
+        "is not a version measured to support it (supported: 2026.10.01-14929f9, 2026.10.16-e3cb207)",
+    );
+    expect(warned).toContain(
+      "harness run: hooks: preToolUse, afterShellExecution, afterMCPExecution withheld — " +
+        "cursor-agent 2026.10.12-d47ca18 is not a version measured to fire them " +
+        "(supported: 2026.10.01-14929f9, 2026.10.16-e3cb207)",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

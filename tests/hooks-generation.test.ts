@@ -589,10 +589,14 @@ test("the Cursor bridge is given the workspace, single-quoted (#198, JC-8)", () 
   expect(config.hooks.beforeReadFile?.[0]?.command).toBe(expected);
 });
 
-test("only measured cursor-agent versions support beforeReadFile (#198, JC-12)", () => {
-  expect(CURSOR_READ_HOOK_VERSIONS).toEqual(["2026.10.01-14929f9"]);
+test("only measured cursor-agent versions support beforeReadFile (#198, JC-12, #285)", () => {
+  expect(CURSOR_READ_HOOK_VERSIONS).toEqual([
+    "2026.10.01-14929f9",
+    "2026.10.16-e3cb207",
+  ]);
   expect(cursorSupportsReadHook("2026.10.01-14929f9")).toBe(true);
   expect(cursorSupportsReadHook("2026.10.01-14929f9\n")).toBe(true);
+  expect(cursorSupportsReadHook("2026.10.16-e3cb207")).toBe(true);
   // A later or earlier build is not supported until it is measured.
   expect(cursorSupportsReadHook("2026.10.02-0000000")).toBe(false);
   expect(cursorSupportsReadHook("2026.09.30-14929f9")).toBe(false);
@@ -600,14 +604,20 @@ test("only measured cursor-agent versions support beforeReadFile (#198, JC-12)",
   expect(cursorReadHookWithheldWarning("")).toContain(
     "the installed cursor-agent's version could not be read",
   );
-  expect(cursorReadHookWithheldWarning("2026.10.02-0000000")).toContain(
-    "cursor-agent 2026.10.02-0000000 is not a version measured to support it",
+  expect(cursorReadHookWithheldWarning("2026.10.02-0000000")).toBe(
+    "hooks: beforeReadFile withheld — cursor-agent 2026.10.02-0000000 is not a version " +
+      "measured to support it (supported: 2026.10.01-14929f9, 2026.10.16-e3cb207), so " +
+      "Cursor's native file reads are not checked against filesystem rules in this run",
   );
 });
 
-test("only measured cursor-agent versions get ADR 0028's user-hook events (#239)", () => {
-  expect(CURSOR_USER_HOOK_EVENT_VERSIONS).toEqual(["2026.10.01-14929f9"]);
+test("only measured cursor-agent versions get ADR 0028's user-hook events (#239, #285)", () => {
+  expect(CURSOR_USER_HOOK_EVENT_VERSIONS).toEqual([
+    "2026.10.01-14929f9",
+    "2026.10.16-e3cb207",
+  ]);
   expect(cursorSupportsUserHookEvents("2026.10.01-14929f9\n")).toBe(true);
+  expect(cursorSupportsUserHookEvents("2026.10.16-e3cb207")).toBe(true);
   expect(cursorSupportsUserHookEvents("2026.10.02-0000000")).toBe(false);
   expect(cursorSupportsUserHookEvents("")).toBe(false);
   expect(
@@ -617,7 +627,7 @@ test("only measured cursor-agent versions get ADR 0028's user-hook events (#239)
     ]),
   ).toBe(
     "hooks: preToolUse, afterShellExecution withheld — cursor-agent 2026.10.02-0000000 " +
-      "is not a version measured to fire them (supported: 2026.10.01-14929f9), so the " +
+      "is not a version measured to fire them (supported: 2026.10.01-14929f9, 2026.10.16-e3cb207), so the " +
       "harness's tool-call hooks do not run on those events' calls in this run (ADR 0028)",
   );
 });
