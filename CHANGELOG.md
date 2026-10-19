@@ -10,6 +10,13 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.9.1](https://github.com/aguil/agents/compare/v0.9.0...v0.9.1) (2026-10-19)
+
+
+### Fixed
+
+* **hooks:** support cursor-agent 2026.10.16-e3cb207's read hook and added events ([eb6af4b](https://github.com/aguil/agents/commit/eb6af4bbc3b24c8512280493d6a9230d468b5464)), closes [#285](https://github.com/aguil/agents/issues/285)
+
 ## [0.9.0](https://github.com/aguil/agents/compare/v0.8.13...v0.9.0) (2026-10-14)
 
 
