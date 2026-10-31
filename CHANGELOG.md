@@ -10,6 +10,15 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.9.2](https://github.com/aguil/agents/compare/v0.9.1...v0.9.2) (2026-10-31)
+
+
+### Fixed
+
+* **code-review:** give the conformance role its rows in the prompt ([28729e0](https://github.com/aguil/agents/commit/28729e0a295232297350dca3a673d1759b53afbd)), closes [#300](https://github.com/aguil/agents/issues/300)
+* **code-review:** require an outcome line per row after the conformance rows ([0ceaa64](https://github.com/aguil/agents/commit/0ceaa64de2e60ec2799de78087e8d9482a4f9fcb))
+* **code-review:** stop telling conformance to cite an artifact it may not read ([4ae1107](https://github.com/aguil/agents/commit/4ae1107e8d075e6311e6b1cbd8a1635b768bcc67))
+
 ## [0.9.1](https://github.com/aguil/agents/compare/v0.9.0...v0.9.1) (2026-10-19)
 
 
