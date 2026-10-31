@@ -49,10 +49,9 @@ run request describes. Start its `title` with the row's `id` in square brackets
 Use `critical` for `unsatisfied` and `warning` for `unverifiable`.
 
 **`validation.evidence`**: Record what you actually did to check the row: the
-files you read, the commands you ran, the context artifacts you used. Cite the
-`acceptance-criteria` artifact as one of them. A finding with nothing here is
-still reported, but it is excluded from the run's status and from the triage
-queue. Cite only genuine acts.
+files you read, the commands you ran, the context artifacts you used. A finding
+with nothing here is still reported, but it is excluded from the run's status
+and from the triage queue. Cite only genuine acts.
 
 **`file`** and **`line`**: as for any finding, only a path from this pull
 request's **changed-files list** and a line inside its diff hunk. For a missing
