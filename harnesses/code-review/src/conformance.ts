@@ -57,6 +57,36 @@ function notRunReason(
 }
 
 /**
+ * The rows themselves, for the conformance role's prompt. Reading them from
+ * the bundle is not dependable: the artifact comes after everything else in
+ * it, so a capped read can stop short of it behind large referenced documents,
+ * and a search outside the role's worktree can be refused. Either way the role
+ * used to judge rows from the PR's paraphrase of them (#300). The JSON is
+ * indented, so no row's text can start a line and close the fence.
+ */
+export function conformancePromptSuffix(input: {
+  readonly roleId: string;
+  readonly criteria: AcceptanceCriteriaArtifactContent | undefined;
+}): string | undefined {
+  if (
+    input.roleId !== CODE_REVIEW_CONFORMANCE_ROLE_ID ||
+    input.criteria?.status !== "loaded" ||
+    input.criteria.criteria.length === 0
+  ) {
+    return undefined;
+  }
+  return [
+    "## Acceptance-criteria rows",
+    "",
+    "These are all of this run's rows, copied from the context bundle's `acceptance-criteria` artifact. Judge each row by this text. You do not need to read the criteria file or search the bundle for it.",
+    "",
+    "```json",
+    JSON.stringify(input.criteria.criteria, null, 2),
+    "```",
+  ].join("\n");
+}
+
+/**
  * Which scheduled criteria actually got a verdict, recorded after the run so
  * consumers that only see metadata (posted reviews) cannot claim a row was
  * checked when the role never reported it.

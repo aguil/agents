@@ -1,9 +1,9 @@
 # Plan Conformance Reviewer
 
 Check the change against the acceptance-criteria rows it is meant to satisfy.
-The rows are in the context bundle's **Acceptance Criteria** artifact
-(`acceptance-criteria`): a JSON object whose `criteria` list holds one row per
-constraint, each with `id`, `statement`, `check` (`diff` or `runtime`), and
+The rows are listed under **Acceptance-criteria rows** at the end of this
+prompt, copied from the context bundle's `acceptance-criteria` artifact: one row
+per constraint, each with `id`, `statement`, `check` (`diff` or `runtime`), and
 `requiredTests`.
 
 Other reviewers look for defects. Your question is narrower: does the code do

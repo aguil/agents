@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   conformanceCoverageViolations,
   conformanceOutcomeViolations,
+  conformancePromptSuffix,
   conformanceReportedMetadata,
   conformanceRunMetadata,
 } from "@aguil/agents-code-review";
@@ -554,6 +555,76 @@ test("a change that violates a stated row gets an unsatisfied finding and a per-
     expect(report).toContain("- ❌ **AC-2**: unsatisfied. Returns early.");
     expect(report).toContain("- ❔ **AC-3**: no result.");
   });
+});
+
+test("the conformance role's prompt carries its rows, and no other role's does", async () => {
+  await withWorkspace(async (workspace) => {
+    const prompts = new Map<string, string>();
+    const adapter = scriptedConformanceAdapter();
+    await runCodeReviewFromConfig({
+      agentsDir: AGENTS_DIR,
+      workspacePath: workspace,
+      contextBundlePath: await writeBundle(workspace, {
+        status: "loaded",
+        reason: "1 criterion from plan.json",
+        sources: ["plan.json"],
+        criteria: [
+          {
+            id: "AC-1",
+            statement: "Keeps {previous} and ``` literal.",
+            check: "runtime",
+            requiredTests: ["hash stays stable"],
+          },
+        ],
+      }),
+      adapter: {
+        ...adapter,
+        run(request) {
+          prompts.set(request.roleId, request.prompt);
+          return adapter.run(request);
+        },
+      },
+      scratchpadRoot: join(workspace, "runs"),
+    });
+
+    const prompt = prompts.get("conformance") ?? "";
+    const rows = /```json\n([\s\S]*?)\n```\n$/.exec(prompt)?.[1];
+    expect(JSON.parse(rows ?? "null")).toEqual([
+      {
+        id: "AC-1",
+        statement: "Keeps {previous} and ``` literal.",
+        check: "runtime",
+        requiredTests: ["hash stays stable"],
+      },
+    ]);
+    expect(prompts.get("quality")).not.toContain("AC-1");
+  });
+});
+
+test("conformancePromptSuffix adds nothing without loaded rows", () => {
+  const criteria = {
+    status: "loaded",
+    reason: "1 criterion",
+    sources: [],
+    criteria: [
+      { id: "AC-1", statement: "Holds.", check: "diff", requiredTests: [] },
+    ],
+  } as const;
+  expect(
+    conformancePromptSuffix({ roleId: "conformance", criteria }),
+  ).toContain("AC-1");
+  expect(
+    conformancePromptSuffix({ roleId: "quality", criteria }),
+  ).toBeUndefined();
+  expect(
+    conformancePromptSuffix({ roleId: "conformance", criteria: undefined }),
+  ).toBeUndefined();
+  expect(
+    conformancePromptSuffix({
+      roleId: "conformance",
+      criteria: { ...criteria, status: "invalid", criteria: [] },
+    }),
+  ).toBeUndefined();
 });
 
 test("without criteria the report says the conformance role did not run and why", async () => {

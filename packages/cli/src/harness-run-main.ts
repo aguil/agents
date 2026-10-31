@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   conformanceCoverageViolations,
   conformanceOutcomeViolations,
+  conformancePromptSuffix,
   conformanceReportedMetadata,
   conformanceRunMetadata,
   detectWorkspaceVcsMode,
@@ -826,6 +827,7 @@ export async function runHarnessRunCli(
   // The run's events go to events.jsonl beside result.raw.json, as under
   // `agents code-review`, so a failed role's reason is in the record (JC-7).
   const record = runEventRecord(join(scratchpadPath, "events.jsonl"));
+  const criteria = acceptanceCriteriaFromArtifacts(collectedArtifacts);
 
   const orchestrator = new NativeBunOrchestrator({
     definition,
@@ -840,6 +842,9 @@ export async function runHarnessRunCli(
           },
     ),
     contextBundlePath,
+    // Undefined without the `acceptance-criteria` provider, so another
+    // harness's role named `conformance` keeps its prompt.
+    rolePromptSuffix: (roleId) => conformancePromptSuffix({ roleId, criteria }),
     eventSink: record.sink,
     ...(loaded.outputSchemas === undefined
       ? {}
@@ -871,7 +876,7 @@ export async function runHarnessRunCli(
   const conformanceMetadata = conformanceRunMetadata({
     declaredRoleIds: loaded.definition.roles.map((role) => role.id),
     enabledRoleIds: definition.roles.map((role) => role.id),
-    criteria: acceptanceCriteriaFromArtifacts(collectedArtifacts),
+    criteria,
   });
   const runMetadata = {
     // The harness-run envelope's VCS guidance reads this, as code-review's does.

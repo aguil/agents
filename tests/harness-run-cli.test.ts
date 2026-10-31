@@ -1506,6 +1506,40 @@ test("harness run reports plan conformance like agents code-review", async () =>
     // The fake agent reports nothing, so the row is listed, not dropped.
     expect(report).toContain("1 criterion: 0 satisfied");
     expect(report).toContain("- ❔ **AC-1**: no result.");
+
+    // A real adapter records the request; the stub only has to exit.
+    await rm(runsDir, { recursive: true, force: true });
+    const binDir = join(agentsDir, "bin");
+    await mkdirP(binDir);
+    await writeFileP(join(binDir, "claude"), "#!/bin/sh\nexit 0\n", {
+      mode: 0o755,
+    });
+    await runHarnessCli(
+      [
+        "planned",
+        "--agents-dir",
+        agentsDir,
+        "--workspace",
+        workspace,
+        "--adapter",
+        "claude",
+      ],
+      { PATH: `${binDir}:${process.env.PATH ?? ""}` },
+    );
+    const [runId] = await readdirP(runsDir);
+    const request = JSON.parse(
+      await readFileP(
+        join(
+          runsDir,
+          runId ?? "",
+          "roles",
+          "conformance",
+          "conformance.request.json",
+        ),
+        "utf8",
+      ),
+    ) as { readonly prompt: string };
+    expect(request.prompt).toContain('"statement": "Holds."');
   } finally {
     await rm(workspace, { recursive: true, force: true });
     await rm(agentsDir, { recursive: true, force: true });

@@ -85,6 +85,11 @@ has `status` (`loaded`, `absent`, or `invalid`), `reason`, `sources`, and
 `acceptance_criteria`, and the `conformance` role is enabled when it is above
 zero.
 
+The run appends the loaded rows to the `conformance` role's prompt, so the role
+sees them without a tool call. A read of the bundle can be cut short before the
+artifact, and a search of it can be refused, and neither may leave the role
+working from the PR's own account of a row.
+
 ## What the conformance role reports
 
 For each row the role emits one outcome with `kind: "conformance"` and `data`

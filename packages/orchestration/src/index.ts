@@ -216,6 +216,14 @@ export interface NativeBunOrchestratorOptions {
     roleId: string,
   ) => Readonly<Record<string, string>> | undefined;
   /**
+   * Text appended to a role's prompt, after interpolation so that run data
+   * stays literal. For input a role must not have to fetch with a tool call:
+   * a read can be refused or truncated, and the role then works without it
+   * (the conformance rows, #300). Injected so what a role needs stays with
+   * the harness that knows it.
+   */
+  readonly rolePromptSuffix?: (roleId: string) => string | undefined;
+  /**
    * Authoritative pass gate. When set, finding severity does not drive
    * status (ADR 0021 / issue #157): evaluated after all roles complete
    * without failing/timing out; `false` makes the run `failed`,
@@ -532,10 +540,15 @@ export class NativeBunOrchestrator implements HarnessOrchestrator {
     const roleScratchpadPath = join(request.scratchpadPath, "roles", role.id);
     await ensureDirectory(roleScratchpadPath);
     await this.options.onRoleStart?.(role.id);
-    const prompt = interpolatePrompt(
+    const interpolatedPrompt = interpolatePrompt(
       await readPrompt(role, this.options.embeddedPrompts),
       interpolation,
     );
+    const promptSuffix = this.options.rolePromptSuffix?.(role.id);
+    const prompt =
+      promptSuffix === undefined
+        ? interpolatedPrompt
+        : `${interpolatedPrompt.trimEnd()}\n\n${promptSuffix}\n`;
     const findings: Finding[] = [];
     let outcome: "completed" | "timed_out" | "failed" = "completed";
     const env = this.options.roleEnv?.(role.id);
