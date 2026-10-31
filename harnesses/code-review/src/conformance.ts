@@ -63,6 +63,11 @@ function notRunReason(
  * and a search outside the role's worktree can be refused. Either way the role
  * used to judge rows from the PR's paraphrase of them (#300). The JSON is
  * indented, so no row's text can start a line and close the fence.
+ *
+ * The closing line is here because the adapter's envelope ends by saying not
+ * to emit finding lines when there are none. A live run on #301 stopped there
+ * with four verdicts in prose and no outcome lines. It sits in the suffix so
+ * installed harnesses get it too.
  */
 export function conformancePromptSuffix(input: {
   readonly roleId: string;
@@ -83,6 +88,8 @@ export function conformancePromptSuffix(input: {
     "```json",
     JSON.stringify(input.criteria.criteria, null, 2),
     "```",
+    "",
+    "Emit one `outcome` line for every row, including a `satisfied` row and a run with no findings. The rule below about finding lines does not apply to outcome lines, and a verdict written only as prose is not recorded.",
   ].join("\n");
 }
 

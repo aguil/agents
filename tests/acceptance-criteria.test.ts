@@ -588,7 +588,7 @@ test("the conformance role's prompt carries its rows, and no other role's does",
     });
 
     const prompt = prompts.get("conformance") ?? "";
-    const rows = /```json\n([\s\S]*?)\n```\n$/.exec(prompt)?.[1];
+    const rows = /```json\n([\s\S]*?)\n```\n/.exec(prompt)?.[1];
     expect(JSON.parse(rows ?? "null")).toEqual([
       {
         id: "AC-1",
@@ -597,6 +597,8 @@ test("the conformance role's prompt carries its rows, and no other role's does",
         requiredTests: ["hash stays stable"],
       },
     ]);
+    expect(prompt.trimEnd().endsWith("is not recorded.")).toBe(true);
+    expect(prompt).toContain("Emit one `outcome` line for every row");
     expect(prompts.get("quality")).not.toContain("AC-1");
   });
 });
