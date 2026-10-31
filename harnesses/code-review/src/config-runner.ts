@@ -44,6 +44,7 @@ import { JsonlFileEventSink } from "@aguil/agents-telemetry";
 import {
   conformanceCoverageViolations,
   conformanceOutcomeViolations,
+  conformancePromptSuffix,
   conformanceReportedMetadata,
   conformanceRunMetadata,
 } from "./conformance";
@@ -428,10 +429,11 @@ export async function runCodeReviewFromConfig(
     tier: triage,
     acceptance_criteria: acceptanceCriteriaRowCount(context.artifacts),
   });
+  const criteria = acceptanceCriteriaFromArtifacts(context.artifacts);
   const conformanceMetadata = conformanceRunMetadata({
     declaredRoleIds: loaded.definition.roles.map((role) => role.id),
     enabledRoleIds: enablement.definition.roles.map((role) => role.id),
-    criteria: acceptanceCriteriaFromArtifacts(context.artifacts),
+    criteria,
   });
   const definition = {
     ...enablement.definition,
@@ -476,6 +478,7 @@ export async function runCodeReviewFromConfig(
             },
           },
     contextBundlePath: writtenContext.jsonPath,
+    rolePromptSuffix: (roleId) => conformancePromptSuffix({ roleId, criteria }),
     ...(outputSchemas === undefined
       ? {}
       : { outputSchemaShapes: outputSchemaShapes(outputSchemas) }),

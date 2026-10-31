@@ -57,6 +57,43 @@ function notRunReason(
 }
 
 /**
+ * The rows themselves, for the conformance role's prompt. Reading them from
+ * the bundle is not dependable: the artifact comes after everything else in
+ * it, so a capped read can stop short of it behind large referenced documents,
+ * and a search outside the role's worktree can be refused. Either way the role
+ * used to judge rows from the PR's paraphrase of them (#300). The JSON is
+ * indented, so no row's text can start a line and close the fence.
+ *
+ * The closing line is here because the adapter's envelope ends by saying not
+ * to emit finding lines when there are none. A live run on #301 stopped there
+ * with four verdicts in prose and no outcome lines. It sits in the suffix so
+ * installed harnesses get it too.
+ */
+export function conformancePromptSuffix(input: {
+  readonly roleId: string;
+  readonly criteria: AcceptanceCriteriaArtifactContent | undefined;
+}): string | undefined {
+  if (
+    input.roleId !== CODE_REVIEW_CONFORMANCE_ROLE_ID ||
+    input.criteria?.status !== "loaded" ||
+    input.criteria.criteria.length === 0
+  ) {
+    return undefined;
+  }
+  return [
+    "## Acceptance-criteria rows",
+    "",
+    "These are all of this run's rows, copied from the context bundle's `acceptance-criteria` artifact. Judge each row by this text. You do not need to read the criteria file or search the bundle for it.",
+    "",
+    "```json",
+    JSON.stringify(input.criteria.criteria, null, 2),
+    "```",
+    "",
+    "Emit one `outcome` line for every row, including a `satisfied` row and a run with no findings. The rule below about finding lines does not apply to outcome lines, and a verdict written only as prose is not recorded.",
+  ].join("\n");
+}
+
+/**
  * Which scheduled criteria actually got a verdict, recorded after the run so
  * consumers that only see metadata (posted reviews) cannot claim a row was
  * checked when the role never reported it.
