@@ -379,13 +379,41 @@ function formatPendingReviewBody(
     `### ${severityEmoji(finding.severity)} ${finding.title}`,
     "",
     finding.description,
+    ...collapsedSectionLines("Evidence and validation", [
+      `**Evidence:** ${finding.evidence}`,
+      "",
+      `**Validation:** ${finding.validation.status} - ${finding.validation.details}`,
+      ...(footer === undefined ? [] : ["", footer]),
+    ]),
     "",
-    `Evidence: ${finding.evidence}`,
-    `Validation: ${finding.validation.status} - ${finding.validation.details}`,
-    ...(footer === undefined ? [] : ["", footer]),
-    "",
+    // Outside the collapsed block: the marker is matched on the raw body.
     `<!-- finding:${findingFingerprint(finding)} -->`,
   ].join("\n");
+}
+
+/**
+ * A `<details>` block for supporting text, so a comment leads with what the
+ * reader acts on. The blank lines around `content` are required: GitHub only
+ * renders markdown inside `<details>` when it is set off from the tags.
+ * Starts with a blank line so it can follow any preceding block.
+ */
+function collapsedSectionLines(
+  summary: string,
+  content: readonly string[],
+  options?: { readonly open?: boolean },
+): readonly string[] {
+  if (content.length === 0) {
+    return [];
+  }
+  return [
+    "",
+    options?.open === true ? "<details open>" : "<details>",
+    `<summary>${summary}</summary>`,
+    "",
+    ...content,
+    "",
+    "</details>",
+  ];
 }
 
 export interface ReplacePendingPullRequestReviewInput {
@@ -1545,6 +1573,16 @@ function formatInlineReviewProvenanceFooter(
 export function formatReviewCoverageSectionLines(
   runMetadata: Readonly<Record<string, string>> | undefined,
 ): readonly string[] {
+  return reviewCoverageSection(runMetadata).lines;
+}
+
+/**
+ * Coverage lines plus whether a scheduled reviewer left work unchecked.
+ * Roles a triage tier omits by design do not count as incomplete.
+ */
+function reviewCoverageSection(
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): { readonly lines: readonly string[]; readonly incomplete: boolean } {
   const parsed = parseCodeReviewRunMetadata(runMetadata);
   const tier = parsed.triageTier;
   const triageRaw = parsed.triageRaw;
@@ -1579,7 +1617,7 @@ export function formatReviewCoverageSectionLines(
     completed.length > 0;
 
   if (!hasSignal) {
-    return [];
+    return { lines: [], incomplete: false };
   }
 
   let missingOutcome: readonly string[] = [];
@@ -1649,7 +1687,34 @@ export function formatReviewCoverageSectionLines(
   }
 
   lines.push(...formatConformanceCoverageLines(parsed));
-  return lines;
+  return {
+    lines,
+    incomplete:
+      timedOut.length > 0 ||
+      failed.length > 0 ||
+      missingOutcome.length > 0 ||
+      conformanceIncomplete,
+  };
+}
+
+/**
+ * Provenance and coverage for the end of a summary, collapsed so the findings
+ * lead. The block renders expanded when coverage is incomplete: a reviewer
+ * that did not finish is something the reader has to see, not look for.
+ */
+function formatRunDetailsLines(
+  provenance: ReviewPostProvenance,
+  runMetadata: Readonly<Record<string, string>> | undefined,
+): readonly string[] {
+  const coverage = reviewCoverageSection(runMetadata);
+  // Each section starts with a blank separator line; drop the leading one.
+  const content = [
+    ...formatReviewProvenanceSectionLines(provenance),
+    ...coverage.lines,
+  ].slice(1);
+  return collapsedSectionLines("Review provenance and coverage", content, {
+    open: coverage.incomplete,
+  });
 }
 
 /**
@@ -1685,7 +1750,7 @@ function noFindingsClosingLine(
   runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
   return conformanceCoverageIncomplete(parseCodeReviewRunMetadata(runMetadata))
-    ? "No findings, but plan conformance is incomplete: see Review coverage."
+    ? "No findings, but plan conformance is incomplete: see Review coverage below."
     : "✅ No findings - code looks good!";
 }
 
@@ -1758,11 +1823,10 @@ function renderTriageSummary(
   if (skippedUnanchorable > 0) {
     lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
   }
-  lines.push(...formatReviewProvenanceSectionLines(provenance));
-  lines.push(...formatReviewCoverageSectionLines(runMetadata));
+  const runDetails = formatRunDetailsLines(provenance, runMetadata);
 
   if (findings.length === 0) {
-    lines.push("", noFindingsClosingLine(runMetadata));
+    lines.push("", noFindingsClosingLine(runMetadata), ...runDetails);
     return lines.join("\n");
   }
 
@@ -1775,6 +1839,7 @@ function renderTriageSummary(
     "",
     "## Follow-up",
     ...formatFindingBullets(followUp, "No follow-up findings.", prDiffContext),
+    ...runDetails,
   );
   return lines.join("\n");
 }
@@ -1795,11 +1860,10 @@ function renderImpactSummary(
   if (skippedUnanchorable > 0) {
     lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
   }
-  lines.push(...formatReviewProvenanceSectionLines(provenance));
-  lines.push(...formatReviewCoverageSectionLines(runMetadata));
+  const runDetails = formatRunDetailsLines(provenance, runMetadata);
 
   if (findings.length === 0) {
-    lines.push("", noFindingsClosingLine(runMetadata));
+    lines.push("", noFindingsClosingLine(runMetadata), ...runDetails);
     return lines.join("\n");
   }
 
@@ -1862,6 +1926,7 @@ function renderImpactSummary(
     );
   }
 
+  lines.push(...runDetails);
   return lines.join("\n");
 }
 
@@ -1896,11 +1961,10 @@ function renderEvidenceSummary(
   if (skippedUnanchorable > 0) {
     lines.push(`- Skipped outside PR diff: ${skippedUnanchorable}`);
   }
-  lines.push(...formatReviewProvenanceSectionLines(provenance));
-  lines.push(...formatReviewCoverageSectionLines(runMetadata));
+  const runDetails = formatRunDetailsLines(provenance, runMetadata);
 
   if (findings.length === 0) {
-    lines.push("", noFindingsClosingLine(runMetadata));
+    lines.push("", noFindingsClosingLine(runMetadata), ...runDetails);
     return lines.join("\n");
   }
 
@@ -1914,11 +1978,14 @@ function renderEvidenceSummary(
       `### Finding ${index + 1}: ${severityEmoji(finding.severity)} ${finding.title}`,
       ...(caption === undefined ? [] : [`- _${caption}_`]),
       `- Why: ${finding.description}`,
-      `- Evidence: ${finding.evidence}`,
-      `- Suggested fix: ${suggestFixFromRole(finding.sourceRole)}`,
+      ...collapsedSectionLines("Evidence and suggested fix", [
+        `- Evidence: ${finding.evidence}`,
+        `- Suggested fix: ${suggestFixFromRole(finding.sourceRole)}`,
+      ]),
     );
   }
 
+  lines.push(...runDetails);
   return lines.join("\n");
 }
 

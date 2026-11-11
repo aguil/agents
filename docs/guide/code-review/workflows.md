@@ -68,6 +68,11 @@ Creates an unsubmitted GitHub review on the target PR.
   finishing the review in the GitHub web UI does not overwrite the summary.
 - If nothing in the diff can be anchored (for example no `patch` hunks), the
   summary remains on the review `body` only.
+- Comments lead with what the reader acts on and fold the rest into `<details>`.
+  An inline comment shows the title and description; evidence, validation, and
+  attribution are collapsed. The summary shows counts and findings; review
+  provenance and coverage are collapsed at the end, and render expanded when a
+  scheduled reviewer timed out, failed, or left plan criteria unchecked.
 - Only anchorable findings (`file` + `line`) are posted as inline comments.
 - If an existing pending review is on the PR: interactive runs prompt before
   replacing it; non-interactive runs require `--replace-pending-review`.
@@ -152,8 +157,14 @@ bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex \
 ### Finding 1: <title>
 
 - Why: ...
+
+<details>
+<summary>Evidence and suggested fix</summary>
+
 - Evidence: ...
 - Suggested fix: ...
+
+</details>
 ```
 
 ## Post command (`agents code-review post`)
