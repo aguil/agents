@@ -2544,6 +2544,15 @@ test("pending review comments lead with the finding and collapse the rest", () =
     expect(body.indexOf("### Review provenance")).toBeGreaterThan(details);
     expect(body.indexOf("### Review coverage")).toBeGreaterThan(details);
     expect(body.endsWith("</details>")).toBe(true);
+    if (style === "impact") {
+      // Only areas with findings get a visible section.
+      expect(body.indexOf("### Correctness / Quality")).toBeLessThan(details);
+      expect(body).not.toContain("### Security");
+      expect(body.indexOf("### No findings")).toBeGreaterThan(details);
+      expect(body.indexOf("- ✅ No security findings.")).toBeGreaterThan(
+        details,
+      );
+    }
 
     // A reviewer that did not finish is shown, not folded away.
     expect(

@@ -1705,10 +1705,15 @@ function reviewCoverageSection(
 function formatRunDetailsLines(
   provenance: ReviewPostProvenance,
   runMetadata: Readonly<Record<string, string>> | undefined,
+  /** Empty-state lines for areas that produced no findings. */
+  noFindingsLines: readonly string[] = [],
 ): readonly string[] {
   const coverage = reviewCoverageSection(runMetadata);
   // Each section starts with a blank separator line; drop the leading one.
   const content = [
+    ...(noFindingsLines.length === 0
+      ? []
+      : ["", "### No findings", ...noFindingsLines]),
     ...formatReviewProvenanceSectionLines(provenance),
     ...coverage.lines,
   ].slice(1);
@@ -1882,36 +1887,31 @@ function renderImpactSummary(
     groups[impactBucketForSourceRole(finding.sourceRole)].push(finding);
   }
 
-  lines.push(
-    "",
-    "### Security",
-    ...formatFindingBullets(
-      groups.security,
-      "No security findings.",
-      prDiffContext,
-    ),
-    "",
-    "### Runtime / Performance",
-    ...formatFindingBullets(
+  // An area with findings gets a visible section; one without is a single
+  // line in the collapsed block, so empty sections do not bury the findings.
+  const noFindingsLines: string[] = [];
+  const areas = [
+    ["### Security", groups.security, "No security findings."],
+    [
+      "### Runtime / Performance",
       groups.performance,
       "No performance findings.",
-      prDiffContext,
-    ),
-    "",
-    "### Correctness / Quality",
-    ...formatFindingBullets(
-      groups.quality,
-      "No quality findings.",
-      prDiffContext,
-    ),
-    "",
-    "### Documentation / Compliance",
-    ...formatFindingBullets(
+    ],
+    ["### Correctness / Quality", groups.quality, "No quality findings."],
+    [
+      "### Documentation / Compliance",
       groups.compliance,
       "No compliance findings.",
-      prDiffContext,
-    ),
-  );
+    ],
+  ] as const;
+  for (const [heading, group, emptyLine] of areas) {
+    const bullets = formatFindingBullets(group, emptyLine, prDiffContext);
+    if (group.length === 0) {
+      noFindingsLines.push(...bullets);
+    } else {
+      lines.push("", heading, ...bullets);
+    }
+  }
 
   if (groups.other.length > 0) {
     lines.push(
@@ -1926,7 +1926,9 @@ function renderImpactSummary(
     );
   }
 
-  lines.push(...runDetails);
+  lines.push(
+    ...formatRunDetailsLines(provenance, runMetadata, noFindingsLines),
+  );
   return lines.join("\n");
 }
 

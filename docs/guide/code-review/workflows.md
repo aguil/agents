@@ -127,7 +127,8 @@ bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex \
 ```
 
 **`impact`** (default) — groups findings by impact area; useful when a PR
-crosses subsystem boundaries.
+crosses subsystem boundaries. Only areas with findings get a section; the rest
+are listed as "No findings" lines in the collapsed block.
 
 ```bash
 bun run agents code-review --adapter opencode --model opencode/gpt-5.3-codex \
