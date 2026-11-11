@@ -2567,6 +2567,53 @@ test("pending review comments lead with the finding and collapse the rest", () =
   }
 });
 
+test("impact summary claims no findings only for roles that completed", () => {
+  const finding: Finding = {
+    id: "finding-quality",
+    severity: "warning",
+    title: "Quality issue",
+    description: "d",
+    evidence: "e",
+    sourceRole: "quality",
+    file: "src/app.ts",
+    line: 3,
+    validation: { status: "verified", details: "ok" },
+  };
+  const body = (runMetadata: Readonly<Record<string, string>>) =>
+    buildPendingReviewSummaryBody({
+      style: "impact",
+      findings: [finding],
+      postedCommentCount: 1,
+      skippedUnanchorable: 0,
+      runMetadata,
+    });
+
+  // Lite tier omits performance; security timed out; compliance failed.
+  const gaps = body({
+    triage: "lite",
+    completed_roles: "quality",
+    timed_out_roles: "security",
+    failed_roles: "compliance",
+  });
+  expect(gaps).not.toContain("No security findings.");
+  expect(gaps).not.toContain("No performance findings.");
+  expect(gaps).not.toContain("No compliance findings.");
+  expect(gaps).not.toContain("### No findings");
+  expect(gaps).toContain("**Security:** not performed");
+
+  // A scheduled role with no recorded outcome was not checked either.
+  const unrecorded = body({ triage: "full", completed_roles: "quality" });
+  expect(unrecorded).not.toContain("No security findings.");
+
+  const complete = body({
+    triage: "full",
+    completed_roles: "security,performance,quality,compliance",
+  });
+  expect(complete).toContain("- ✅ No security findings.");
+  expect(complete).toContain("- ✅ No performance findings.");
+  expect(complete).toContain("- ✅ No compliance findings.");
+});
+
 test("builds evidence review summary no-findings body with green check", () => {
   const body = buildPendingReviewSummaryBody({
     style: "evidence",
