@@ -2493,6 +2493,80 @@ test("formats pending review comments with severity emojis", () => {
   expect(comments[1]?.body).not.toContain("WARNING:");
 });
 
+test("pending review comments lead with the finding and collapse the rest", () => {
+  const finding: Finding = {
+    id: "finding-collapsed",
+    severity: "warning",
+    title: "Collapsed issue",
+    description: "What is wrong.",
+    evidence: "Where it shows.",
+    sourceRole: "quality",
+    file: "src/app.ts",
+    line: 3,
+    validation: { status: "verified", details: "Reproduced locally." },
+  };
+  const provenance = {
+    reviewerLogin: "octo",
+    runMetadata: {
+      adapter: "claude",
+      triage: "full",
+      completed_roles: "security,performance,quality,compliance",
+    },
+  };
+
+  const inline =
+    findingsToPendingReviewComments([finding], provenance)[0]?.body ?? "";
+  const open = inline.indexOf("<details>");
+  const close = inline.indexOf("</details>");
+  expect(inline.indexOf("What is wrong.")).toBeLessThan(open);
+  for (const collapsed of ["Where it shows.", "Reproduced locally.", "@octo"]) {
+    expect(inline.indexOf(collapsed)).toBeGreaterThan(open);
+    expect(inline.indexOf(collapsed)).toBeLessThan(close);
+  }
+  // The resolved-thread scan matches the marker on the raw body.
+  expect(inline.indexOf("<!-- finding:")).toBeGreaterThan(close);
+
+  for (const style of ["triage", "impact", "evidence"] as const) {
+    const summary = (runMetadata: Readonly<Record<string, string>>) =>
+      buildPendingReviewSummaryBody({
+        style,
+        findings: [finding],
+        postedCommentCount: 1,
+        skippedUnanchorable: 0,
+        runMetadata,
+        provenance: { ...provenance, runMetadata },
+      });
+    const body = summary(provenance.runMetadata);
+    const details = body.indexOf(
+      "<details>\n<summary>Review provenance and coverage</summary>",
+    );
+    expect(body.indexOf("Collapsed issue")).toBeLessThan(details);
+    expect(body.indexOf("### Review provenance")).toBeGreaterThan(details);
+    expect(body.indexOf("### Review coverage")).toBeGreaterThan(details);
+    expect(body.endsWith("</details>")).toBe(true);
+    if (style === "impact") {
+      // Only areas with findings get a visible section.
+      expect(body.indexOf("### Correctness / Quality")).toBeLessThan(details);
+      expect(body).not.toContain("### Security");
+      expect(body.indexOf("### No findings")).toBeGreaterThan(details);
+      expect(body.indexOf("- ✅ No security findings.")).toBeGreaterThan(
+        details,
+      );
+    }
+
+    // A reviewer that did not finish is shown, not folded away.
+    expect(
+      summary({
+        ...provenance.runMetadata,
+        completed_roles: "performance,quality,compliance",
+        timed_out_roles: "security",
+      }),
+    ).toContain(
+      "<details open>\n<summary>Review provenance and coverage</summary>",
+    );
+  }
+});
+
 test("builds evidence review summary no-findings body with green check", () => {
   const body = buildPendingReviewSummaryBody({
     style: "evidence",
