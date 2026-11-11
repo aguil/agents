@@ -1582,7 +1582,12 @@ export function formatReviewCoverageSectionLines(
  */
 function reviewCoverageSection(
   runMetadata: Readonly<Record<string, string>> | undefined,
-): { readonly lines: readonly string[]; readonly incomplete: boolean } {
+): {
+  readonly lines: readonly string[];
+  readonly incomplete: boolean;
+  /** Roles with no completed review: omitted by tier, timed out, failed, or unrecorded. */
+  readonly notPerformed: ReadonlySet<string>;
+} {
   const parsed = parseCodeReviewRunMetadata(runMetadata);
   const tier = parsed.triageTier;
   const triageRaw = parsed.triageRaw;
@@ -1617,7 +1622,7 @@ function reviewCoverageSection(
     completed.length > 0;
 
   if (!hasSignal) {
-    return { lines: [], incomplete: false };
+    return { lines: [], incomplete: false, notPerformed: new Set() };
   }
 
   let missingOutcome: readonly string[] = [];
@@ -1694,6 +1699,12 @@ function reviewCoverageSection(
       failed.length > 0 ||
       missingOutcome.length > 0 ||
       conformanceIncomplete,
+    notPerformed: new Set([
+      ...skippedByTriage,
+      ...timedOutRolesRaw,
+      ...failedRolesRaw,
+      ...missingOutcome,
+    ]),
   };
 }
 
@@ -1754,8 +1765,13 @@ function conformanceCoverageIncomplete(
 function noFindingsClosingLine(
   runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
-  return conformanceCoverageIncomplete(parseCodeReviewRunMetadata(runMetadata))
-    ? "No findings, but plan conformance is incomplete: see Review coverage below."
+  if (conformanceCoverageIncomplete(parseCodeReviewRunMetadata(runMetadata))) {
+    return "No findings, but plan conformance is incomplete: see Review coverage below.";
+  }
+  // A reviewer that timed out, failed, or recorded no outcome found nothing
+  // because it checked nothing.
+  return reviewCoverageSection(runMetadata).incomplete
+    ? "No findings, but the review is incomplete: see Review coverage below."
     : "✅ No findings - code looks good!";
 }
 
@@ -1889,25 +1905,23 @@ function renderImpactSummary(
 
   // An area with findings gets a visible section; one without is a single
   // line in the collapsed block, so empty sections do not bury the findings.
+  // An area whose reviewer did not complete gets no such line: nothing was
+  // checked, and Review coverage already says why.
+  const { notPerformed } = reviewCoverageSection(runMetadata);
   const noFindingsLines: string[] = [];
   const areas = [
-    ["### Security", groups.security, "No security findings."],
-    [
-      "### Runtime / Performance",
-      groups.performance,
-      "No performance findings.",
-    ],
-    ["### Correctness / Quality", groups.quality, "No quality findings."],
-    [
-      "### Documentation / Compliance",
-      groups.compliance,
-      "No compliance findings.",
-    ],
-  ] as const;
-  for (const [heading, group, emptyLine] of areas) {
+    ["security", "### Security", "No security findings."],
+    ["performance", "### Runtime / Performance", "No performance findings."],
+    ["quality", "### Correctness / Quality", "No quality findings."],
+    ["compliance", "### Documentation / Compliance", "No compliance findings."],
+  ] as const satisfies readonly (readonly [CodeReviewRoleId, string, string])[];
+  for (const [roleId, heading, emptyLine] of areas) {
+    const group = groups[roleId];
     const bullets = formatFindingBullets(group, emptyLine, prDiffContext);
     if (group.length === 0) {
-      noFindingsLines.push(...bullets);
+      if (!notPerformed.has(roleId)) {
+        noFindingsLines.push(...bullets);
+      }
     } else {
       lines.push("", heading, ...bullets);
     }
