@@ -66,6 +66,9 @@ Creates an unsubmitted GitHub review on the target PR.
 - When the PR diff has at least one mappable hunk, the summary is posted as the
   **first** inline review thread and the review-level `body` is left empty, so
   finishing the review in the GitHub web UI does not overwrite the summary.
+  GitHub's review dialog does not show an API-authored pending `body` and
+  submits its own (usually empty) text in its place; last confirmed in
+  October 2026.
 - If nothing in the diff can be anchored (for example no `patch` hunks), the
   summary remains on the review `body` only.
 - Comments lead with what the reader acts on and fold the rest into `<details>`.
