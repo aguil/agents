@@ -1765,8 +1765,13 @@ function conformanceCoverageIncomplete(
 function noFindingsClosingLine(
   runMetadata: Readonly<Record<string, string>> | undefined,
 ): string {
-  return conformanceCoverageIncomplete(parseCodeReviewRunMetadata(runMetadata))
-    ? "No findings, but plan conformance is incomplete: see Review coverage below."
+  if (conformanceCoverageIncomplete(parseCodeReviewRunMetadata(runMetadata))) {
+    return "No findings, but plan conformance is incomplete: see Review coverage below.";
+  }
+  // A reviewer that timed out, failed, or recorded no outcome found nothing
+  // because it checked nothing.
+  return reviewCoverageSection(runMetadata).incomplete
+    ? "No findings, but the review is incomplete: see Review coverage below."
     : "✅ No findings - code looks good!";
 }
 

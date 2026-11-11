@@ -2614,6 +2614,45 @@ test("impact summary claims no findings only for roles that completed", () => {
   expect(complete).toContain("- ✅ No compliance findings.");
 });
 
+test("a clean review with an unfinished reviewer does not close green", () => {
+  const bodies = (runMetadata: Readonly<Record<string, string>>) =>
+    (["triage", "impact", "evidence"] as const).map((style) =>
+      buildPendingReviewSummaryBody({
+        style,
+        findings: [],
+        postedCommentCount: 0,
+        skippedUnanchorable: 0,
+        runMetadata,
+      }),
+    );
+  const unfinished: readonly Readonly<Record<string, string>>[] = [
+    {
+      triage: "full",
+      completed_roles: "performance,quality,compliance",
+      timed_out_roles: "security",
+    },
+    {
+      triage: "full",
+      completed_roles: "performance,quality,compliance",
+      failed_roles: "security",
+    },
+    { triage: "full", completed_roles: "performance,quality,compliance" },
+  ];
+  for (const runMetadata of unfinished) {
+    for (const body of bodies(runMetadata)) {
+      expect(body).not.toContain("code looks good");
+      expect(body).toContain("the review is incomplete");
+    }
+  }
+  // A role the tier omits by design is not a gap.
+  for (const body of bodies({
+    triage: "lite",
+    completed_roles: "security,quality,compliance",
+  })) {
+    expect(body).toContain("✅ No findings - code looks good!");
+  }
+});
+
 test("builds evidence review summary no-findings body with green check", () => {
   const body = buildPendingReviewSummaryBody({
     style: "evidence",
