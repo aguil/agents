@@ -10,6 +10,20 @@ Entries from the next release onward are updated by
 [release-please](https://github.com/googleapis/release-please) when the release
 PR merges. See [docs/release-checklist.md](./docs/release-checklist.md).
 
+## [0.9.3](https://github.com/aguil/agents/compare/v0.9.2...v0.9.3) (2026-11-11)
+
+
+### Added
+
+* **code-review-post:** collapse impact areas that have no findings ([a8975d1](https://github.com/aguil/agents/commit/a8975d10fe59b5dbc99ab30b4f4b049a150cefd8))
+* **code-review-post:** lead review comments with key details ([732177f](https://github.com/aguil/agents/commit/732177fc319a6d166708187e71ff727cdd32400b))
+
+
+### Fixed
+
+* **code-review-post:** claim no findings only for roles that completed ([3cb191a](https://github.com/aguil/agents/commit/3cb191ac939d458f9a21971103ddb42b52987982))
+* **code-review-post:** do not close green when a reviewer did not finish ([d9c5488](https://github.com/aguil/agents/commit/d9c54884635e6846fd786ceffe43148f0f6e732a))
+
 ## [0.9.2](https://github.com/aguil/agents/compare/v0.9.1...v0.9.2) (2026-10-31)
 
 
